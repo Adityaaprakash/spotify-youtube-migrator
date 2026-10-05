@@ -5,5 +5,7 @@ public enum ErrorCode {
     UNAUTHORIZED,
     FORBIDDEN,
     NOT_FOUND,
+    CONFLICT,
+    INVALID_STATE,
     INTERNAL_SERVER_ERROR
 }

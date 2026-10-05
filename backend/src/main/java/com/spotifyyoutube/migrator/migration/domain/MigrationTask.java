@@ -28,7 +28,7 @@ public class MigrationTask extends BaseEntity {
     @Column(name = "status", nullable = false)
     private MigrationStatus status = MigrationStatus.PENDING;
 
-    @Column(name = "error_message")
+    @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 
     public MigrationTask() {

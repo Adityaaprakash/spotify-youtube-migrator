@@ -10,10 +10,11 @@ When a future requirement affects current architecture, document the architectur
 ### **Phase 0 — Architecture & Project Foundation** [COMPLETE]
 - Directory structures, build systems, framework boilerplate, and ADRs established.
 
-### **Phase 1 — Domain Model & API Contracts** [IN PROGRESS]
+### **Phase 1 — Domain Model & API Contracts** [IN PROGRESS - BLOCKED]
 - **Phase 1A/B/C**: [COMPLETE] Core Domain Model, Invariants, and Repositories built.
-- **Phase 1D**: [NOT STARTED] Application Service Contracts
-- **Phase 1E/1F**: [NOT STARTED] API DTOs and Validation/Error Contracts
+- **Phase 1D**: [COMPLETE] Application Service Contracts
+- **Phase 1E/1F**: [COMPLETE] API DTOs and Validation/Error Contracts
+- **Phase 1G**: [BLOCKED] Persistence & Migration Verification. Domain and Flyway schemas manually aligned (UNIQUE constraints, Nullability), but runtime validation blocked by lack of Docker/Testcontainers environment.
 
 ## Future Phases
 - Phase 2 — Authentication & Identity

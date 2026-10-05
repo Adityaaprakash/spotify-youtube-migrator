@@ -11,14 +11,18 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+import jakarta.persistence.UniqueConstraint;
+
 @Entity
-@Table(name = "playlists")
+@Table(name = "playlists", uniqueConstraints = {
+    @UniqueConstraint(columnNames = {"user_id", "external_id", "platform"})
+})
 public class Playlist extends BaseEntity {
 
     @Column(name = "name", nullable = false)
     private String name;
 
-    @Column(name = "description")
+    @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
     @Enumerated(EnumType.STRING)
@@ -28,10 +32,10 @@ public class Playlist extends BaseEntity {
     @Column(name = "external_id", nullable = false)
     private String externalId;
 
-    @Column(name = "url")
+    @Column(name = "url", length = 2048)
     private String url;
 
-    @Column(name = "image_url")
+    @Column(name = "image_url", length = 2048)
     private String imageUrl;
 
     @Column(name = "total_tracks")

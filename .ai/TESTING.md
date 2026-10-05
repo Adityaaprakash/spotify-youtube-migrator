@@ -16,3 +16,6 @@ YouTubeClientIntegrationTest
 MigrationControllerTest
 
 The roadmap already calls for this layered testing strategy later.
+
+**Current Blockers:**
+- PostgreSQL integration / Repository Tests rely on `Testcontainers` which currently fails to execute due to lacking a Docker engine environment.

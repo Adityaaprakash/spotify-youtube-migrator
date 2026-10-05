@@ -21,7 +21,8 @@ CREATE TABLE playlists (
     image_url VARCHAR(2048),
     total_tracks INT,
     user_id UUID NOT NULL,
-    CONSTRAINT fk_playlist_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    CONSTRAINT fk_playlist_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT uq_playlist_user_ext_platform UNIQUE (user_id, external_id, platform)
 );
 
 CREATE INDEX idx_playlists_user_id ON playlists(user_id);

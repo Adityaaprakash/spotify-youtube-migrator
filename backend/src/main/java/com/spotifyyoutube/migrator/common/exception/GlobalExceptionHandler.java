@@ -23,6 +23,39 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiError> handleResourceNotFoundException(ResourceNotFoundException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(
+                ErrorCode.NOT_FOUND,
+                ex.getMessage(),
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<ApiError> handleConflictException(ConflictException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(
+                ErrorCode.CONFLICT,
+                ex.getMessage(),
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(InvalidStateException.class)
+    public ResponseEntity<ApiError> handleInvalidStateException(InvalidStateException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(
+                ErrorCode.INVALID_STATE,
+                ex.getMessage(),
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.CONFLICT); // usually 409 Conflict for invalid state preventing an operation
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleGenericException(Exception ex, HttpServletRequest request) {
         ApiError apiError = new ApiError(

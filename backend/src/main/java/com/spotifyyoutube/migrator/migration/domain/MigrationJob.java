@@ -40,10 +40,10 @@ public class MigrationJob extends BaseEntity {
     @Column(name = "total_tracks")
     private Integer totalTracks;
 
-    @Column(name = "processed_tracks")
+    @Column(name = "processed_tracks", nullable = false)
     private Integer processedTracks = 0;
 
-    @Column(name = "failed_tracks")
+    @Column(name = "failed_tracks", nullable = false)
     private Integer failedTracks = 0;
 
     @Column(name = "started_at")
@@ -52,7 +52,7 @@ public class MigrationJob extends BaseEntity {
     @Column(name = "completed_at")
     private Instant completedAt;
     
-    @Column(name = "target_playlist_url")
+    @Column(name = "target_playlist_url", length = 2048)
     private String targetPlaylistUrl;
 
     public MigrationJob() {
