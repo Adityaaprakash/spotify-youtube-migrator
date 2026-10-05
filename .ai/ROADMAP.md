@@ -11,8 +11,9 @@ When a future requirement affects current architecture, document the architectur
 - Directory structures, build systems, framework boilerplate, and ADRs established.
 
 ### **Phase 1 — Domain Model & API Contracts** [IN PROGRESS]
-- Foundation entities and JPA Repositories created.
-- API models and DTO interfaces still pending.
+- **Phase 1A/B/C**: [COMPLETE] Core Domain Model, Invariants, and Repositories built.
+- **Phase 1D**: [NOT STARTED] Application Service Contracts
+- **Phase 1E/1F**: [NOT STARTED] API DTOs and Validation/Error Contracts
 
 ## Future Phases
 - Phase 2 — Authentication & Identity
