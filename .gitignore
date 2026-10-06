@@ -22,6 +22,10 @@ dist/
 dist-ssr/
 *.local
 
+# Generated local artifacts
+*_output.txt
+*_output_utf8.txt
+
 # Logs
 logs
 *.log

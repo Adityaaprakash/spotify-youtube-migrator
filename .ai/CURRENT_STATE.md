@@ -3,7 +3,7 @@
 Last Updated: 2026-10-05
 
 Current Phase: Phase 1 — Domain Model & API Contracts
-Current Subphase: Phase 1G — Persistence & Migration Verification (BLOCKED)
+Current Subphase: PHASE 1 — CODE/FUNCTIONAL CONTRACTS COMPLETE / RUNTIME DATABASE VERIFICATION BLOCKED (FROZEN)
 
 ## Completed
 
@@ -27,7 +27,8 @@ Current Subphase: Phase 1G — Persistence & Migration Verification (BLOCKED)
 ## Current Verification
 - Backend Compilation: `mvn clean compile` — **PASS**
 - Checkstyle: `mvn checkstyle:check` — **PASS**
-- MockWeb API Testing: `MigrationControllerTest` — **PASS**
+- Controller & Service Unit Testing (`UserControllerTest`, `PlaylistControllerTest`, `MigrationControllerTest`, etc.): **PASS**
+- Domain Verification (`DomainTest`): **PASS**
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — environment unavailable
 - Transaction Boundary Verification: **BLOCKED** — environment unavailable
 - Cascade Verification: **BLOCKED** — environment unavailable
@@ -35,6 +36,16 @@ Current Subphase: Phase 1G — Persistence & Migration Verification (BLOCKED)
 To run verifying commands once Docker is available:
 `mvn clean verify` or `docker-compose up -d && mvn test`
 
+## Phase 1 Freeze Status
+- **Domain model**: FROZEN
+- **Repository contracts**: FROZEN
+- **Application service interfaces**: FROZEN
+- **API DTO contracts**: FROZEN
+- **Error model**: FROZEN
+- **Database schema**: FROZEN
+- **Architecture boundaries**: FROZEN
+- **Provider isolation**: FROZEN
+
 ## Next Recommended Work
-1. Resolve internal Testcontainers environment blockers, or run Phase 1G verification explicitly in an environment that supports Docker. 
-2. Only after Phase 1 tests PASS, proceed to freeze Phase 1 and start Phase 2 (Authentication & Identity).
+1. Transition to Phase 2 (Authentication & Identity).
+2. Establish continuous pipeline or local environment supporting Docker to execute pending `Repository Integration` regression tests.

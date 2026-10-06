@@ -14,6 +14,12 @@ MigrationStateMachineTest
 SpotifyClientIntegrationTest
 YouTubeClientIntegrationTest
 MigrationControllerTest
+PlaylistControllerTest
+UserControllerTest
+MigrationServiceImplTest
+PlaylistServiceImplTest
+UserServiceImplTest
+DomainTest
 
 The roadmap already calls for this layered testing strategy later.
 
