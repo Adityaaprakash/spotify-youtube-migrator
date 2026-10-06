@@ -16,12 +16,12 @@ public class DomainTest {
     @Test
     public void testUserEntity() {
         User user = new User("test@domain.com");
-        user.setSpotifyId("spotify-123");
-        user.setYoutubeId("yt-123");
+        user.setDisplayName("Test User");
+        user.setPasswordHash("hashedpassword");
         
         assertEquals("test@domain.com", user.getEmail());
-        assertEquals("spotify-123", user.getSpotifyId());
-        assertEquals("yt-123", user.getYoutubeId());
+        assertEquals("Test User", user.getDisplayName());
+        assertEquals("hashedpassword", user.getPasswordHash());
     }
 
     @Test

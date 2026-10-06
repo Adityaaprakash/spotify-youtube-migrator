@@ -1,6 +1,5 @@
 package com.spotifyyoutube.migrator.identity.api;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spotifyyoutube.migrator.common.config.SecurityConfig;
 import com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
@@ -21,8 +20,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.springframework.security.test.context.support.WithMockUser;
+
 @WebMvcTest(UserController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class})
+@WithMockUser
 public class UserControllerTest {
 
     @Autowired

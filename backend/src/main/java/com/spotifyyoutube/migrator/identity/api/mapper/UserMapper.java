@@ -16,8 +16,8 @@ public class UserMapper {
         return new UserResponse(
                 user.getId(),
                 user.getEmail(),
-                user.getSpotifyId(),
-                user.getYoutubeId()
+                user.getDisplayName(),
+                user.getStatus()
         );
     }
 }

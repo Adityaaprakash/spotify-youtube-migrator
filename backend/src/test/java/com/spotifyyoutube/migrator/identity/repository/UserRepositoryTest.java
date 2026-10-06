@@ -22,13 +22,12 @@ public class UserRepositoryTest {
     @Test
     public void testSaveAndFindByEmail() {
         User user = new User("test@example.com");
-        user.setSpotifyId("spotify-123");
-        user.setYoutubeId("youtube-456");
+        user.setDisplayName("Repo Tester");
         
         userRepository.save(user);
 
         Optional<User> found = userRepository.findByEmail("test@example.com");
         assertThat(found).isPresent();
-        assertThat(found.get().getSpotifyId()).isEqualTo("spotify-123");
+        assertThat(found.get().getDisplayName()).isEqualTo("Repo Tester");
     }
 }

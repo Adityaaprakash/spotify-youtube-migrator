@@ -27,8 +27,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import org.springframework.security.test.context.support.WithMockUser;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+
 @WebMvcTest(MigrationController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class})
+@WithMockUser
 public class MigrationControllerTest {
 
     @Autowired
@@ -58,7 +62,8 @@ public class MigrationControllerTest {
 
         mockMvc.perform(post("/api/migrations")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(request)))
+                .content(objectMapper.writeValueAsString(request))
+                .with(csrf()))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.sourcePlaylistId").value("spotify-pl-1"));
     }
@@ -71,7 +76,8 @@ public class MigrationControllerTest {
 
         mockMvc.perform(post("/api/migrations")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(request)))
+                .content(objectMapper.writeValueAsString(request))
+                .with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
     }
