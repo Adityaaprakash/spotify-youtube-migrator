@@ -1,0 +1,66 @@
+﻿[INFO] Scanning for projects...
+[INFO] 
+[INFO] --------------------< com.spotifyyoutube:migrator >---------------------
+[INFO] Building migrator 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- checkstyle:3.5.0:check (validate) @ migrator ---
+[INFO] Starting audit...
+Audit done.
+[INFO] You have 0 Checkstyle violations.
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ migrator ---
+[INFO] Copying 5 resources from src\main\resources to target\classes
+[INFO] Copying 4 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ migrator ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ migrator ---
+[INFO] Copying 0 resource from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ migrator ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 14 source files with javac [debug parameters release 22] to target\test-classes
+[INFO] -------------------------------------------------------------
+[ERROR] COMPILATION ERROR : 
+[INFO] -------------------------------------------------------------
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[32,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[32,87] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[33,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[33,89] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[34,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[34,87] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[36,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[36,70] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[37,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[37,110] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[122,2] reached end of file while parsing
+[INFO] 11 errors 
+[INFO] -------------------------------------------------------------
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  7.266 s
+[INFO] Finished at: 2026-10-07T10:37:26+05:30
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-compiler-plugin:3.13.0:testCompile (default-testCompile) on project migrator: Compilation failure: Compilation failure: 
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[32,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[32,87] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[33,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[33,89] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[34,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[34,87] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[36,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[36,70] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[37,1] illegal start of type
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[37,110] <identifier> expected
+[ERROR] /C:/Projects/spotify-youtube-migrator/backend/src/test/java/com/spotifyyoutube/migrator/migration/api/MigrationControllerTest.java:[122,2] reached end of file while parsing
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

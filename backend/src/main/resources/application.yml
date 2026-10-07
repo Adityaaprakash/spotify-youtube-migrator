@@ -22,7 +22,17 @@ spring:
 oauth:
   encryption:
     key: ${OAUTH_ENCRYPTION_KEY:1234567890abcdef1234567890abcdef12345678123=}
-
+  providers:
+    spotify:
+      client-id: ${SPOTIFY_CLIENT_ID:mock-spotify-client-id}
+      client-secret: ${SPOTIFY_CLIENT_SECRET:mock-spotify-secret}
+      redirect-uri: ${SPOTIFY_REDIRECT_URI:http://localhost:8080/api/oauth/spotify/callback}
+      scopes: user-read-private user-read-email
+    google:
+      client-id: ${GOOGLE_CLIENT_ID:mock-google-client-id}
+      client-secret: ${GOOGLE_CLIENT_SECRET:mock-google-secret}
+      redirect-uri: ${GOOGLE_REDIRECT_URI:http://localhost:8080/api/oauth/google/callback}
+      scopes: openid email profile
 management:
   endpoints:
     web:

@@ -13,3 +13,14 @@ spring:
 oauth:
   encryption:
     key: 1234567890abcdef1234567890abcdef12345678123=
+  providers:
+    spotify:
+      client-id: "test-spotify-id"
+      client-secret: "test-spotify-secret"
+      redirect-uri: "http://localhost/api/oauth/spotify/callback"
+      scopes: "user-read-private user-read-email"
+    google:
+      client-id: "test-google-id"
+      client-secret: "test-google-secret"
+      redirect-uri: "http://localhost/api/oauth/google/callback"
+      scopes: "openid email profile"

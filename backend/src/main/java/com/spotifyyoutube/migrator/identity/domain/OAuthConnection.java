@@ -35,6 +35,10 @@ public class OAuthConnection extends BaseEntity {
     @Column(name = "scopes", columnDefinition = "TEXT")
     private String scopes;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    private ConnectionStatus status = ConnectionStatus.CONNECTED;
+
     public OAuthConnection() {
     }
 
@@ -92,6 +96,14 @@ public class OAuthConnection extends BaseEntity {
 
     public void setScopes(String scopes) {
         this.scopes = scopes;
+    }
+
+    public ConnectionStatus getStatus() {
+        return status;
+    }
+
+    public void setStatus(ConnectionStatus status) {
+        this.status = status;
     }
 
     public boolean isAccessTokenExpired() {
