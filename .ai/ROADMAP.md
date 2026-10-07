@@ -18,8 +18,12 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 1H**: [COMPLETE] Domain / API Testing via Mockito and WebMvcTest.
 - **Phase 1I/1J**: [COMPLETE / FROZEN] Architecture Audited and Code/Functional Contracts Frozen.
 
+### **Phase 2 — Authentication & Identity** [IMPLEMENTATION COMPLETE BUT RUNTIME VERIFICATION BLOCKED]
+- **Phase 2A-2C**: [COMPLETE] Application Identity, Authentication, and OAuth Infrastructure.
+- **Phase 2D-2F**: [COMPLETE] Provider Adapters (Spotify/Google) and encrypted Token Lifecycle logic.
+- **Phase 2G-2H**: [COMPLETE / FROZEN] Security hardening for sessions, state consumption race conditions, IDOR, and full unit test execution.
+
 ## Future Phases
-- Phase 2 — Authentication & Identity
 - Phase 3 — Spotify Integration
 - Phase 4 — YouTube Integration
 - Phase 5 — Track Normalization

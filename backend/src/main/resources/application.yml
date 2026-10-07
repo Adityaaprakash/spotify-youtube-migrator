@@ -3,6 +3,15 @@ spring:
     active: ${APP_ENV:local}
   application:
     name: migrator
+
+server:
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+        # Use HTTPS in production, fallback to false for local dev
+        secure: ${SERVER_SECURE_COOKIE:false}
   
   datasource:
     url: ${DATABASE_URL}

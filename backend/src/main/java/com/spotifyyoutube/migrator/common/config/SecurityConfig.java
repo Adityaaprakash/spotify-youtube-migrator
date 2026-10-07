@@ -32,8 +32,6 @@ public class SecurityConfig {
             )
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/logout").permitAll()
-                // OAuth generic infrastructure endpoints
-                .requestMatchers("/api/oauth/**").permitAll()
                 // Actuator
                 .requestMatchers("/actuator/**").permitAll()
                 .anyRequest().authenticated()

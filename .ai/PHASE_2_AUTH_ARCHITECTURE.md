@@ -29,4 +29,5 @@ All OAuth mechanics have been strictly generalized:
 1. **At-Rest Token Encryption**: All stored access and refresh tokens are symmetrically encrypted at the application boundary `OAuthTokenService` via AES-GCM.
 2. **Double-Submit CSRF**: Enabled out of the box for the frontend to parse and send `X-XSRF-TOKEN`.
 3. **Session vs JWT**: Adopted standard server-side sessions over stateless JWTs on the client, minimizing XSS token-extraction risks and allowing easy immediate session invalidation on logout.
-4. **State Tie-in**: `OAuthState` enforces that the application user who initiated the request is the exact same application user consuming the state token.
+4. **State Tie-in**: `OAuthState` enforces that the application user who initiated the request is the exact same application user consuming the state token. Validation consumption is executed atomically to avert race conditions via `@Modifying DELETE`.
+5. **Token Lifecycle Separation**: Only `OAuthTokenLifecycleService` conducts token exchanges (with decryptions mapped securely). Individual adapter routines simply process REST code mapping. Invalid/Revoked cases transition the persistence model properly via `ConnectionStatus.REAUTH_REQUIRED`.

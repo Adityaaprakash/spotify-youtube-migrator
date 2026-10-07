@@ -62,7 +62,11 @@ public class OAuthStateServiceImpl implements OAuthStateService {
             throw new InvalidStateException("OAuth state has expired.");
         }
 
-        state.setConsumedAt(OffsetDateTime.now());
-        return oAuthStateRepository.save(state);
+        int rowsAffected = oAuthStateRepository.consumeState(stateToken);
+        if (rowsAffected == 0) {
+            throw new InvalidStateException("OAuth state has already been consumed.");
+        }
+        
+        return state;
     }
 }
