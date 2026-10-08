@@ -11,9 +11,13 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import org.springframework.context.annotation.Import;
+import com.spotifyyoutube.migrator.common.config.JpaConfig;
+
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("test")
+@Import(JpaConfig.class)
 public class UserRepositoryTest {
 
     @Autowired

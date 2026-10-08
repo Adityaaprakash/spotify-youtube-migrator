@@ -28,6 +28,10 @@
 	</scm>
 	<properties>
 		<java.version>22</java.version>
+		<!-- Override Spring Boot BOM's pinned 1.19.8; docker-java 3.3.6 (bundled with 1.19.8)
+		     sends an API version that Docker Engine 29.x rejects with HTTP 500.
+		     Testcontainers 1.21.4 ships a version that supports Docker 29+ fully. -->
+		<testcontainers.version>1.21.4</testcontainers.version>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -92,6 +96,13 @@
 
 	<build>
 		<plugins>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>-Duser.timezone=UTC</argLine>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
