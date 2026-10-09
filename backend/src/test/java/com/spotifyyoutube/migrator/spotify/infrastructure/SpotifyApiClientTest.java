@@ -59,7 +59,11 @@ class SpotifyApiClientTest {
 
         assertThatThrownBy(() -> spotifyApiClient.getCurrentUserProfile("valid_token"))
                 .isInstanceOf(ExternalProviderException.class)
-                .hasMessageContaining("500");
+                .hasMessageStartingWith("Failed to fetch Spotify profile")
+                .satisfies(e -> {
+                    ExternalProviderException ext = (ExternalProviderException) e;
+                    assertThat(ext.getProviderStatusCode()).isEqualTo(500);
+                });
     }
 
     @Test

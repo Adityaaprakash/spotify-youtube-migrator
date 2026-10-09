@@ -1,5 +1,6 @@
 package com.spotifyyoutube.migrator.identity.application;
 
+import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.domain.ConnectionStatus;
 import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
@@ -36,7 +37,7 @@ public class OAuthTokenLifecycleServiceImpl implements OAuthTokenLifecycleServic
     @Transactional
     public OAuthConnection refreshConnectionIfNeeded(UUID userId, OAuthProvider provider) {
         OAuthConnection connection = connectionRepository.findByUserIdAndProvider(userId, provider)
-                .orElseThrow(() -> new ResourceNotFoundException("No active OAuth connection found for provider: " + provider.name()));
+                .orElseThrow(() -> new InvalidStateException("No active OAuth connection found for provider: " + provider.name()));
 
         if (connection.getStatus() != ConnectionStatus.CONNECTED) {
             return connection;

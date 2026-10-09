@@ -26,7 +26,7 @@ When a future requirement affects current architecture, document the architectur
 ### **Phase 3 — Spotify Integration** [IN PROGRESS]
 - **Phase 3A-3C**: [COMPLETE] Spotify API Foundation, Identity retrieval, and Paged Playlist Discovery implementation.
 - **Phase 3D-3F**: [COMPLETE] Playlist Metadata Retrieval, Complete Paginated Track Retrieval, and safe Mapping boundaries enforcing canonical models.
-- **Phase 3G-3H**: [NOT STARTED] Spotify API error/rate-limit handling expansion and full phase QA audit.
+- **Phase 3G-3H**: [COMPLETE] Spotify API error/rate-limit handling expansion and full phase QA audit.
 
 ## Future Phases
 - Phase 4 — YouTube Integration

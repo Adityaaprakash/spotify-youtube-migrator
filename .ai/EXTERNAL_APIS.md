@@ -31,6 +31,16 @@ In the Tracks loop, any null items (`nullItem`) or local items (`is_local=true`)
 Scopes:
 Inherits `playlist-read-private` and `playlist-read-collaborative` from Phase 3A-3C. No additional scopes were required for retrieving metadata or tracks inside the authenticated bounds.
 
+Error Mappings:
+- HTTP 400 maps to `HttpStatus.BAD_REQUEST`.
+- HTTP 401 maps to `HttpStatus.UNAUTHORIZED`.
+- HTTP 403 maps to `HttpStatus.FORBIDDEN`.
+- HTTP 404 maps to `HttpStatus.NOT_FOUND` (with explicit playlist/connection hints).
+- HTTP 429 maps to `HttpStatus.TOO_MANY_REQUESTS` appending `Retry-After` appropriately.
+- Invalid token connections are flagged structurally via `InvalidStateException` resulting natively as a 409 Conflict.
+- Network timeouts (`ResourceAccessException`) map manually to 504 `HttpStatus.GATEWAY_TIMEOUT`.
+- Malformed bodies map via `RestClientException` to 502 `HttpStatus.BAD_GATEWAY`.
+
 Reauthorization implies: Token bounds are wrapped around `OAuthTokenLifecycleService`. Reauth is purely transparent unless connection status breaks permanently.
 
 

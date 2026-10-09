@@ -27,7 +27,8 @@ public class SpotifyApiClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .onStatus(status -> status.isError(), (req, res) -> {
-                    throw new ExternalProviderException("Failed to fetch Spotify profile. Status: " + res.getStatusCode());
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+                    throw new ExternalProviderException("Failed to fetch Spotify profile", res.getStatusCode().value(), retryAfter);
                 })
                 .body(SpotifyUserProfileDto.class);
     }
@@ -44,7 +45,8 @@ public class SpotifyApiClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .onStatus(status -> status.isError(), (req, res) -> {
-                    throw new ExternalProviderException("Failed to fetch Spotify playlists. Status: " + res.getStatusCode());
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+                    throw new ExternalProviderException("Failed to fetch Spotify playlists", res.getStatusCode().value(), retryAfter);
                 })
                 .body(new ParameterizedTypeReference<SpotifyPagingDto<SpotifyPlaylistSummaryDto>>() {});
     }
@@ -62,7 +64,8 @@ public class SpotifyApiClient {
                     if (res.getStatusCode().value() == 404) {
                         throw new com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException("Playlist not found on Spotify");
                     }
-                    throw new ExternalProviderException("Failed to fetch Spotify playlist metadata. Status: " + res.getStatusCode());
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+                    throw new ExternalProviderException("Failed to fetch Spotify playlist metadata", res.getStatusCode().value(), retryAfter);
                 })
                 .body(SpotifyPlaylistSummaryDto.class);
     }
@@ -79,7 +82,11 @@ public class SpotifyApiClient {
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
                 .retrieve()
                 .onStatus(status -> status.isError(), (req, res) -> {
-                    throw new ExternalProviderException("Failed to fetch Spotify playlist tracks. Status: " + res.getStatusCode());
+                    if (res.getStatusCode().value() == 404) {
+                        throw new com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException("Playlist not found on Spotify for tracks");
+                    }
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+                    throw new ExternalProviderException("Failed to fetch Spotify playlist tracks", res.getStatusCode().value(), retryAfter);
                 })
                 .body(new ParameterizedTypeReference<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto>>() {});
     }

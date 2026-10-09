@@ -4,6 +4,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -70,9 +72,54 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ExternalProviderException.class)
     public ResponseEntity<ApiError> handleExternalProviderException(ExternalProviderException ex, HttpServletRequest request) {
+        HttpStatus responseStatus = HttpStatus.BAD_GATEWAY;
+
+        if (ex.getProviderStatusCode() != null) {
+            switch (ex.getProviderStatusCode()) {
+                case 400 -> responseStatus = HttpStatus.BAD_REQUEST;
+                case 401 -> responseStatus = HttpStatus.UNAUTHORIZED;
+                case 403 -> responseStatus = HttpStatus.FORBIDDEN;
+                case 404 -> responseStatus = HttpStatus.NOT_FOUND;
+                case 429 -> responseStatus = HttpStatus.TOO_MANY_REQUESTS;
+                default -> {
+                    if (ex.getProviderStatusCode() >= 500) {
+                        responseStatus = HttpStatus.BAD_GATEWAY;
+                    }
+                }
+            }
+        }
+
         ApiError apiError = new ApiError(
                 ErrorCode.EXTERNAL_PROVIDER_ERROR,
                 ex.getMessage(),
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+
+        ResponseEntity.BodyBuilder builder = ResponseEntity.status(responseStatus);
+        if (ex.getRetryAfter() != null) {
+            builder.header(org.springframework.http.HttpHeaders.RETRY_AFTER, ex.getRetryAfter());
+        }
+
+        return builder.body(apiError);
+    }
+
+    @ExceptionHandler(ResourceAccessException.class)
+    public ResponseEntity<ApiError> handleResourceAccessException(ResourceAccessException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(
+                ErrorCode.EXTERNAL_PROVIDER_ERROR,
+                "Network timeout or connection failure with external provider",
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.GATEWAY_TIMEOUT);
+    }
+
+    @ExceptionHandler(RestClientException.class)
+    public ResponseEntity<ApiError> handleRestClientException(RestClientException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(
+                ErrorCode.EXTERNAL_PROVIDER_ERROR,
+                "Malformed or unexpected response from external provider",
                 Instant.now().toString(),
                 request.getRequestURI()
         );
