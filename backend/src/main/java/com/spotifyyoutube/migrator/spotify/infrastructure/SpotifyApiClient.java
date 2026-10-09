@@ -48,4 +48,39 @@ public class SpotifyApiClient {
                 })
                 .body(new ParameterizedTypeReference<SpotifyPagingDto<SpotifyPlaylistSummaryDto>>() {});
     }
+
+    public SpotifyPlaylistSummaryDto getPlaylistMetadata(String accessToken, String playlistId) {
+        String uri = UriComponentsBuilder.fromPath("/playlists/{id}")
+                .buildAndExpand(playlistId)
+                .toUriString();
+
+        return restClient.get()
+                .uri(uri)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .onStatus(status -> status.isError(), (req, res) -> {
+                    if (res.getStatusCode().value() == 404) {
+                        throw new com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException("Playlist not found on Spotify");
+                    }
+                    throw new ExternalProviderException("Failed to fetch Spotify playlist metadata. Status: " + res.getStatusCode());
+                })
+                .body(SpotifyPlaylistSummaryDto.class);
+    }
+
+    public com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto> getPlaylistTracks(String accessToken, String playlistId, int limit, int offset) {
+        String uri = UriComponentsBuilder.fromPath("/playlists/{id}/tracks")
+                .queryParam("limit", limit)
+                .queryParam("offset", offset)
+                .buildAndExpand(playlistId)
+                .toUriString();
+
+        return restClient.get()
+                .uri(uri)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .onStatus(status -> status.isError(), (req, res) -> {
+                    throw new ExternalProviderException("Failed to fetch Spotify playlist tracks. Status: " + res.getStatusCode());
+                })
+                .body(new ParameterizedTypeReference<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto>>() {});
+    }
 }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistSummaryDto;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyUserProfileDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -82,6 +83,62 @@ class SpotifyApiClientTest {
         
         assertThat(result).isNotNull();
         assertThat(result.limit()).isEqualTo(50);
+        assertThat(result.total()).isEqualTo(0);
+        mockServer.verify();
+    }
+
+    @Test
+    void getPlaylistMetadata_shouldReturnSummary_onSuccess() throws Exception {
+        String mockResponseBody = """
+        {
+            "id": "p123",
+            "name": "My Playlist"
+        }
+        """;
+
+        mockServer.expect(requestTo("https://api.spotify.com/v1/playlists/p123"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer valid_token"))
+                .andRespond(withSuccess(mockResponseBody, MediaType.APPLICATION_JSON));
+
+        SpotifyPlaylistSummaryDto result = spotifyApiClient.getPlaylistMetadata("valid_token", "p123");
+        
+        assertThat(result).isNotNull();
+        assertThat(result.id()).isEqualTo("p123");
+        assertThat(result.name()).isEqualTo("My Playlist");
+        mockServer.verify();
+    }
+
+    @Test
+    void getPlaylistMetadata_shouldThrowResourceNotFound_on404() {
+        mockServer.expect(requestTo("https://api.spotify.com/v1/playlists/notFound"))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND));
+
+        assertThatThrownBy(() -> spotifyApiClient.getPlaylistMetadata("valid_token", "notFound"))
+                .isInstanceOf(com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException.class)
+                .hasMessageContaining("Playlist not found");
+    }
+
+    @Test
+    void getPlaylistTracks_shouldReturnPaging_onSuccess() throws Exception {
+        String mockResponseBody = """
+        {
+            "href": "https://api.spotify.com/v1/playlists/p123/tracks",
+            "items": [],
+            "limit": 50,
+            "offset": 0,
+            "total": 0
+        }
+        """;
+
+        mockServer.expect(requestTo("https://api.spotify.com/v1/playlists/p123/tracks?limit=50&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer valid_token"))
+                .andRespond(withSuccess(mockResponseBody, MediaType.APPLICATION_JSON));
+
+        SpotifyPagingDto<SpotifyPlaylistTrackDto> result = spotifyApiClient.getPlaylistTracks("valid_token", "p123", 50, 0);
+        
+        assertThat(result).isNotNull();
         assertThat(result.total()).isEqualTo(0);
         mockServer.verify();
     }

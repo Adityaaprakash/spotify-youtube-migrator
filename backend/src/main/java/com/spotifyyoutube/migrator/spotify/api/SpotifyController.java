@@ -8,10 +8,14 @@ import com.spotifyyoutube.migrator.spotify.application.SpotifyIdentityService;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import java.util.List;
+import com.spotifyyoutube.migrator.playlist.api.dto.PlaylistResponse;
+import com.spotifyyoutube.migrator.playlist.api.dto.TrackResponse;
 
 @RestController
 @RequestMapping("/api/spotify")
@@ -48,5 +52,27 @@ public class SpotifyController {
         }
         User user = userService.getUserByEmail(principal.getName());
         return ResponseEntity.ok(playlistService.getPlaylists(user.getId(), limit, offset));
+    }
+
+    @GetMapping("/playlists/{playlistId}")
+    public ResponseEntity<PlaylistResponse> getPlaylistMetadata(
+            java.security.Principal principal,
+            @PathVariable("playlistId") String playlistId) {
+        if (principal == null) {
+            return ResponseEntity.status(401).build();
+        }
+        User user = userService.getUserByEmail(principal.getName());
+        return ResponseEntity.ok(playlistService.getPlaylistMetadata(user.getId(), playlistId));
+    }
+
+    @GetMapping("/playlists/{playlistId}/tracks")
+    public ResponseEntity<List<TrackResponse>> getPlaylistTracks(
+            java.security.Principal principal,
+            @PathVariable("playlistId") String playlistId) {
+        if (principal == null) {
+            return ResponseEntity.status(401).build();
+        }
+        User user = userService.getUserByEmail(principal.getName());
+        return ResponseEntity.ok(playlistService.getPlaylistTracks(user.getId(), playlistId));
     }
 }

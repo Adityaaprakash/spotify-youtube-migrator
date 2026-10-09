@@ -12,8 +12,17 @@ import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistSummaryDto;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Objects;
+
+import com.spotifyyoutube.migrator.playlist.api.dto.PlaylistResponse;
+import com.spotifyyoutube.migrator.playlist.api.dto.TrackResponse;
+import com.spotifyyoutube.migrator.playlist.api.mapper.PlaylistMapper;
+import com.spotifyyoutube.migrator.playlist.domain.Playlist;
+import com.spotifyyoutube.migrator.playlist.domain.Track;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto;
 
 @Service
 public class SpotifyPlaylistService {
@@ -54,5 +63,57 @@ public class SpotifyPlaylistService {
                 .toList();
 
         return spotifyMapper.mapPaging(pagingDto, items);
+    }
+
+    public PlaylistResponse getPlaylistMetadata(UUID userId, String playlistId) {
+        OAuthConnection connection = tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.SPOTIFY);
+        if (connection.getStatus() != ConnectionStatus.CONNECTED) {
+            throw new com.spotifyyoutube.migrator.common.exception.InvalidStateException("Spotify connection requires reauthorization.");
+        }
+
+        SpotifyPlaylistSummaryDto dto = spotifyApiClient.getPlaylistMetadata(connection.getAccessToken(), playlistId);
+        
+        Playlist domainPlaylist = spotifyMapper.toPlaylistDomain(dto, null);
+        return PlaylistMapper.toResponse(domainPlaylist);
+    }
+
+    public List<TrackResponse> getPlaylistTracks(UUID userId, String playlistId) {
+        OAuthConnection connection = tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.SPOTIFY);
+        if (connection.getStatus() != ConnectionStatus.CONNECTED) {
+            throw new com.spotifyyoutube.migrator.common.exception.InvalidStateException("Spotify connection requires reauthorization.");
+        }
+
+        // We fetch the playlist metadata first just to pass as a reference, or we can use a dummy Playlist
+        // But since this is a domain boundary, creating a dummy Playlist with the ID is sufficient for track mapping.
+        Playlist dummyPlaylist = new Playlist();
+        dummyPlaylist.setExternalId(playlistId);
+        
+        int offset = 0;
+        int limit = 50; 
+        SpotifyPagingDto<SpotifyPlaylistTrackDto> currentPaging;
+        List<Track> allTracks = new ArrayList<>();
+
+        do {
+            currentPaging = spotifyApiClient.getPlaylistTracks(connection.getAccessToken(), playlistId, limit, offset);
+            
+            if (currentPaging.items() != null) {
+                for (SpotifyPlaylistTrackDto item : currentPaging.items()) {
+                    if (item == null || item.track() == null) {
+                        continue;
+                    }
+                    if (Boolean.TRUE.equals(item.isLocal())) {
+                        continue; // We skip local tracks since they aren't on the public platform
+                    }
+                    Track track = spotifyMapper.toTrackDomain(item.track(), dummyPlaylist);
+                    if (track != null) {
+                        allTracks.add(track);
+                    }
+                }
+            }
+
+            offset += limit;
+        } while (currentPaging.next() != null && !currentPaging.next().isBlank() && (currentPaging.total() == null || offset < currentPaging.total()));
+
+        return PlaylistMapper.toTrackResponseList(allTracks);
     }
 }

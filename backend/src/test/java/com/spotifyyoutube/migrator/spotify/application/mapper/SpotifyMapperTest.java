@@ -8,6 +8,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
+import com.spotifyyoutube.migrator.playlist.domain.Playlist;
+import com.spotifyyoutube.migrator.playlist.domain.Track;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class SpotifyMapperTest {
@@ -105,5 +110,81 @@ class SpotifyMapperTest {
         SpotifyPageResponse<String> response = mapper.mapPaging(dto, List.of("1"));
 
         assertThat(response.hasNext()).isFalse();
+    }
+
+    @Test
+    void toPlaylistDomain_shouldMapCorrectly() {
+        SpotifyPlaylistSummaryDto dto = new SpotifyPlaylistSummaryDto(
+                "pl123", "My Playlist", "Desc",
+                new SpotifyOwnerDto("owner1", "Owner Name"),
+                List.of(new SpotifyImageDto("http://playlist.img", null, null)),
+                new SpotifyTracksDto(null, 42),
+                new SpotifyExternalUrlsDto("http://spotify.url")
+        );
+        User user = new User();
+
+        Playlist domain = mapper.toPlaylistDomain(dto, user);
+
+        assertThat(domain).isNotNull();
+        assertThat(domain.getPlatform()).isEqualTo(Platform.SPOTIFY);
+        assertThat(domain.getExternalId()).isEqualTo("pl123");
+        assertThat(domain.getName()).isEqualTo("My Playlist");
+        assertThat(domain.getDescription()).isEqualTo("Desc");
+        assertThat(domain.getImageUrl()).isEqualTo("http://playlist.img");
+        assertThat(domain.getUrl()).isEqualTo("http://spotify.url");
+        assertThat(domain.getTotalTracks()).isEqualTo(42);
+        assertThat(domain.getUser()).isEqualTo(user);
+    }
+
+    @Test
+    void toPlaylistDomain_shouldHandleNullsAndMissingOptionals() {
+        SpotifyPlaylistSummaryDto dto = new SpotifyPlaylistSummaryDto(
+                "pl123", null, null, null, null, null, null
+        );
+
+        Playlist domain = mapper.toPlaylistDomain(dto, null);
+
+        assertThat(domain).isNotNull();
+        assertThat(domain.getName()).isEqualTo("Unknown Playlist");
+        assertThat(domain.getDescription()).isNull();
+        assertThat(domain.getImageUrl()).isNull();
+        assertThat(domain.getUrl()).isNull();
+        assertThat(domain.getTotalTracks()).isNull();
+    }
+
+    @Test
+    void toTrackDomain_shouldMapCorrectly() {
+        SpotifyTrackDto dto = new SpotifyTrackDto(
+                "t123", "Song", 200000, "spotify:track:t123", false,
+                List.of(new SpotifyArtistDto("a1", "Artist 1"), new SpotifyArtistDto("a2", "Artist 2")),
+                new SpotifyAlbumDto("al1", "Album")
+        );
+        Playlist playlist = new Playlist();
+
+        Track track = mapper.toTrackDomain(dto, playlist);
+
+        assertThat(track).isNotNull();
+        assertThat(track.getExternalId()).isEqualTo("t123");
+        assertThat(track.getName()).isEqualTo("Song");
+        assertThat(track.getArtist()).isEqualTo("Artist 1, Artist 2");
+        assertThat(track.getAlbum()).isEqualTo("Album");
+        assertThat(track.getDurationMs()).isEqualTo(200000);
+        assertThat(track.getPlaylist()).isEqualTo(playlist);
+    }
+
+    @Test
+    void toTrackDomain_shouldHandleNulls() {
+        SpotifyTrackDto dto = new SpotifyTrackDto(
+                null, null, null, null, null, null, null
+        );
+
+        Track track = mapper.toTrackDomain(dto, null);
+
+        assertThat(track).isNotNull();
+        assertThat(track.getExternalId()).startsWith("local-");
+        assertThat(track.getName()).isEqualTo("Unknown Track");
+        assertThat(track.getArtist()).isEqualTo("Unknown Artist");
+        assertThat(track.getAlbum()).isNull();
+        assertThat(track.getDurationMs()).isEqualTo(0);
     }
 }

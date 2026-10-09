@@ -3,9 +3,15 @@
 Last Updated: 2026-10-07
 
 Current Phase: Phase 3 — Spotify Integration
-Current Subphase: PHASE 3A-3C COMPLETE (Spotify API Foundation, Identity retrieval, and Paged Playlist Discovery)
+Current Subphase: PHASE 3D-3F COMPLETE (Playlist Metadata Retrieval, Track Pagination, Application Mapping)
 
 ## Completed
+### Phase 3A-3F
+- **Phase 3A-3C**: Spotify API Foundation, Identity retrieval via Phase 2 tokens, and Paged Playlist Discovery implementation.
+- **Phase 3D**: Playlist Metadata Retrieval implemented targeting `/playlists/{playlistId}` via `SpotifyApiClient` retaining canonical models.
+- **Phase 3E**: Exhaustive page aggregation for `/playlists/{playlistId}/tracks`, securely ignoring local/null objects without crashing.
+- **Phase 3F**: Safe abstraction boundaries built into `SpotifyMapper` which translates Spotify provider DTOs firmly into standard `.domain.Playlist` / `.domain.Track` models, before flushing out as `PlaylistResponse`/`TrackResponse`.
+
 ### Phase 2A–2H
 - **Phase 2A-2C**: Application Authentication, Session setup, and OAuth Infrastructure.
 - **Phase 2D-2F**: Spotify and Google Provider Adapters implemented cleanly wrapped in Token Lifecycle engine.
@@ -22,10 +28,10 @@ Current Subphase: PHASE 3A-3C COMPLETE (Spotify API Foundation, Identity retriev
 
 ## Current Issues
 ## Current Issues
-- Environment configuration: `Testcontainers` lacks internal availability intermittently on execution pipelines. Test execution fails occasionally with `Failed to find a Docker environment` or connection failures on CI.
+- Environment configuration: `Testcontainers` Docker integration passes routinely but can drop out intermittently depending on Docker Desktop availability on CI/CD pipelines. Ensure daemon is up when validating execution.
 
 ## Not Yet Implemented
-- Phase 3D Spotify Track Retrieval and further migration operations.
+- Phase 3G-3H Spotify Rate Limit & Error Handling expansion.
 - Phase 4 YouTube Integration.
 - Matching and synchronization logic.
 - Background asynchronous queue execution for migrations.
@@ -33,11 +39,11 @@ Current Subphase: PHASE 3A-3C COMPLETE (Spotify API Foundation, Identity retriev
 ## Current Verification
 - Backend Compilation: `mvn clean compile` — **PASS**
 - Checkstyle: `mvn checkstyle:check` — **PASS**
-- Controller & Service Unit Testing (`UserControllerTest`, `PlaylistControllerTest`, `MigrationControllerTest`, etc.): **PASS**
+- Controller & Service Unit Testing (`UserControllerTest`, `PlaylistControllerTest`, `MigrationControllerTest`, `SpotifyPlaylistServiceTest`, etc.): **PASS**
 - Domain Verification (`DomainTest`): **PASS**
-- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — environment unavailable
-- Transaction Boundary Verification: **BLOCKED** — environment unavailable
-- Cascade Verification: **BLOCKED** — environment unavailable
+- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **PASS** (Docker environment was successfully discovered).
+- Transaction Boundary Verification: **PASS**
+- Cascade Verification: **PASS**
 
 To run verifying commands once Docker is available:
 `mvn clean verify` or `docker-compose up -d && mvn test`
@@ -51,11 +57,12 @@ To run verifying commands once Docker is available:
 - **Connection Storage/Status**: FROZEN
 
 ## Phase 3 Freeze Status
-- **Spotify API Client**: FROZEN
+- **Spotify API Client**: FROZEN (Base implementation, Metadata, Tracks)
 - **Spotify Identity Retrieval**: FROZEN
 - **Spotify Playlist Discovery**: FROZEN
 - **Provider-To-Safe-DTO Mapping**: FROZEN
+- **Domain Metadata & Track Mapping**: FROZEN
 
 ## Next Recommended Work
-1. Implement Phase 3D (Spotify Track Retrieval).
-2. Continue addressing Docker integration barriers if they reappear.
+1. Implement Phase 3G-3H (Rate Limiter and Final audit).
+2. Phase 4 (YouTube connection creation).

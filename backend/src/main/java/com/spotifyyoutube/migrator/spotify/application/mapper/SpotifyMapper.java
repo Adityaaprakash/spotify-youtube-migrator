@@ -10,6 +10,14 @@ import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyUserProfile
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.stream.Collectors;
+
+import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
+import com.spotifyyoutube.migrator.playlist.domain.Playlist;
+import com.spotifyyoutube.migrator.playlist.domain.Track;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyArtistDto;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyTrackDto;
 
 @Component
 public class SpotifyMapper {
@@ -68,5 +76,56 @@ public class SpotifyMapper {
                 pagingDto.offset(),
                 hasNext
         );
+    }
+
+    public Playlist toPlaylistDomain(SpotifyPlaylistSummaryDto dto, User user) {
+        if (dto == null) return null;
+
+        Playlist playlist = new Playlist();
+        playlist.setPlatform(Platform.SPOTIFY);
+        playlist.setExternalId(dto.id());
+        playlist.setName(dto.name() != null ? dto.name() : "Unknown Playlist");
+        playlist.setDescription(dto.description());
+
+        if (dto.externalUrls() != null) {
+            playlist.setUrl(dto.externalUrls().spotify());
+        }
+
+        if (dto.images() != null && !dto.images().isEmpty()) {
+            playlist.setImageUrl(dto.images().getFirst().url());
+        }
+
+        if (dto.tracks() != null) {
+            playlist.setTotalTracks(dto.tracks().total());
+        }
+
+        playlist.setUser(user);
+        return playlist;
+    }
+
+    public Track toTrackDomain(SpotifyTrackDto dto, Playlist playlist) {
+        if (dto == null) return null;
+
+        Track track = new Track();
+        track.setExternalId(dto.id() != null ? dto.id() : "local-" + java.util.UUID.randomUUID().toString());
+        track.setName(dto.name() != null ? dto.name() : "Unknown Track");
+        
+        String artistNames = "Unknown Artist";
+        if (dto.artists() != null && !dto.artists().isEmpty()) {
+            artistNames = dto.artists().stream()
+                    .map(SpotifyArtistDto::name)
+                    .filter(name -> name != null && !name.isBlank())
+                    .collect(Collectors.joining(", "));
+        }
+        track.setArtist(artistNames);
+
+        if (dto.album() != null) {
+            track.setAlbum(dto.album().name());
+        }
+
+        track.setDurationMs(dto.durationMs() != null ? dto.durationMs() : 0);
+        track.setPlaylist(playlist);
+        
+        return track;
     }
 }

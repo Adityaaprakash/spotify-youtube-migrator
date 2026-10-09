@@ -5,6 +5,9 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPageResponse;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPlaylistSummaryResponse;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyProfileResponse;
+import com.spotifyyoutube.migrator.playlist.api.dto.PlaylistResponse;
+import com.spotifyyoutube.migrator.playlist.api.dto.TrackResponse;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyIdentityService;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
 import org.junit.jupiter.api.Test;
@@ -78,5 +81,42 @@ class SpotifyControllerTest {
         mockMvc.perform(get("/api/spotify/playlists?limit=20&offset=0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.limit").value(20));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylistMetadata_shouldReturnResponse() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("test@example.com");
+
+        when(userService.getUserByEmail("test@example.com")).thenReturn(user);
+
+        PlaylistResponse mockResponse = new PlaylistResponse(
+                null, "Playlist 1", "Desc", Platform.SPOTIFY, "pl1", "url", 10
+        );
+        when(playlistService.getPlaylistMetadata(user.getId(), "pl1")).thenReturn(mockResponse);
+
+        mockMvc.perform(get("/api/spotify/playlists/pl1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.externalId").value("pl1"))
+                .andExpect(jsonPath("$.name").value("Playlist 1"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylistTracks_shouldReturnTrackList() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("test@example.com");
+
+        when(userService.getUserByEmail("test@example.com")).thenReturn(user);
+
+        TrackResponse t1 = new TrackResponse(null, "Song", "Art", "Alb", 123, "t1");
+        when(playlistService.getPlaylistTracks(user.getId(), "pl1")).thenReturn(List.of(t1));
+
+        mockMvc.perform(get("/api/spotify/playlists/pl1/tracks"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].externalId").value("t1"));
     }
 }
