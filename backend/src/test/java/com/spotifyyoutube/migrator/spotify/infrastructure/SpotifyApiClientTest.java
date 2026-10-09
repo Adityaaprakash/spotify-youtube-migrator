@@ -1,0 +1,88 @@
+package com.spotifyyoutube.migrator.spotify.infrastructure;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistSummaryDto;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyUserProfileDto;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.client.RestClientTest;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
+
+@RestClientTest(SpotifyApiClient.class)
+class SpotifyApiClientTest {
+
+    @Autowired
+    private SpotifyApiClient spotifyApiClient;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private MockRestServiceServer mockServer;
+
+    @BeforeEach
+    void setUp() {
+        mockServer.reset();
+    }
+
+    @Test
+    void getCurrentUserProfile_shouldReturnProfile_onSuccess() throws Exception {
+        SpotifyUserProfileDto mockResponse = new SpotifyUserProfileDto("u123", "User", "test@test.com", null);
+
+        mockServer.expect(requestTo("https://api.spotify.com/v1/me"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer valid_token"))
+                .andRespond(withSuccess(objectMapper.writeValueAsString(mockResponse), MediaType.APPLICATION_JSON));
+
+        SpotifyUserProfileDto dto = spotifyApiClient.getCurrentUserProfile("valid_token");
+        
+        assertThat(dto).isNotNull();
+        assertThat(dto.id()).isEqualTo("u123");
+        mockServer.verify();
+    }
+
+    @Test
+    void getCurrentUserProfile_shouldThrowExternalProviderException_onError() {
+        mockServer.expect(requestTo("https://api.spotify.com/v1/me"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> spotifyApiClient.getCurrentUserProfile("valid_token"))
+                .isInstanceOf(ExternalProviderException.class)
+                .hasMessageContaining("500");
+    }
+
+    @Test
+    void getUserPlaylists_shouldReturnPaging_onSuccess() throws Exception {
+        String mockResponseBody = """
+        {
+            "href": "https://api.spotify.com/v1/me/playlists",
+            "items": [],
+            "limit": 50,
+            "offset": 0,
+            "total": 0
+        }
+        """;
+
+        mockServer.expect(requestTo("https://api.spotify.com/v1/me/playlists?limit=50&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer valid_token"))
+                .andRespond(withSuccess(mockResponseBody, MediaType.APPLICATION_JSON));
+
+        SpotifyPagingDto<SpotifyPlaylistSummaryDto> result = spotifyApiClient.getUserPlaylists("valid_token", 50, 0);
+        
+        assertThat(result).isNotNull();
+        assertThat(result.limit()).isEqualTo(50);
+        assertThat(result.total()).isEqualTo(0);
+        mockServer.verify();
+    }
+}

@@ -1,0 +1,52 @@
+package com.spotifyyoutube.migrator.spotify.api;
+
+import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPageResponse;
+import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPlaylistSummaryResponse;
+import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyProfileResponse;
+import com.spotifyyoutube.migrator.spotify.application.SpotifyIdentityService;
+import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/spotify")
+public class SpotifyController {
+
+    private final SpotifyIdentityService identityService;
+    private final SpotifyPlaylistService playlistService;
+    private final com.spotifyyoutube.migrator.identity.application.UserService userService;
+
+    public SpotifyController(SpotifyIdentityService identityService, 
+                             SpotifyPlaylistService playlistService,
+                             com.spotifyyoutube.migrator.identity.application.UserService userService) {
+        this.identityService = identityService;
+        this.playlistService = playlistService;
+        this.userService = userService;
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<SpotifyProfileResponse> getCurrentProfile(java.security.Principal principal) {
+        if (principal == null) {
+            return ResponseEntity.status(401).build();
+        }
+        User user = userService.getUserByEmail(principal.getName());
+        return ResponseEntity.ok(identityService.getConnectedProfile(user.getId()));
+    }
+
+    @GetMapping("/playlists")
+    public ResponseEntity<SpotifyPageResponse<SpotifyPlaylistSummaryResponse>> getPlaylists(
+            java.security.Principal principal,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        if (principal == null) {
+            return ResponseEntity.status(401).build();
+        }
+        User user = userService.getUserByEmail(principal.getName());
+        return ResponseEntity.ok(playlistService.getPlaylists(user.getId(), limit, offset));
+    }
+}

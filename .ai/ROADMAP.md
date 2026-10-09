@@ -23,8 +23,11 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 2D-2F**: [COMPLETE] Provider Adapters (Spotify/Google) and encrypted Token Lifecycle logic.
 - **Phase 2G-2H**: [COMPLETE / FROZEN] Security hardening for sessions, state consumption race conditions, IDOR, and full unit test execution.
 
+### **Phase 3 — Spotify Integration** [IN PROGRESS]
+- **Phase 3A-3C**: [COMPLETE] Spotify API Foundation, Identity retrieval, and Paged Playlist Discovery implementation.
+- **Phase 3D**: [NOT STARTED] Spotify Track Retrieval.
+
 ## Future Phases
-- Phase 3 — Spotify Integration
 - Phase 4 — YouTube Integration
 - Phase 5 — Track Normalization
 - Phase 6 — Candidate Discovery

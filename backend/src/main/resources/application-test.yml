@@ -18,7 +18,7 @@ oauth:
       client-id: "test-spotify-id"
       client-secret: "test-spotify-secret"
       redirect-uri: "http://localhost/api/oauth/spotify/callback"
-      scopes: "user-read-private user-read-email"
+      scopes: "user-read-private user-read-email playlist-read-private playlist-read-collaborative"
     google:
       client-id: "test-google-id"
       client-secret: "test-google-secret"

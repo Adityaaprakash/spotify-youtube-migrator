@@ -68,6 +68,17 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(apiError, HttpStatus.CONFLICT); // usually 409 Conflict for invalid state preventing an operation
     }
 
+    @ExceptionHandler(ExternalProviderException.class)
+    public ResponseEntity<ApiError> handleExternalProviderException(ExternalProviderException ex, HttpServletRequest request) {
+        ApiError apiError = new ApiError(
+                ErrorCode.EXTERNAL_PROVIDER_ERROR,
+                ex.getMessage(),
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_GATEWAY);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleGenericException(Exception ex, HttpServletRequest request) {
         ApiError apiError = new ApiError(

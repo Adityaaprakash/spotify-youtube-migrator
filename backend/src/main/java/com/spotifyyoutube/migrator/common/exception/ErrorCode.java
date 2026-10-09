@@ -7,5 +7,6 @@ public enum ErrorCode {
     NOT_FOUND,
     CONFLICT,
     INVALID_STATE,
+    EXTERNAL_PROVIDER_ERROR,
     INTERNAL_SERVER_ERROR
 }
