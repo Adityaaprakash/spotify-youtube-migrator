@@ -1,5 +1,6 @@
 package com.spotifyyoutube.migrator.spotify.api;
 
+import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPageResponse;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPlaylistSummaryResponse;
@@ -7,7 +8,6 @@ import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyProfileResponse;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyIdentityService;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,11 +23,11 @@ public class SpotifyController {
 
     private final SpotifyIdentityService identityService;
     private final SpotifyPlaylistService playlistService;
-    private final com.spotifyyoutube.migrator.identity.application.UserService userService;
+    private final UserService userService;
 
-    public SpotifyController(SpotifyIdentityService identityService, 
+    public SpotifyController(SpotifyIdentityService identityService,
                              SpotifyPlaylistService playlistService,
-                             com.spotifyyoutube.migrator.identity.application.UserService userService) {
+                             UserService userService) {
         this.identityService = identityService;
         this.playlistService = playlistService;
         this.userService = userService;

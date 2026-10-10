@@ -29,8 +29,7 @@ Current Subphase: PHASE 3G-3H COMPLETE (Spotify API error/rate-limit handling ex
 - Explicit Mappers manually configured (no MapStruct) tracking strict one-to-one Domain-to-DTO conventions.
 
 ## Current Issues
-## Current Issues
-- Environment configuration: `Testcontainers` Docker integration passes routinely but can drop out intermittently depending on Docker Desktop availability on CI/CD pipelines. Ensure daemon is up when validating execution. `docker info` exits with `1` blocking database containers locally.
+- Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
 - Phase 4 YouTube Integration.

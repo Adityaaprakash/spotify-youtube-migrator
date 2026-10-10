@@ -3,7 +3,6 @@ package com.spotifyyoutube.migrator.spotify.application.mapper;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPageResponse;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyPlaylistSummaryResponse;
 import com.spotifyyoutube.migrator.spotify.api.dto.SpotifyProfileResponse;
-import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyImageDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistSummaryDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyUserProfileDto;
@@ -112,10 +111,11 @@ public class SpotifyMapper {
         
         String artistNames = "Unknown Artist";
         if (dto.artists() != null && !dto.artists().isEmpty()) {
-            artistNames = dto.artists().stream()
+            String joined = dto.artists().stream()
                     .map(SpotifyArtistDto::name)
                     .filter(name -> name != null && !name.isBlank())
                     .collect(Collectors.joining(", "));
+            artistNames = joined.isBlank() ? "Unknown Artist" : joined;
         }
         track.setArtist(artistNames);
 

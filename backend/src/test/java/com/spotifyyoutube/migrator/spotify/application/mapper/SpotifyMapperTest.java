@@ -187,4 +187,50 @@ class SpotifyMapperTest {
         assertThat(track.getAlbum()).isNull();
         assertThat(track.getDurationMs()).isEqualTo(0);
     }
+
+    @Test
+    void mapPlaylistSummary_ownerHasNullDisplayName_shouldFallBackToOwnerId() {
+        // Owner.displayName is null but owner.id exists — mapper should use the id as displayName
+        SpotifyPlaylistSummaryDto dto = new SpotifyPlaylistSummaryDto(
+                "pl999", "Playlist", null,
+                new SpotifyOwnerDto("owner-id-42", null),
+                null, null, null
+        );
+
+        SpotifyPlaylistSummaryResponse response = mapper.mapPlaylistSummary(dto);
+
+        assertThat(response.ownerDisplayName()).isEqualTo("owner-id-42");
+    }
+
+    @Test
+    void toTrackDomain_allArtistNamesBlank_shouldDefaultToUnknownArtist() {
+        // Artist list present but all names are blank/empty — should collapse to "Unknown Artist"
+        SpotifyTrackDto dto = new SpotifyTrackDto(
+                "t-blank", "Song", 100, "uri", false,
+                List.of(new SpotifyArtistDto("a1", "  "), new SpotifyArtistDto("a2", "")),
+                null
+        );
+
+        Track track = mapper.toTrackDomain(dto, null);
+
+        assertThat(track.getArtist()).isEqualTo("Unknown Artist");
+    }
+
+    @Test
+    void mapProfile_emptyImagesList_shouldReturnNullImageUrl() {
+        // images is non-null but empty — getFirst() would throw; mapper should return null
+        SpotifyUserProfileDto dto = new SpotifyUserProfileDto(
+                "u-empty-imgs", "Name", null, List.of()
+        );
+
+        SpotifyProfileResponse response = mapper.mapProfile(dto);
+
+        assertThat(response.imageUrl()).isNull();
+    }
+
+    @Test
+    void toPlaylistDomain_nullDto_shouldReturnNull() {
+        Playlist result = mapper.toPlaylistDomain(null, null);
+        assertThat(result).isNull();
+    }
 }

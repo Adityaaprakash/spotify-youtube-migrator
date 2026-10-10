@@ -1,8 +1,10 @@
 package com.spotifyyoutube.migrator.spotify.infrastructure;
 
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
+import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistSummaryDto;
+import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto;
 import com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyUserProfileDto;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
@@ -70,7 +72,7 @@ public class SpotifyApiClient {
                 .body(SpotifyPlaylistSummaryDto.class);
     }
 
-    public com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto> getPlaylistTracks(String accessToken, String playlistId, int limit, int offset) {
+    public SpotifyPagingDto<SpotifyPlaylistTrackDto> getPlaylistTracks(String accessToken, String playlistId, int limit, int offset) {
         String uri = UriComponentsBuilder.fromPath("/playlists/{id}/tracks")
                 .queryParam("limit", limit)
                 .queryParam("offset", offset)
@@ -83,11 +85,11 @@ public class SpotifyApiClient {
                 .retrieve()
                 .onStatus(status -> status.isError(), (req, res) -> {
                     if (res.getStatusCode().value() == 404) {
-                        throw new com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException("Playlist not found on Spotify for tracks");
+                        throw new ResourceNotFoundException("Playlist not found on Spotify for tracks");
                     }
                     String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
                     throw new ExternalProviderException("Failed to fetch Spotify playlist tracks", res.getStatusCode().value(), retryAfter);
                 })
-                .body(new ParameterizedTypeReference<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPagingDto<com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyPlaylistTrackDto>>() {});
+                .body(new ParameterizedTypeReference<SpotifyPagingDto<SpotifyPlaylistTrackDto>>() {});
     }
 }

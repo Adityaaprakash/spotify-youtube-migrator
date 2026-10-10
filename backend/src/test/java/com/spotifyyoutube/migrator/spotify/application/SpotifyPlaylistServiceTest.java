@@ -173,4 +173,49 @@ class SpotifyPlaylistServiceTest {
         assertThat(responses).isEmpty(); // Both skipped
         verify(spotifyMapper, never()).toTrackDomain(any(), any());
     }
+
+    @Test
+    void getPlaylists_shouldDefaultLimitTo20_whenLimitBelowOne() {
+        when(tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.SPOTIFY)).thenReturn(connection);
+
+        SpotifyPagingDto<SpotifyPlaylistSummaryDto> pagingDto = new SpotifyPagingDto<>(
+                "href", List.of(), 20, 0, null, null, 0
+        );
+        when(spotifyApiClient.getUserPlaylists("valid_token", 20, 0)).thenReturn(pagingDto);
+        when(spotifyMapper.<SpotifyPlaylistSummaryDto, SpotifyPlaylistSummaryResponse>mapPaging(eq(pagingDto), any()))
+                .thenReturn(new SpotifyPageResponse<>(List.of(), 0, 20, 0, false));
+
+        spotifyPlaylistService.getPlaylists(userId, 0, 0);
+
+        // Spotify MUST be called with 20 (the default), not 0
+        verify(spotifyApiClient).getUserPlaylists("valid_token", 20, 0);
+    }
+
+    @Test
+    void getPlaylists_shouldClampNegativeOffsetToZero() {
+        when(tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.SPOTIFY)).thenReturn(connection);
+
+        SpotifyPagingDto<SpotifyPlaylistSummaryDto> pagingDto = new SpotifyPagingDto<>(
+                "href", List.of(), 20, 0, null, null, 0
+        );
+        when(spotifyApiClient.getUserPlaylists("valid_token", 20, 0)).thenReturn(pagingDto);
+        when(spotifyMapper.<SpotifyPlaylistSummaryDto, SpotifyPlaylistSummaryResponse>mapPaging(eq(pagingDto), any()))
+                .thenReturn(new SpotifyPageResponse<>(List.of(), 0, 20, 0, false));
+
+        spotifyPlaylistService.getPlaylists(userId, 20, -5);
+
+        // Negative offset must be normalised to 0 before calling the API
+        verify(spotifyApiClient).getUserPlaylists("valid_token", 20, 0);
+    }
+
+    @Test
+    void getPlaylists_shouldThrowInvalidState_whenConnectionRequiresReauth() {
+        connection.setStatus(ConnectionStatus.REAUTH_REQUIRED);
+        when(tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.SPOTIFY)).thenReturn(connection);
+
+        assertThatThrownBy(() -> spotifyPlaylistService.getPlaylists(userId, 20, 0))
+                .isInstanceOf(InvalidStateException.class)
+                .hasMessageContaining("reauthorization");
+    }
 }
+
