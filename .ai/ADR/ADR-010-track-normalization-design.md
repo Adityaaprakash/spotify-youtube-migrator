@@ -37,6 +37,12 @@ To enable deterministic and reliable candidate discovery and similarity scoring 
    - `AlbumNormalizer` performs basic normalization (Unicode NFC, `Locale.ROOT` lowercasing, whitespace collapsing, and quote/dash standardization).
    - Unlike `TitleNormalizer`, `AlbumNormalizer` intentionally preserves album edition descriptors (e.g. `Deluxe Edition`, `Expanded Edition`, `Anniversary Edition`, `Remastered`, `Live`, `Live at Wembley`, `Soundtrack`, `Special Edition`, `[Explicit]`, `[Clean]`). These qualifiers represent substantive release distinctions rather than promotional noise, allowing downstream match evaluation to reward exact album edition matches.
 
+9. **Duration Normalization & Representation**:
+   - `DurationNormalizer` converts diverse provider durations (Spotify millisecond integers/longs and YouTube ISO-8601 strings) into canonical `java.time.Duration`.
+   - Exact precision is preserved at the millisecond and nanosecond level without lossy floating-point conversions or premature rounding.
+   - Matching tolerance strategy is intentionally deferred to downstream matching evaluation (Phase 6 / Phase 7); the normalizer focuses exclusively on exact, deterministic conversion.
+   - Strict error contract: `null` or blank strings return `null` (representing absent duration). Legitimate zero durations return `Duration.ZERO`. Negative values, malformed ISO strings, and arithmetic overflows reject with `IllegalArgumentException`. Invalid or unparseable durations are never silently converted to zero or synthetic defaults.
+
 ## Consequences
-- **Positive**: Clean, deterministic, fast comparison foundation with 100% test coverage and zero external dependencies.
+- **Positive**: Clean, deterministic, fast comparison foundation with 100% test coverage and zero external dependencies. Heterogeneous provider duration formats map cleanly to standard `java.time.Duration`.
 - **Trade-offs**: Raw artist strings lacking explicit featured markers (e.g., legacy comma-separated lists) cannot be split automatically without risking band corruption; callers must rely on structured source lists when available.

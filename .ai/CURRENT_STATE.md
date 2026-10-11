@@ -3,15 +3,15 @@
 Last Updated: 2026-10-11
 
 Current Phase: Phase 5 — Track Normalization Engine
-Current Subphase: Phase 5A–5D COMPLETE (Phases 5E–5H Pending)
+Current Subphase: Phase 5A–5E COMPLETE (Phases 5F–5H Pending)
 
 ## Completed
-### Phase 5A–5D (Track Normalization Engine: Foundation, Title, Artist & Album Normalization)
+### Phase 5A–5E (Track Normalization Engine: Foundation, Title, Artist, Album & Duration Normalization)
 - **Phase 5A (Repository Audit & Normalization Design)**:
   - Audited existing codebase and established ADR-010 (`.ai/ADR/ADR-010-track-normalization-design.md`).
   - Placed normalization in `com.spotifyyoutube.migrator.matching.normalization` within the modular monolith.
   - Implemented normalizers as stateless Spring `@Component`s with pure, deterministic functions, requiring no external dependencies, database, or network calls, fully testable as POJOs.
-  - Preserved strict provider isolation: inputs are standard Java types (`String`, `List<String>`), zero imports from Spotify or YouTube DTO packages.
+  - Preserved strict provider isolation: inputs are standard Java types (`String`, `List<String>`, `Long`, `Integer`), zero imports from Spotify or YouTube DTO packages.
   - Enforced source immutability: inputs are never mutated, original source metadata in `Track` or destination candidate objects is preserved untouched.
 - **Phase 5B (Title Normalization — TitleNormalizer)**:
   - Implemented `TitleNormalizer` in `com.spotifyyoutube.migrator.matching.normalization`.
@@ -36,6 +36,14 @@ Current Subphase: Phase 5A–5D COMPLETE (Phases 5E–5H Pending)
   - Typography & punctuation standardization: standardizes curly/smart apostrophes to `'`, double quotes to `"`, and dash variants to `-`. Preserves colons, commas, ampersands, plus signs, brackets, currency symbols, and backslashes.
   - Meaningful album edition preservation: strictly preserves substantive album release editions and qualifiers (`Deluxe Edition`, `Expanded Edition`, `Anniversary Edition`, `Remastered`, `Remaster`, `Live`, venue names like `Live at Wembley`, `Acoustic`, `Soundtrack`, `Special Edition`, `[Explicit]`, `[Clean]`). Does NOT apply promotional stripping or delete parenthetical album annotations.
   - Determinism & immutability: stateless, deterministic, and idempotent.
+- **Phase 5E (Duration Normalization — DurationNormalizer)**:
+  - Implemented `DurationNormalizer` in `com.spotifyyoutube.migrator.matching.normalization`.
+  - Canonical representation: normalizes heterogeneous provider formats (Spotify millisecond integers/longs and YouTube ISO-8601 strings) into canonical `java.time.Duration`.
+  - Precision: preserves exact millisecond and nanosecond precision without rounding or floating-point conversions.
+  - Millisecond API: `fromMilliseconds(Long)` and overloaded `fromMilliseconds(Integer)`.
+  - ISO-8601 API: `fromIso8601(String)` parsing standard durations (`PT3M20S`, `PT45S`, `PT1H2M3S`, `PT0S`, `PT1H`, `PT5M`, fractional `PT3M20.5S`, `PT0.123S`).
+  - Error and null contract: `null` or blank input safely returns `null` (absent duration); legitimate zero duration returns `Duration.ZERO`; negative durations, malformed ISO strings, and out-of-range arithmetic overflows safely reject with `IllegalArgumentException`. Invalid data is never silently substituted with zero or fallback values.
+  - Pure & stateless: independent Spring `@Component` testable as POJO.
 
 ### Phase 4G–4H (YouTube Integration — MusicDestination & Verification)
 - **Phase 4G (MusicDestination Abstraction & YouTube Adapter)**:
@@ -109,7 +117,7 @@ Current Subphase: Phase 5A–5D COMPLETE (Phases 5E–5H Pending)
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 5E–5H: Duration normalizer, normalization orchestration service, and variant-token classification.
+- Phase 5F–5H: Normalization orchestration service, variant-token classification, and Phase 5 verification/freeze.
 - Candidate Discovery (Phase 6).
 - Matching Engine & Benchmarking (Phase 7 & Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
@@ -117,7 +125,7 @@ Current Subphase: Phase 5A–5D COMPLETE (Phases 5E–5H Pending)
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`): **PASS** (93 tests passing across 19 nested test categories: 28 title tests, 33 artist tests, 32 album tests)
+- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`): **PASS** (148 tests passing across 24 nested test categories: 28 title tests, 33 artist tests, 32 album tests, 55 duration tests)
 - Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing)
 - Regression Unit/Slice Test Suite (`GlobalExceptionHandlerTest`, `SpotifyApiClientTest`, `SpotifyControllerTest`, `SpotifyPlaylistServiceTest`, `GoogleProviderAdapterTest`, etc.): **PASS**
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
@@ -126,8 +134,8 @@ Current Subphase: Phase 5A–5D COMPLETE (Phases 5E–5H Pending)
 - **Phase 2 (Auth & Identity)**: FROZEN
 - **Phase 3 (Spotify Integration)**: FROZEN
 - **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
-- **Phase 5 (Track Normalization Engine)**: Phase 5A–5D COMPLETE; Phase 5E–5H PENDING
+- **Phase 5 (Track Normalization Engine)**: Phase 5A–5E COMPLETE; Phase 5F–5H PENDING
 
 ## Next Recommended Work
-1. Phase 5E: `DurationNormalizer` (second/millisecond tolerance calculation and duration comparison utilities).
-2. Phase 5F: `NormalizationOrchestrator` (composed normalization pipeline and metadata tokenization).
+1. Phase 5F: `NormalizationOrchestrator` (composed normalization pipeline and metadata tokenization).
+2. Phase 5G: Variant-Token Detection & Classification.

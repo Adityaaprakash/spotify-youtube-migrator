@@ -15,8 +15,8 @@ Implemented and verified:
 - `YouTubeSearchServiceTest`: Service layer unit tests with mocked client/mapper testing query validation (non-blank, max length 500), pagination bounding (1-50 limit), whitespace trimming, and exception propagation.
 - `YouTubeControllerTest`: WebMvcTest validating authenticated search endpoint access, unauthenticated rejection (403/401), missing parameter handling (400), and exception mapping via GlobalExceptionHandler.
 
-## Track Normalization Testing Scope (Phase 5A-5D)
-Implemented and verified (93 total normalization tests):
+## Track Normalization Testing Scope (Phase 5A-5E)
+Implemented and verified (148 total normalization tests):
 - `TitleNormalizerTest`: 28 tests across 7 nested categories:
   - Basic casing & whitespace: lowercase normalization (`Locale.ROOT`), trimming, collapsing multi-space/tabs/newlines.
   - Null & blank handling: returns empty string for `null`, `""`, and whitespace-only strings.
@@ -41,10 +41,17 @@ Implemented and verified (93 total normalization tests):
   - Punctuation & typography: standardization of smart/curly apostrophes, double quotes, and dash variants to ASCII while preserving internal punctuation, colons, ampersands, plus signs, brackets, currency symbols, and backslashes.
   - Meaningful album edition preservation: verifies that `Deluxe Edition`, `Remastered`, `Expanded Edition`, `Anniversary Edition`, `Live at Wembley`, `Soundtrack`, `Special Edition`, `[Explicit]`, etc., are strictly retained and never stripped.
   - Determinism & immutability: idempotent and pure function execution.
+- `DurationNormalizerTest`: 55 tests across 5 nested categories:
+  - Millisecond conversion: whole-second conversions (200,000 ms -> 200s), fractional seconds (200,500 ms -> 200s 500ms), 1 ms, zero milliseconds (0L -> Duration.ZERO), null inputs, `Integer` overload support, large durations (100h), extreme numeric values (`Long.MAX_VALUE`), and negative value rejection (`IllegalArgumentException`).
+  - ISO-8601 parsing: standard (`PT3M20S`), seconds-only (`PT45S`), compound (`PT1H2M3S`), zero variants (`PT0S`, `PT0M`, `PT0H`), hours-only (`PT1H`), minutes-only (`PT5M`), fractional seconds (`PT3M20.5S`, `PT0.123S`), whitespace trimming, null/blank handling, malformed rejection, negative duration rejection (`-PT3M`, `PT-3M`), and extreme arithmetic overflow rejection (`IllegalArgumentException`).
+  - Consistency across representations: verifies identical `Duration` equality between equivalent milliseconds and ISO-8601 durations (e.g. 200,000 ms == `PT3M20S`, 45,000 ms == `PT45S`, 3,723,000 ms == `PT1H2M3S`, 0L == `PT0S`, 200,500 ms == `PT3M20.5S`, 123L == `PT0.123S`).
+  - Determinism & purity: idempotent, stateless execution with no retained state across invocations.
+  - Error contract: verifies invalid inputs never silently produce `Duration.ZERO` or fallback values, and legitimate zero durations are strictly distinct from absent `null` durations.
 
-## Future Testing Scope (Phases 5E+)
+## Future Testing Scope (Phases 5F+)
 As the migrator logic scales, testing will expand to:
-- `DurationNormalizerTest` (Phase 5E)
+- `NormalizationOrchestratorTest` (Phase 5F)
+- `VariantClassifierTest` (Phase 5G)
 - `MatchScorerTest` (Phase 7)
 - `MigrationStateMachineTest` (Phase 9)
 - Full End-to-End Migration Flow Testing
