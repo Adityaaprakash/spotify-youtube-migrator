@@ -42,7 +42,15 @@ To enable deterministic and reliable candidate discovery and similarity scoring 
    - Exact precision is preserved at the millisecond and nanosecond level without lossy floating-point conversions or premature rounding.
    - Matching tolerance strategy is intentionally deferred to downstream matching evaluation (Phase 6 / Phase 7); the normalizer focuses exclusively on exact, deterministic conversion.
    - Strict error contract: `null` or blank strings return `null` (representing absent duration). Legitimate zero durations return `Duration.ZERO`. Negative values, malformed ISO strings, and arithmetic overflows reject with `IllegalArgumentException`. Invalid or unparseable durations are never silently converted to zero or synthetic defaults.
+10. **Metadata Tokenizer & Variant Detection**:
+    - `MetadataTokenizer` provides stateless, deterministic tokenization of track metadata strings into an immutable `TokenizedTitle` aggregate.
+    - Tokenization classifies tokens into high-level categories (`TokenCategory`): `OFFICIAL_CONTENT`, `MEDIA_FORMAT`, `REMASTER`, `EDIT_OR_MIX`, `PERFORMANCE`, `DERIVATIVE_VERSION`, `FEATURED_ARTIST`, and `UNKNOWN_ANNOTATION`.
+    - Recording and release variants (`VariantType`) are extracted into an immutable, insertion-ordered set (`REMASTER`, `LIVE`, `ACOUSTIC`, `UNPLUGGED`, `RADIO_EDIT`, `EXTENDED_MIX`, `ORIGINAL_MIX`, `CLUB_MIX`, `INSTRUMENTAL`, `DEMO`, `STUDIO`, `REMIX`, `COVER`, `KARAOKE`, `NIGHTCORE`, `SPED_UP`, `SLOWED`, `SLOWED_REVERB`, `REVERB`).
+    - Media formats (`MediaFormat`) distinguish `AUDIO`, `VIDEO`, `MUSIC_VIDEO`, `LYRIC_VIDEO`, and `VISUALIZER`.
+    - Rich contextual details are captured in structured records: `RemasterDetails` (with optional release/remaster year) and `LivePerformanceDetails` (with optional venue or event).
+    - Unrecognized parenthetical and bracketed annotations are retained in `unknownAnnotations` and kept within `cleanTitle` to prevent accidental loss of identity information during candidate discovery and match scoring.
+    - Featured artist parentheticals (`feat.`, `ft.`, `featuring`) are cleanly routed to `featuredArtists` and stripped from clean title without being misclassified as variants.
 
 ## Consequences
-- **Positive**: Clean, deterministic, fast comparison foundation with 100% test coverage and zero external dependencies. Heterogeneous provider duration formats map cleanly to standard `java.time.Duration`.
+- **Positive**: Clean, deterministic, fast comparison foundation with 100% test coverage and zero external dependencies. Heterogeneous provider duration formats map cleanly to standard `java.time.Duration`. Comprehensive metadata tokenization accurately detects variants, performance context, and official indicators while preserving unknown annotations.
 - **Trade-offs**: Raw artist strings lacking explicit featured markers (e.g., legacy comma-separated lists) cannot be split automatically without risking band corruption; callers must rely on structured source lists when available.

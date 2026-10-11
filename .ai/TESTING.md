@@ -48,9 +48,18 @@ Implemented and verified (148 total normalization tests):
   - Determinism & purity: idempotent, stateless execution with no retained state across invocations.
   - Error contract: verifies invalid inputs never silently produce `Duration.ZERO` or fallback values, and legitimate zero durations are strictly distinct from absent `null` durations.
 
-## Future Testing Scope (Phases 5F+)
+## Metadata Tokenization & Variant Testing Scope (Phase 5F)
+Implemented and verified (58 unit tests in `MetadataTokenizerTest` across 7 nested categories):
+- Official-content detection: verifies `Official Audio`, `Official Video`, `Official Music Video`, `Official Lyric Video`, `Lyric Video`, `Visualizer`, case-insensitivity, whitespace variations, and non-misclassification of legitimate titles containing words like "Official".
+- Remaster detection: verifies `Remastered`, trailing year (`Remastered 2014`), leading year (`2011 Remaster`), version phrasing (`2024 Remastered Version`), digital/anniversary remasters, and non-extraction of unrelated numeric title years.
+- Edit and mix detection: distinguishes and classifies `Radio Edit`, `Extended Mix`, `Original Mix`, `Club Mix`, `Instrumental`, and `Demo Version`.
+- Recording and performance detection: verifies `Live`, `Live Version`, `Live at Wembley` (capturing venue context), `Acoustic`, `Unplugged` / `MTV Unplugged`, `Studio Version`, and safety against false matches in titles starting with "Live".
+- Alternate-version detection: verifies `Remix` (including named remixers), `Cover`, `Karaoke`, `Nightcore`, `Sped Up`, `Slowed`, `Slowed + Reverb`, and `Reverb`.
+- Preservation and ambiguity: verifies preservation of unknown parenthetical annotations in `unknownAnnotations` and `cleanTitle`, compound comma-separated annotations, conflicting variants, multi-artist featured credits with delimiters, unbracketed trailing featured credits, empty/delimiter brackets, and featured artist credits routing to `featuredArtists` without variant confusion.
+- Input handling and determinism: verifies null, blank, whitespace-only strings, plain titles without markers, duplicate marker deduplication, non-Latin Unicode support, and deterministic repeatability.
+
+## Future Testing Scope (Phases 5G+)
 As the migrator logic scales, testing will expand to:
-- `NormalizationOrchestratorTest` (Phase 5F)
 - `VariantClassifierTest` (Phase 5G)
 - `MatchScorerTest` (Phase 7)
 - `MigrationStateMachineTest` (Phase 9)

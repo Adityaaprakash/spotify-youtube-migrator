@@ -3,10 +3,10 @@
 Last Updated: 2026-10-11
 
 Current Phase: Phase 5 — Track Normalization Engine
-Current Subphase: Phase 5A–5E COMPLETE (Phases 5F–5H Pending)
+Current Subphase: Phase 5A–5F COMPLETE (Phases 5G–5H Pending)
 
 ## Completed
-### Phase 5A–5E (Track Normalization Engine: Foundation, Title, Artist, Album & Duration Normalization)
+### Phase 5A–5F (Track Normalization Engine: Foundation, Title, Artist, Album, Duration Normalization & MetadataTokenizer)
 - **Phase 5A (Repository Audit & Normalization Design)**:
   - Audited existing codebase and established ADR-010 (`.ai/ADR/ADR-010-track-normalization-design.md`).
   - Placed normalization in `com.spotifyyoutube.migrator.matching.normalization` within the modular monolith.
@@ -44,6 +44,16 @@ Current Subphase: Phase 5A–5E COMPLETE (Phases 5F–5H Pending)
   - ISO-8601 API: `fromIso8601(String)` parsing standard durations (`PT3M20S`, `PT45S`, `PT1H2M3S`, `PT0S`, `PT1H`, `PT5M`, fractional `PT3M20.5S`, `PT0.123S`).
   - Error and null contract: `null` or blank input safely returns `null` (absent duration); legitimate zero duration returns `Duration.ZERO`; negative durations, malformed ISO strings, and out-of-range arithmetic overflows safely reject with `IllegalArgumentException`. Invalid data is never silently substituted with zero or fallback values.
   - Pure & stateless: independent Spring `@Component` testable as POJO.
+- **Phase 5F (MetadataTokenizer & Variant Detection)**:
+  - Implemented `MetadataTokenizer` and domain models (`TokenizedTitle`, `MetadataToken`, `TokenCategory`, `VariantType`, `MediaFormat`, `RemasterDetails`, `LivePerformanceDetails`) in `com.spotifyyoutube.migrator.matching.normalization`.
+  - Stateless parsing of track metadata strings into structured, immutable result records.
+  - High-level categorization: `OFFICIAL_CONTENT`, `MEDIA_FORMAT`, `REMASTER`, `EDIT_OR_MIX`, `PERFORMANCE`, `DERIVATIVE_VERSION`, `FEATURED_ARTIST`, `UNKNOWN_ANNOTATION`.
+  - Variant classification: 19 distinct variants (`REMASTER`, `LIVE`, `ACOUSTIC`, `UNPLUGGED`, `RADIO_EDIT`, `EXTENDED_MIX`, `ORIGINAL_MIX`, `CLUB_MIX`, `INSTRUMENTAL`, `DEMO`, `STUDIO`, `REMIX`, `COVER`, `KARAOKE`, `NIGHTCORE`, `SPED_UP`, `SLOWED`, `SLOWED_REVERB`, `REVERB`) preserving encounter order via unmodifiable linked sets.
+  - Media format classification: `AUDIO`, `VIDEO`, `MUSIC_VIDEO`, `LYRIC_VIDEO`, `VISUALIZER`.
+  - Context extraction: `RemasterDetails` (release/remaster year) and `LivePerformanceDetails` (venue/event identification).
+  - Conservative preservation: unclassified bracketed annotations are retained in `unknownAnnotations` and kept within `cleanTitle` to prevent information loss.
+  - Featured artist routing: parenthetical and unbracketed guest credits (`feat. DaBaby`, `feat. Artist 1 & Artist 2`) extracted into `featuredArtists` with delimiter splitting and stripped from title without misclassification.
+  - Multi-annotation parsing: correctly decomposes compound bracketed qualifiers separated by comma, slash, semicolon, or pipe (e.g. `[Live at Wembley, Remastered 2024]`).
 
 ### Phase 4G–4H (YouTube Integration — MusicDestination & Verification)
 - **Phase 4G (MusicDestination Abstraction & YouTube Adapter)**:
@@ -117,7 +127,8 @@ Current Subphase: Phase 5A–5E COMPLETE (Phases 5F–5H Pending)
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 5F–5H: Normalization orchestration service, variant-token classification, and Phase 5 verification/freeze.
+- Phase 5G: Normalization Pipeline Orchestration.
+- Phase 5H: Phase 5 Verification & Freeze.
 - Candidate Discovery (Phase 6).
 - Matching Engine & Benchmarking (Phase 7 & Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
@@ -125,7 +136,7 @@ Current Subphase: Phase 5A–5E COMPLETE (Phases 5F–5H Pending)
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`): **PASS** (148 tests passing across 24 nested test categories: 28 title tests, 33 artist tests, 32 album tests, 55 duration tests)
+- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`): **PASS** (201 tests passing: 29 title tests, 31 artist tests, 36 album tests, 47 duration tests, 58 metadata tokenizer tests)
 - Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing)
 - Regression Unit/Slice Test Suite (`GlobalExceptionHandlerTest`, `SpotifyApiClientTest`, `SpotifyControllerTest`, `SpotifyPlaylistServiceTest`, `GoogleProviderAdapterTest`, etc.): **PASS**
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
@@ -134,8 +145,8 @@ Current Subphase: Phase 5A–5E COMPLETE (Phases 5F–5H Pending)
 - **Phase 2 (Auth & Identity)**: FROZEN
 - **Phase 3 (Spotify Integration)**: FROZEN
 - **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
-- **Phase 5 (Track Normalization Engine)**: Phase 5A–5E COMPLETE; Phase 5F–5H PENDING
+- **Phase 5 (Track Normalization Engine)**: Phase 5A–5F COMPLETE; Phase 5G–5H PENDING
 
 ## Next Recommended Work
-1. Phase 5F: `NormalizationOrchestrator` (composed normalization pipeline and metadata tokenization).
-2. Phase 5G: Variant-Token Detection & Classification.
+1. Phase 5G: `NormalizationOrchestrator` (composed normalization pipeline integrating `TitleNormalizer`, `ArtistNormalizer`, `AlbumNormalizer`, `DurationNormalizer`, and `MetadataTokenizer`).
+2. Phase 5H: Phase 5 Verification & Freeze.
