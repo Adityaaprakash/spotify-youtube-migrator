@@ -8,6 +8,8 @@ import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistVerification;
+import com.spotifyyoutube.migrator.migration.application.destination.model.PlaylistVerificationStatus;
 import com.spotifyyoutube.migrator.youtube.api.dto.AddVideoToPlaylistRequest;
 import com.spotifyyoutube.migrator.youtube.api.dto.CreateYouTubePlaylistRequest;
 import com.spotifyyoutube.migrator.youtube.api.dto.YouTubePlaylistItemResponse;
@@ -316,5 +318,78 @@ class YouTubeControllerTest {
                         .with(csrf()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void getPlaylist_shouldReturn200_whenFound() throws Exception {
+        UUID userId = UUID.randomUUID();
+        User mockUser = new User();
+        mockUser.setId(userId);
+        mockUser.setEmail("user@example.com");
+
+        when(userService.getUserByEmail("user@example.com")).thenReturn(mockUser);
+
+        YouTubePlaylistResponse response = new YouTubePlaylistResponse(
+                "PL123", "My Playlist", "Description", "private", "2026-10-10T00:00:00Z", "My Channel"
+        );
+        when(playlistService.getPlaylist(userId, "PL123")).thenReturn(response);
+
+        mockMvc.perform(get("/api/youtube/playlists/PL123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("PL123"))
+                .andExpect(jsonPath("$.title").value("My Playlist"))
+                .andExpect(jsonPath("$.privacyStatus").value("private"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void getPlaylist_shouldReturn404_whenNotFound() throws Exception {
+        UUID userId = UUID.randomUUID();
+        User mockUser = new User();
+        mockUser.setId(userId);
+        mockUser.setEmail("user@example.com");
+
+        when(userService.getUserByEmail("user@example.com")).thenReturn(mockUser);
+        when(playlistService.getPlaylist(userId, "PLnotfound"))
+                .thenThrow(new ResourceNotFoundException("YouTube playlist not found: PLnotfound"));
+
+        mockMvc.perform(get("/api/youtube/playlists/PLnotfound"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    void getPlaylist_shouldReturn403_whenUnauthenticated() throws Exception {
+        mockMvc.perform(get("/api/youtube/playlists/PL123"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void verifyPlaylist_shouldReturn200_whenValid() throws Exception {
+        UUID userId = UUID.randomUUID();
+        User mockUser = new User();
+        mockUser.setId(userId);
+        mockUser.setEmail("user@example.com");
+
+        when(userService.getUserByEmail("user@example.com")).thenReturn(mockUser);
+
+        DestinationPlaylistVerification verification = new DestinationPlaylistVerification(
+                "PL123", PlaylistVerificationStatus.ACCESSIBLE, "Playlist exists and is accessible.", null
+        );
+        when(playlistService.verifyPlaylist(userId, "PL123")).thenReturn(verification);
+
+        mockMvc.perform(get("/api/youtube/playlists/PL123/verify"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.playlistId").value("PL123"))
+                .andExpect(jsonPath("$.status").value("ACCESSIBLE"))
+                .andExpect(jsonPath("$.message").value("Playlist exists and is accessible."));
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturn403_whenUnauthenticated() throws Exception {
+        mockMvc.perform(get("/api/youtube/playlists/PL123/verify"))
+                .andExpect(status().isForbidden());
     }
 }

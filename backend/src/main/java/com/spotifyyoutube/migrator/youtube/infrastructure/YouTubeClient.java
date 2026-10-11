@@ -8,6 +8,7 @@ import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistIte
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistItemSnippetRequestDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistInsertRequestDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistListResponseDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeResourceIdDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeSearchListResponseDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto;
@@ -206,5 +207,44 @@ public class YouTubeClient {
                     throw new ExternalProviderException("Failed to add video to YouTube playlist", statusCode, retryAfter);
                 })
                 .body(YouTubePlaylistItemDto.class);
+    }
+
+    public YouTubePlaylistListResponseDto getPlaylist(String accessToken, String playlistId) {
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new IllegalArgumentException("Access token must not be blank");
+        }
+        if (playlistId == null || playlistId.isBlank()) {
+            throw new IllegalArgumentException("Playlist ID must not be blank");
+        }
+
+        return restClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/playlists")
+                        .queryParam("part", "snippet,status")
+                        .queryParam("id", playlistId.trim())
+                        .build())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .onStatus(status -> status.isError(), (req, res) -> {
+                    int statusCode = res.getStatusCode().value();
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+
+                    if (statusCode == 404) {
+                        throw new ResourceNotFoundException("YouTube playlist endpoint not found");
+                    }
+                    if (statusCode == 401) {
+                        throw new ExternalProviderException("YouTube API authentication failed: invalid or expired access token", 401);
+                    }
+                    if (statusCode == 403) {
+                        throw new ExternalProviderException("YouTube API request forbidden: insufficient permissions or quota exceeded", 403, retryAfter);
+                    }
+                    if (statusCode == 429) {
+                        throw new ExternalProviderException("YouTube API rate limit exceeded", 429, retryAfter);
+                    }
+                    if (statusCode == 400) {
+                        throw new ExternalProviderException("YouTube API request invalid", 400);
+                    }
+                    throw new ExternalProviderException("Failed to retrieve YouTube playlist", statusCode, retryAfter);
+                })
+                .body(YouTubePlaylistListResponseDto.class);
     }
 }

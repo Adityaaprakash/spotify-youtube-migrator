@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.youtube.api;
 
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistVerification;
 import com.spotifyyoutube.migrator.youtube.api.dto.AddVideoToPlaylistRequest;
 import com.spotifyyoutube.migrator.youtube.api.dto.CreateYouTubePlaylistRequest;
 import com.spotifyyoutube.migrator.youtube.api.dto.YouTubePlaylistItemResponse;
@@ -94,5 +95,33 @@ public class YouTubeController {
         User user = userService.getUserByEmail(principal.getName());
         YouTubePlaylistItemResponse response = playlistService.addVideoToPlaylist(user.getId(), playlistId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/playlists/{playlistId}")
+    public ResponseEntity<YouTubePlaylistResponse> getPlaylist(
+            Principal principal,
+            @PathVariable("playlistId") String playlistId) {
+
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        User user = userService.getUserByEmail(principal.getName());
+        YouTubePlaylistResponse response = playlistService.getPlaylist(user.getId(), playlistId);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/playlists/{playlistId}/verify")
+    public ResponseEntity<DestinationPlaylistVerification> verifyPlaylist(
+            Principal principal,
+            @PathVariable("playlistId") String playlistId) {
+
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        User user = userService.getUserByEmail(principal.getName());
+        DestinationPlaylistVerification response = playlistService.verifyPlaylist(user.getId(), playlistId);
+        return ResponseEntity.ok(response);
     }
 }

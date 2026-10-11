@@ -35,6 +35,8 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 4D**: [COMPLETE] YouTube Video Metadata Retrieval (`YouTubeClient.getVideoMetadata`, `YouTubeSearchService.getVideoDetails`, `/api/youtube/videos/{videoId}`).
 - **Phase 4E**: [COMPLETE] YouTube Playlist Creation (`YouTubeClient.createPlaylist`, `YouTubePlaylistService.createPlaylist`, `/api/youtube/playlists`).
 - **Phase 4F**: [COMPLETE] Adding Videos to Playlists (`YouTubeClient.addVideoToPlaylist`, `YouTubePlaylistService.addVideoToPlaylist`, `/api/youtube/playlists/{playlistId}/videos`).
+- **Phase 4G**: [COMPLETE] MusicDestination Abstraction & YouTube Adapter (`MusicDestination`, domain models, `YouTubeMusicDestinationAdapter`).
+- **Phase 4H**: [COMPLETE / FROZEN] Destination Verification, Verification Endpoints (`/api/youtube/playlists/{playlistId}`, `/api/youtube/playlists/{playlistId}/verify`), and Phase 4 Freeze.
 - Phase 5 — Track Normalization
 - Phase 6 — Candidate Discovery
 - Phase 7 — Matching Engine

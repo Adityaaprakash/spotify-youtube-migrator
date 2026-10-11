@@ -57,20 +57,23 @@ YouTube provider DTOs (`YouTubeSearchListResponseDto`, `YouTubeSearchResultDto`,
 Internal domain or application response layers must only consume application-owned contracts (`YouTubeVideoSearchResponse`, `YouTubeVideoSummaryResponse`).
 
 Mapping:
-YouTube Provider DTO (`YouTubeSearchListResponseDto`, `YouTubeVideoListResponseDto`, `YouTubePlaylistDto`, `YouTubePlaylistItemDto`)
+YouTube Provider DTO (`YouTubeSearchListResponseDto`, `YouTubeVideoListResponseDto`, `YouTubePlaylistDto`, `YouTubePlaylistListResponseDto`, `YouTubePlaylistItemDto`)
 → `YouTubeMapper`
 → Application Response DTO (`YouTubeVideoSearchResponse`, `YouTubeVideoDetailsResponse`, `YouTubePlaylistResponse`, `YouTubePlaylistItemResponse`)
+→ Migration Destination Domain Model (`DestinationPlaylist`, `DestinationTrackCandidate`, `DestinationSearchResult`, `DestinationTrackDetails`, `DestinationPlaylistItem`, `DestinationPlaylistVerification`) via `YouTubeMusicDestinationAdapter`
 
 Endpoints Used:
 - `GET /search`: Search for video candidates (`part=snippet`, `type=video`, `q`, `maxResults`, `key`, `pageToken`). Costs 100 quota units.
 - `GET /videos`: Retrieve detailed video metadata including ISO-8601 duration (`part=snippet,contentDetails`, `id`, `key`). Costs 1 quota unit.
 - `POST /playlists`: Create a new YouTube playlist (`part=snippet,status`, Bearer access token). Costs 50 quota units.
+- `GET /playlists`: Retrieve playlist metadata and verify accessibility (`part=snippet,status`, `id`, Bearer access token). Costs 1 quota unit.
 - `POST /playlistItems`: Add a video track to a YouTube playlist (`part=snippet`, Bearer access token, payload with playlistId, videoId, position). Costs 50 quota units.
 
 Quota Policy:
 - The YouTube Data API v3 allocates a default project quota of 10,000 units/day.
 - `search.list` costs **100 units** per call (1% of daily standard quota).
 - `videos.list` costs **1 unit** per call.
+- `playlists.list` (GET) costs **1 unit** per call.
 - `playlists.insert` costs **50 units** per call.
 - `playlistItems.insert` costs **50 units** per call.
 - Search queries must be validated strictly (non-blank, max 500 chars, maxResults bounded between 1 and 50) to prevent quota exhaustion.
@@ -78,7 +81,7 @@ Quota Policy:
 
 Authentication & Credential Policy:
 - Read-only video discovery (`/search`) and metadata (`/videos`) use the project API key (`YOUTUBE_API_KEY`).
-- User playlist management operations (`POST /playlists`, `POST /playlistItems`) leverage the Phase 2 Google OAuth tokens (`GoogleProviderAdapter`, `OAuthTokenLifecycleService`).
+- User playlist management operations (`POST /playlists`, `GET /playlists`, `POST /playlistItems`) leverage the Phase 2 Google OAuth tokens (`GoogleProviderAdapter`, `OAuthTokenLifecycleService`).
 - API keys and OAuth tokens are never returned to the frontend or logged.
 
 Error Mappings:
@@ -96,5 +99,4 @@ YouTube Music Limitations:
 
 ## Provider Abstraction
 
-Migration engine must depend on internal abstractions,
-not Spotify/YouTube implementations.
+Migration engine depends strictly on internal abstractions (`MusicDestination`, `DestinationPlaylist`, etc.) in `migration.application.destination`, not directly on Spotify or YouTube implementations. `YouTubeMusicDestinationAdapter` bridges the YouTube subsystem to this provider-neutral contract.

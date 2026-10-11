@@ -2,10 +2,13 @@ package com.spotifyyoutube.migrator.youtube.application;
 
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
+import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.application.OAuthTokenLifecycleService;
 import com.spotifyyoutube.migrator.identity.domain.ConnectionStatus;
 import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistVerification;
+import com.spotifyyoutube.migrator.migration.application.destination.model.PlaylistVerificationStatus;
 import com.spotifyyoutube.migrator.youtube.api.dto.AddVideoToPlaylistRequest;
 import com.spotifyyoutube.migrator.youtube.api.dto.CreateYouTubePlaylistRequest;
 import com.spotifyyoutube.migrator.youtube.api.dto.YouTubePlaylistItemResponse;
@@ -16,13 +19,18 @@ import com.spotifyyoutube.migrator.youtube.infrastructure.YouTubeClient;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistInsertRequestDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistItemDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistListResponseDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistSnippetDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistStatusDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -313,5 +321,185 @@ class YouTubePlaylistServiceTest {
                     ExternalProviderException ex = (ExternalProviderException) e;
                     assertThat(ex.getProviderStatusCode()).isEqualTo(404);
                 });
+    }
+
+    @Test
+    void getPlaylist_shouldCallClientAndReturnMappedResponse_whenValid() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-google-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+
+        YouTubePlaylistDto mockItem = new YouTubePlaylistDto("youtube#playlist", "etag", "PLtarget", null, null);
+        YouTubePlaylistListResponseDto mockResponse = new YouTubePlaylistListResponseDto(
+                "youtube#playlistListResponse", "etag", List.of(mockItem), null
+        );
+        YouTubePlaylistResponse expectedResponse = new YouTubePlaylistResponse(
+                "PLtarget", "My Playlist", "Description", "private", "2026-10-10T00:00:00Z", "My Channel"
+        );
+
+        when(youTubeClient.getPlaylist("valid-google-token", "PLtarget")).thenReturn(mockResponse);
+        when(youTubeMapper.toPlaylistResponse(mockItem)).thenReturn(expectedResponse);
+
+        YouTubePlaylistResponse result = playlistService.getPlaylist(testUserId, "PLtarget");
+
+        assertThat(result).isNotNull();
+        assertThat(result.id()).isEqualTo("PLtarget");
+        assertThat(result.title()).isEqualTo("My Playlist");
+        verify(youTubeClient).getPlaylist("valid-google-token", "PLtarget");
+    }
+
+    @Test
+    void getPlaylist_shouldThrowResourceNotFound_whenItemsAreEmpty() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-google-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+
+        YouTubePlaylistListResponseDto emptyResponse = new YouTubePlaylistListResponseDto(
+                "youtube#playlistListResponse", "etag", List.of(), null
+        );
+        when(youTubeClient.getPlaylist("valid-google-token", "PLtarget")).thenReturn(emptyResponse);
+
+        assertThatThrownBy(() -> playlistService.getPlaylist(testUserId, "PLtarget"))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("YouTube playlist not found");
+    }
+
+    @Test
+    void getPlaylist_shouldThrowIllegalArgumentException_whenParamsInvalid() {
+        assertThatThrownBy(() -> playlistService.getPlaylist(null, "PLtarget"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("User ID must not be null");
+
+        assertThatThrownBy(() -> playlistService.getPlaylist(testUserId, "   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Playlist ID must not be blank");
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnAccessible_whenPlaylistFound() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-google-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+
+        YouTubePlaylistSnippetDto snippet = new YouTubePlaylistSnippetDto(
+                "Verified Playlist", "Desc", "2026-10-10T00:00:00Z", null, "Channel", null
+        );
+        YouTubePlaylistStatusDto status = new YouTubePlaylistStatusDto("public");
+        YouTubePlaylistDto item = new YouTubePlaylistDto("youtube#playlist", "etag", "PLtarget", snippet, status);
+        YouTubePlaylistListResponseDto responseDto = new YouTubePlaylistListResponseDto(
+                "youtube#playlistListResponse", "etag", List.of(item), null
+        );
+
+        when(youTubeClient.getPlaylist("valid-google-token", "PLtarget")).thenReturn(responseDto);
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.ACCESSIBLE);
+        assertThat(result.playlistId()).isEqualTo("PLtarget");
+        assertThat(result.playlist()).isNotNull();
+        assertThat(result.playlist().title()).isEqualTo("Verified Playlist");
+        assertThat(result.playlist().privacyStatus()).isEqualTo("public");
+        assertThat(result.playlist().url()).isEqualTo("https://www.youtube.com/playlist?list=PLtarget");
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnNotFound_whenItemsAreEmpty() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-google-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+
+        YouTubePlaylistListResponseDto emptyResponse = new YouTubePlaylistListResponseDto(
+                "youtube#playlistListResponse", "etag", List.of(), null
+        );
+        when(youTubeClient.getPlaylist("valid-google-token", "PLtarget")).thenReturn(emptyResponse);
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.NOT_FOUND);
+        assertThat(result.playlist()).isNull();
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnNotFound_whenResourceNotFoundExceptionThrown() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-google-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+        when(youTubeClient.getPlaylist("valid-google-token", "PLtarget"))
+                .thenThrow(new ResourceNotFoundException("YouTube playlist endpoint not found"));
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.NOT_FOUND);
+        assertThat(result.playlist()).isNull();
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnInaccessible_whenGoogleAccountNotConnected() {
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(null);
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.INACCESSIBLE);
+        assertThat(result.message()).contains("Google account is not connected");
+        assertThat(result.playlist()).isNull();
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnInaccessible_whenAccessTokenIsBlank() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.INACCESSIBLE);
+        assertThat(result.message()).contains("Google access token is not available");
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnInaccessible_on401Or403() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+        when(youTubeClient.getPlaylist("valid-token", "PLtarget"))
+                .thenThrow(new ExternalProviderException("Unauthorized", 401));
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.INACCESSIBLE);
+        assertThat(result.playlist()).isNull();
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnUncertain_on5xxOr429() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+        when(youTubeClient.getPlaylist("valid-token", "PLtarget"))
+                .thenThrow(new ExternalProviderException("YouTube 503 Service Unavailable", 503));
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.UNCERTAIN);
+        assertThat(result.playlist()).isNull();
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnUncertain_onResourceAccessException() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+        when(youTubeClient.getPlaylist("valid-token", "PLtarget"))
+                .thenThrow(new ResourceAccessException("Connection timed out"));
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.UNCERTAIN);
+        assertThat(result.message()).contains("Upstream connection failure");
+        assertThat(result.playlist()).isNull();
+    }
+
+    @Test
+    void verifyPlaylist_shouldReturnFailed_on400BadRequest() {
+        OAuthConnection connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-token");
+        when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+        when(youTubeClient.getPlaylist("valid-token", "PLtarget"))
+                .thenThrow(new ExternalProviderException("Bad Request", 400));
+
+        DestinationPlaylistVerification result = playlistService.verifyPlaylist(testUserId, "PLtarget");
+
+        assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.FAILED);
+        assertThat(result.playlist()).isNull();
     }
 }
