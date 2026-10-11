@@ -12,7 +12,7 @@ To enable deterministic and reliable candidate discovery and similarity scoring 
    Place normalization components in `com.spotifyyoutube.migrator.matching.normalization` under the `matching` module.
 
 2. **Component Lifecycle & State**:
-   Normalizers (`TitleNormalizer`, `ArtistNormalizer`) are implemented as stateless Spring `@Component`s. They contain pure, deterministic functions, requiring no external dependencies, no database, no network calls, and no Spring context for unit testing.
+   Normalizers (`TitleNormalizer`, `ArtistNormalizer`, `AlbumNormalizer`) are implemented as stateless Spring `@Component`s. They contain pure, deterministic functions, requiring no external dependencies, no database, no network calls, and no Spring context for unit testing.
 
 3. **Provider Isolation**:
    Normalizers accept standard Java types (`String`, `List<String>`) rather than provider-specific DTOs (`SpotifyTrackDto`, `YouTubeVideoSummaryResponse`). They contain zero imports from `com.spotifyyoutube.migrator.spotify.*` or `com.spotifyyoutube.migrator.youtube.*`.
@@ -32,6 +32,10 @@ To enable deterministic and reliable candidate discovery and similarity scoring 
 7. **Artist Normalization & Collaboration Boundaries**:
    - `ArtistNormalizer` identifies token-bounded featured artist markers (`feat.`, `feat`, `ft.`, `ft`, `featuring`) into `NormalizedArtistCredit(primaryArtist, featuredArtists)`.
    - It avoids naive splitting on commas, ampersands, or plus signs, thus preserving intact multi-name bands (e.g. `Simon & Garfunkel`, `Earth, Wind & Fire`, `AC/DC`, `Florence + the Machine`).
+
+8. **Album Normalization & Edition Preservation**:
+   - `AlbumNormalizer` performs basic normalization (Unicode NFC, `Locale.ROOT` lowercasing, whitespace collapsing, and quote/dash standardization).
+   - Unlike `TitleNormalizer`, `AlbumNormalizer` intentionally preserves album edition descriptors (e.g. `Deluxe Edition`, `Expanded Edition`, `Anniversary Edition`, `Remastered`, `Live`, `Live at Wembley`, `Soundtrack`, `Special Edition`, `[Explicit]`, `[Clean]`). These qualifiers represent substantive release distinctions rather than promotional noise, allowing downstream match evaluation to reward exact album edition matches.
 
 ## Consequences
 - **Positive**: Clean, deterministic, fast comparison foundation with 100% test coverage and zero external dependencies.

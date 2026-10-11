@@ -15,9 +15,9 @@ Implemented and verified:
 - `YouTubeSearchServiceTest`: Service layer unit tests with mocked client/mapper testing query validation (non-blank, max length 500), pagination bounding (1-50 limit), whitespace trimming, and exception propagation.
 - `YouTubeControllerTest`: WebMvcTest validating authenticated search endpoint access, unauthenticated rejection (403/401), missing parameter handling (400), and exception mapping via GlobalExceptionHandler.
 
-## Track Normalization Testing Scope (Phase 5A-5C)
-Implemented and verified:
-- `TitleNormalizerTest`: 21 tests across 7 nested categories:
+## Track Normalization Testing Scope (Phase 5A-5D)
+Implemented and verified (93 total normalization tests):
+- `TitleNormalizerTest`: 28 tests across 7 nested categories:
   - Basic casing & whitespace: lowercase normalization (`Locale.ROOT`), trimming, collapsing multi-space/tabs/newlines.
   - Null & blank handling: returns empty string for `null`, `""`, and whitespace-only strings.
   - Punctuation & separators: smart/curly apostrophe normalization (`’`, `‘` -> `'`), double quote normalization (`“`, `”`, `„` -> `"`), dash variants (en-dash, em-dash, minus -> `-`).
@@ -25,7 +25,7 @@ Implemented and verified:
   - Promotional annotations: conservative removal of `(Official Audio)`, `[Official Video]`, `(Official Music Video)`, `(Official Lyric Video)`, `(Official Visualizer)`, `- Official Video`, and `| Official Audio` without corrupting legitimate titles (`Official Secrets`, `The Official Song`) or blanking titles composed only of promotional words without brackets.
   - Meaningful versions: strictly preserves `(Live)`, `(Acoustic)`, `(Remix)`, `(Karaoke Version)`, `(Nightcore)`, `(Sped Up)`, and `(Slowed)`.
   - Determinism & immutability: idempotent (`normalize(normalize(x)) == normalize(x)`) and non-mutating.
-- `ArtistNormalizerTest`: 22 tests across 6 nested categories:
+- `ArtistNormalizerTest`: 33 tests across 6 nested categories:
   - Basic casing, whitespace, and tabs/newlines.
   - Null, blank, and empty collection handling.
   - Unicode NFC canonical composition and preservation of non-Latin alphabets and Latin diacritics (`Beyoncé`, `Björk`, `Sigur Rós`).
@@ -34,10 +34,16 @@ Implemented and verified:
   - Identity preservation: preserves multi-name bands with ampersands, commas, and plus signs (`Simon & Garfunkel`, `Earth, Wind & Fire`, `AC/DC`, `Florence + the Machine`, `Crosby, Stills, Nash & Young`).
   - Discrete list normalization: `normalizeArtistList` preserves original list ordering and purges blanks.
   - Determinism & immutability: idempotent and non-mutating.
+- `AlbumNormalizerTest`: 32 tests across 6 nested categories:
+  - Null & blank handling: returns empty string for `null`, `""`, and whitespace-only strings without placeholders.
+  - Basic casing & whitespace: lowercase normalization (`Locale.ROOT`), trimming, collapsing consecutive whitespace, tabs, and newlines.
+  - Unicode & non-Latin scripts: NFC canonical composition (combining characters vs precomposed accented characters equivalence) and preservation of Japanese, Cyrillic, Greek, Korean scripts.
+  - Punctuation & typography: standardization of smart/curly apostrophes, double quotes, and dash variants to ASCII while preserving internal punctuation, colons, ampersands, plus signs, brackets, currency symbols, and backslashes.
+  - Meaningful album edition preservation: verifies that `Deluxe Edition`, `Remastered`, `Expanded Edition`, `Anniversary Edition`, `Live at Wembley`, `Soundtrack`, `Special Edition`, `[Explicit]`, etc., are strictly retained and never stripped.
+  - Determinism & immutability: idempotent and pure function execution.
 
-## Future Testing Scope (Phases 5D+)
+## Future Testing Scope (Phases 5E+)
 As the migrator logic scales, testing will expand to:
-- `AlbumNormalizerTest` (Phase 5D)
 - `DurationNormalizerTest` (Phase 5E)
 - `MatchScorerTest` (Phase 7)
 - `MigrationStateMachineTest` (Phase 9)
