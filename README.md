@@ -3,8 +3,8 @@
 ## Purpose
 A backend and frontend architecture establishing the platform for migrating Spotify playlists to YouTube Music.
 
-## Current Phase: PHASE 3 — SPOTIFY INTEGRATION
-This project is currently on Phase 3: the domain foundation, identity management, OAuth flows, and Spotify API integration (playlists, tracks, metadata) have been implemented. YouTube integration and migration logic are pending.
+## Current Phase: PHASE 4 — YOUTUBE INTEGRATION (PHASES 4A-4C COMPLETE)
+This project is currently on Phase 4: the domain foundation, identity management, OAuth flows, Spotify API integration (playlists, tracks, metadata), and YouTube Video Search integration (API client, DTO mapping, search service, controller) have been implemented. YouTube playlist management/writing and migration matching logic are next.
 
 ## Architecture
 - **Language Stack**: Java 22 / TypeScript
@@ -16,12 +16,13 @@ This project is currently on Phase 3: the domain foundation, identity management
 ## Local Setup
 
 ### 1. Configuration
-Create a `.env` file in the root based on `.env.example`. You will need to provide legitimate OAuth credentials for the external providers:
+Create a `.env` file in the root based on `.env.example`. You will need to provide legitimate OAuth credentials and API keys for the external providers:
 ```ini
 SPOTIFY_CLIENT_ID=your_spotify_client_id
 SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
+YOUTUBE_API_KEY=your_youtube_api_key
 ```
 
 ### 2. Database

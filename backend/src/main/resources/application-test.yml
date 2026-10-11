@@ -24,3 +24,12 @@ oauth:
       client-secret: "test-google-secret"
       redirect-uri: "http://localhost/api/oauth/google/callback"
       scopes: "openid email profile"
+
+youtube:
+  api-key: "test-youtube-api-key"
+  base-url: "https://www.googleapis.com/youtube/v3"
+  connect-timeout-ms: 5000
+  read-timeout-ms: 10000
+  max-results-limit: 50
+  default-max-results: 25
+

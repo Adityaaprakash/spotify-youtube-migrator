@@ -1,0 +1,616 @@
+﻿[INFO] Scanning for projects...
+[INFO] 
+[INFO] --------------------< com.spotifyyoutube:migrator >---------------------
+[INFO] Building migrator 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- checkstyle:3.5.0:check (validate) @ migrator ---
+[INFO] Starting audit...
+[WARN] C:\Projects\spotify-youtube-migrator\backend\src\main\java\com\spotifyyoutube\migrator\spotify\application\mapper\SpotifyMapper.java:6:8: Unused import - com.spotifyyoutube.migrator.spotify.infrastructure.dto.SpotifyImageDto. [UnusedImports]
+[WARN] C:\Projects\spotify-youtube-migrator\backend\src\main\java\com\spotifyyoutube\migrator\spotify\application\SpotifyPlaylistService.java:18:8: Unused import - java.util.Objects. [UnusedImports]
+Audit done.
+[INFO] You have 0 Checkstyle violations.
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ migrator ---
+[INFO] Copying 5 resources from src\main\resources to target\classes
+[INFO] Copying 4 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.13.0:compile (default-compile) @ migrator ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ migrator ---
+[INFO] Copying 0 resource from src\test\resources to target\test-classes
+[INFO] 
+[INFO] --- compiler:3.13.0:testCompile (default-testCompile) @ migrator ---
+[INFO] Recompiling the module because of added or removed source files.
+[INFO] Compiling 20 source files with javac [debug parameters release 22] to target\test-classes
+[INFO] 
+[INFO] --- surefire:3.2.5:test (default-test) @ migrator ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest
+17:57:49.496 [main] INFO org.springframework.test.context.support.AnnotationConfigContextLoaderUtils -- Could not detect default configuration classes for test class [com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest]: GlobalExceptionHandlerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+17:57:49.986 [main] INFO org.springframework.boot.test.context.SpringBootTestContextBootstrapper -- Found @SpringBootConfiguration com.spotifyyoutube.migrator.MigratorApplication for test class com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.3.4)
+
+2026-10-10T17:57:51.334Z  INFO 6000 --- [migrator] [           main] c.s.m.c.e.GlobalExceptionHandlerTest     : Starting GlobalExceptionHandlerTest using Java 22.0.2 with PID 6000 (started by DELL in C:\Projects\spotify-youtube-migrator\backend)
+2026-10-10T17:57:51.335Z DEBUG 6000 --- [migrator] [           main] c.s.m.c.e.GlobalExceptionHandlerTest     : Running with Spring Boot v3.3.4, Spring v6.1.13
+2026-10-10T17:57:51.337Z  INFO 6000 --- [migrator] [           main] c.s.m.c.e.GlobalExceptionHandlerTest     : The following 1 profile is active: "local"
+2026-10-10T17:57:53.474Z  WARN 6000 --- [migrator] [           main] .s.s.UserDetailsServiceAutoConfiguration : 
+
+Using generated security password: 3ef0c459-80f1-4aad-9edd-ec5e1e7e02ae
+
+This generated password is for development use only. Your security configuration must be updated before running your application in production.
+
+2026-10-10T17:57:53.492Z  INFO 6000 --- [migrator] [           main] r$InitializeUserDetailsManagerConfigurer : Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager
+2026-10-10T17:57:54.889Z  INFO 6000 --- [migrator] [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-10-10T17:57:54.890Z  INFO 6000 --- [migrator] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-10-10T17:57:54.894Z  INFO 6000 --- [migrator] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 4 ms
+2026-10-10T17:57:55.158Z  INFO 6000 --- [migrator] [           main] c.s.m.c.e.GlobalExceptionHandlerTest     : Started GlobalExceptionHandlerTest in 4.942 seconds (process running for 7.667)
+.\mvnw.cmd : WARNING: A Java agent 
+has been loaded dynamically (C:\Users
+\DELL\.m2\repository\net\bytebuddy\by
+te-buddy-agent\1.14.19\byte-buddy-age
+nt-1.14.19.jar)
+At line:1 char:1
++ .\mvnw.cmd test -pl . 
+"--no-transfer-progress" 
+-Dtest="SpotifyMapperT ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpe 
+   cified: (WARNING: A Java...nt-1.  
+  14.19.jar):String) [], RemoteExc   
+ eption
+    + FullyQualifiedErrorId : Native 
+   CommandError
+ 
+WARNING: If a serviceability tool is 
+in use, please run with 
+-XX:+EnableDynamicAgentLoading to 
+hide this warning
+WARNING: If a serviceability tool is 
+not in use, please run with 
+-Djdk.instrument.traceUsage for more 
+information
+WARNING: Dynamic loading of agents 
+will be disallowed by default in a 
+future release
+Java HotSpot(TM) 64-Bit Server VM 
+warning: Sharing is only supported 
+for boot loader classes because 
+bootstrap classpath has been appended
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/external-unauthorized
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:56.882073700Z","path":"/test-exceptions/external-unauthorized"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/conflict
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.046550300Z","path":"/test-exceptions/conflict"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/external-rate-limit
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.169439300Z","path":"/test-exceptions/external-rate-limit"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/not-found
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.187761400Z","path":"/test-exceptions/not-found"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/timeout
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.203942300Z","path":"/test-exceptions/timeout"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/malformed-response
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.224464700Z","path":"/test-exceptions/malformed-response"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/invalid-state
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.241806600Z","path":"/test-exceptions/invalid-state"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/external-no-code
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.258402900Z","path":"/test-exceptions/external-no-code"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+
+MockHttpServletRequest:
+      HTTP Method = GET
+      Request URI = /test-exceptions/external-server-error
+       Parameters = {}
+          Headers = [Accept:"application/json"]
+             Body = null
+    Session Attrs = {SPRING_SECURITY_CONTEXT=SecurityContextImpl [Authentication=UsernamePasswordAuthenticationToken [Principal=org.springframework.security.core.userdetails.User [Username=user, Password=[PROTECTED], Enabled=true, AccountNonExpired=true, CredentialsNonExpired=true, AccountNonLocked=true, Granted Authorities=[ROLE_USER]], Credentials=[PROTECTED], Authenticated=true, Details=null, Granted Authorities=[ROLE_USER]]]}
+
+Handler:
+             Type = org.springframework.web.servlet.resource.ResourceHttpRequestHandler
+
+Async:
+    Async started = false
+     Async result = null
+
+Resolved Exception:
+             Type = org.springframework.web.servlet.resource.NoResourceFoundException
+
+ModelAndView:
+        View name = null
+             View = null
+            Model = null
+
+FlashMap:
+       Attributes = null
+
+MockHttpServletResponse:
+           Status = 500
+    Error message = null
+          Headers = [Vary:"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers", Content-Type:"application/json", X-Content-Type-Options:"nosniff", X-XSS-Protection:"0", Cache-Control:"no-cache, no-store, max-age=0, must-revalidate", Pragma:"no-cache", Expires:"0", X-Frame-Options:"DENY"]
+     Content type = application/json
+             Body = {"code":"INTERNAL_SERVER_ERROR","message":"An unexpected error occurred","timestamp":"2026-10-10T17:57:57.277071500Z","path":"/test-exceptions/external-server-error"}
+    Forwarded URL = null
+   Redirected URL = null
+          Cookies = []
+[ERROR] Tests run: 10, Failures: 9, Errors: 0, Skipped: 0, Time elapsed: 8.307 s <<< FAILURE! -- in com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_401_shouldReturn401Unauthorized -- Time elapsed: 1.855 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<401> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_401_shouldReturn401Unauthorized(GlobalExceptionHandlerTest.java:140)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.conflictException_shouldReturn409WithConflictCode -- Time elapsed: 0.019 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<409> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.conflictException_shouldReturn409WithConflictCode(GlobalExceptionHandlerTest.java:105)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_rateLimited_shouldReturn429WithRetryAfterHeader -- Time elapsed: 0.016 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<429> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_rateLimited_shouldReturn429WithRetryAfterHeader(GlobalExceptionHandlerTest.java:123)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.resourceNotFoundException_shouldReturn404WithNotFoundCode -- Time elapsed: 0.015 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<404> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.resourceNotFoundException_shouldReturn404WithNotFoundCode(GlobalExceptionHandlerTest.java:94)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.resourceAccessException_timeout_shouldReturn504GatewayTimeout -- Time elapsed: 0.016 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<504> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.resourceAccessException_timeout_shouldReturn504GatewayTimeout(GlobalExceptionHandlerTest.java:156)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.restClientException_malformedResponse_shouldReturn502AndNotLeakDetails -- Time elapsed: 0.017 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<502> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.restClientException_malformedResponse_shouldReturn502AndNotLeakDetails(GlobalExceptionHandlerTest.java:165)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.invalidStateException_shouldReturn409WithInvalidStateCode -- Time elapsed: 0.014 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<409> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.invalidStateException_shouldReturn409WithInvalidStateCode(GlobalExceptionHandlerTest.java:114)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_noCode_shouldReturn502BadGateway -- Time elapsed: 0.014 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<502> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_noCode_shouldReturn502BadGateway(GlobalExceptionHandlerTest.java:148)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[ERROR] com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_5xx_shouldReturn502BadGateway -- Time elapsed: 0.016 s <<< FAILURE!
+java.lang.AssertionError: Status expected:<502> but was:<500>
+	at org.springframework.test.util.AssertionErrors.fail(AssertionErrors.java:59)
+	at org.springframework.test.util.AssertionErrors.assertEquals(AssertionErrors.java:122)
+	at org.springframework.test.web.servlet.result.StatusResultMatchers.lambda$matcher$9(StatusResultMatchers.java:637)
+	at org.springframework.test.web.servlet.MockMvc$1.andExpect(MockMvc.java:214)
+	at com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandlerTest.externalProviderException_5xx_shouldReturn502BadGateway(GlobalExceptionHandlerTest.java:132)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[INFO] Running com.spotifyyoutube.migrator.spotify.api.SpotifyControllerTest
+2026-10-10T17:57:57.307Z  INFO 6000 --- [migrator] [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.spotifyyoutube.migrator.spotify.api.SpotifyControllerTest]: SpotifyControllerTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-10-10T17:57:57.385Z  INFO 6000 --- [migrator] [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.spotifyyoutube.migrator.MigratorApplication for test class com.spotifyyoutube.migrator.spotify.api.SpotifyControllerTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.3.4)
+
+2026-10-10T17:57:57.452Z  INFO 6000 --- [migrator] [           main] c.s.m.spotify.api.SpotifyControllerTest  : Starting SpotifyControllerTest using Java 22.0.2 with PID 6000 (started by DELL in C:\Projects\spotify-youtube-migrator\backend)
+2026-10-10T17:57:57.453Z DEBUG 6000 --- [migrator] [           main] c.s.m.spotify.api.SpotifyControllerTest  : Running with Spring Boot v3.3.4, Spring v6.1.13
+2026-10-10T17:57:57.453Z  INFO 6000 --- [migrator] [           main] c.s.m.spotify.api.SpotifyControllerTest  : The following 1 profile is active: "local"
+2026-10-10T17:57:58.581Z  WARN 6000 --- [migrator] [           main] .s.s.UserDetailsServiceAutoConfiguration : 
+
+Using generated security password: 71a2c637-150e-42c5-93c8-cf85ae075bd8
+
+This generated password is for development use only. Your security configuration must be updated before running your application in production.
+
+2026-10-10T17:57:58.584Z  INFO 6000 --- [migrator] [           main] r$InitializeUserDetailsManagerConfigurer : Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager
+2026-10-10T17:57:59.024Z  INFO 6000 --- [migrator] [           main] o.s.b.t.m.w.SpringBootMockServletContext : Initializing Spring TestDispatcherServlet ''
+2026-10-10T17:57:59.024Z  INFO 6000 --- [migrator] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Initializing Servlet ''
+2026-10-10T17:57:59.025Z  INFO 6000 --- [migrator] [           main] o.s.t.web.servlet.TestDispatcherServlet  : Completed initialization in 1 ms
+2026-10-10T17:57:59.048Z  INFO 6000 --- [migrator] [           main] c.s.m.spotify.api.SpotifyControllerTest  : Started SpotifyControllerTest in 1.655 seconds (process running for 11.557)
+[INFO] Tests run: 5, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.067 s -- in com.spotifyyoutube.migrator.spotify.api.SpotifyControllerTest
+[INFO] Running com.spotifyyoutube.migrator.spotify.application.mapper.SpotifyMapperTest
+[ERROR] Tests run: 14, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.280 s <<< FAILURE! -- in com.spotifyyoutube.migrator.spotify.application.mapper.SpotifyMapperTest
+[ERROR] com.spotifyyoutube.migrator.spotify.application.mapper.SpotifyMapperTest.toTrackDomain_allArtistNamesBlank_shouldDefaultToUnknownArtist -- Time elapsed: 0.021 s <<< FAILURE!
+org.opentest4j.AssertionFailedError: 
+
+expected: "Unknown Artist"
+ but was: ""
+	at java.base/jdk.internal.reflect.DirectConstructorHandleAccessor.newInstance(DirectConstructorHandleAccessor.java:62)
+	at java.base/java.lang.reflect.Constructor.newInstanceWithCaller(Constructor.java:502)
+	at com.spotifyyoutube.migrator.spotify.application.mapper.SpotifyMapperTest.toTrackDomain_allArtistNamesBlank_shouldDefaultToUnknownArtist(SpotifyMapperTest.java:216)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:580)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+	at java.base/java.util.ArrayList.forEach(ArrayList.java:1597)
+
+[INFO] Running com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistServiceTest
+[INFO] Tests run: 8, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.457 s -- in com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistServiceTest
+[INFO] Running com.spotifyyoutube.migrator.spotify.infrastructure.SpotifyApiClientTest
+2026-10-10T17:58:00.154Z  INFO 6000 --- [migrator] [           main] t.c.s.AnnotationConfigContextLoaderUtils : Could not detect default configuration classes for test class [com.spotifyyoutube.migrator.spotify.infrastructure.SpotifyApiClientTest]: SpotifyApiClientTest does not declare any static, non-private, non-final, nested classes annotated with @Configuration.
+2026-10-10T17:58:00.252Z  INFO 6000 --- [migrator] [           main] .b.t.c.SpringBootTestContextBootstrapper : Found @SpringBootConfiguration com.spotifyyoutube.migrator.MigratorApplication for test class com.spotifyyoutube.migrator.spotify.infrastructure.SpotifyApiClientTest
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.3.4)
+
+2026-10-10T17:58:00.337Z  INFO 6000 --- [migrator] [           main] c.s.m.s.i.SpotifyApiClientTest           : Starting SpotifyApiClientTest using Java 22.0.2 with PID 6000 (started by DELL in C:\Projects\spotify-youtube-migrator\backend)
+2026-10-10T17:58:00.337Z DEBUG 6000 --- [migrator] [           main] c.s.m.s.i.SpotifyApiClientTest           : Running with Spring Boot v3.3.4, Spring v6.1.13
+2026-10-10T17:58:00.338Z  INFO 6000 --- [migrator] [           main] c.s.m.s.i.SpotifyApiClientTest           : The following 1 profile is active: "local"
+2026-10-10T17:58:00.875Z  INFO 6000 --- [migrator] [           main] c.s.m.s.i.SpotifyApiClientTest           : Started SpotifyApiClientTest in 0.617 seconds (process running for 13.385)
+[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.944 s -- in com.spotifyyoutube.migrator.spotify.infrastructure.SpotifyApiClientTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[ERROR] Failures: 
+[ERROR]   GlobalExceptionHandlerTest.conflictException_shouldReturn409WithConflictCode:105 Status expected:<409> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.externalProviderException_401_shouldReturn401Unauthorized:140 Status expected:<401> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.externalProviderException_5xx_shouldReturn502BadGateway:132 Status expected:<502> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.externalProviderException_noCode_shouldReturn502BadGateway:148 Status expected:<502> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.externalProviderException_rateLimited_shouldReturn429WithRetryAfterHeader:123 Status expected:<429> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.invalidStateException_shouldReturn409WithInvalidStateCode:114 Status expected:<409> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.resourceAccessException_timeout_shouldReturn504GatewayTimeout:156 Status expected:<504> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.resourceNotFoundException_shouldReturn404WithNotFoundCode:94 Status expected:<404> but was:<500>
+[ERROR]   GlobalExceptionHandlerTest.restClientException_malformedResponse_shouldReturn502AndNotLeakDetails:165 Status expected:<502> but was:<500>
+[ERROR]   SpotifyMapperTest.toTrackDomain_allArtistNamesBlank_shouldDefaultToUnknownArtist:216 
+expected: "Unknown Artist"
+ but was: ""
+[INFO] 
+[ERROR] Tests run: 43, Failures: 10, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD FAILURE
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  29.564 s
+[INFO] Finished at: 2026-10-10T23:28:01+05:30
+[INFO] ------------------------------------------------------------------------
+[ERROR] Failed to execute goal org.apache.maven.plugins:maven-surefire-plugin:3.2.5:test (default-test) on project migrator: There are test failures.
+[ERROR] 
+[ERROR] Please refer to C:\Projects\spotify-youtube-migrator\backend\target\surefire-reports for the individual test results.
+[ERROR] Please refer to dump files (if any exist) [date].dump, [date]-jvmRun[N].dump and [date].dumpstream.
+[ERROR] -> [Help 1]
+[ERROR] 
+[ERROR] To see the full stack trace of the errors, re-run Maven with the -e switch.
+[ERROR] Re-run Maven using the -X switch to enable full debug logging.
+[ERROR] 
+[ERROR] For more information about the errors and possible solutions, please read the following articles:
+[ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoFailureException

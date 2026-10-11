@@ -1,18 +1,32 @@
 # Current State
 
-Last Updated: 2026-10-07
+Last Updated: 2026-10-11
 
-Current Phase: Phase 3 — Spotify Integration
-Current Subphase: PHASE 3G-3H COMPLETE (Spotify API error/rate-limit handling expansion and full phase QA audit)
+Current Phase: Phase 4 — YouTube Integration
+Current Subphase: Phase 4A + 4B + 4C COMPLETE (YouTube Feasibility/Configuration, Client Foundation & Video Search)
 
 ## Completed
-### Phase 3A-3F
+### Phase 4A–4C
+- **Phase 4A**: YouTube API Feasibility & Configuration:
+  - Confirmed YouTube Data API v3 (`search.list`) capabilities, quota limits (100 units/call against 10,000 default units/day), and YouTube Music non-public API boundaries.
+  - Reused Phase 2 Google OAuth infrastructure for user identity; added YouTube configuration properties (`apiKey`, `baseUrl`, `connectTimeoutMs`, `readTimeoutMs`, `maxResultsLimit`, `defaultMaxResults`) in `application.yml` and `application-test.yml`.
+  - Added environment variable placeholders in `.env.example`.
+- **Phase 4B**: YouTube Client Foundation:
+  - Implemented `YouTubeClient` using Spring `RestClient`, strict provider DTO isolation (`YouTubeSearchListResponseDto`, `YouTubeSearchResultDto`, `YouTubeResourceIdDto`, `YouTubeSearchSnippetDto`, `YouTubeThumbnailDto`, `YouTubePageInfoDto`).
+  - Implemented comprehensive error mapping: 400 Bad Request, 401 Unauthorized (invalid key), 403 Forbidden (quota exceeded), 404 Not Found, 429 Rate Limit (with `Retry-After`), and 5xx errors mapped cleanly to `ExternalProviderException` without leaking sensitive upstream details.
+- **Phase 4C**: YouTube Video Search:
+  - Implemented `YouTubeSearchService` with query validation (non-null, trimmed, max 500 characters) and pagination constraints (`maxResults` 1-50).
+  - Implemented `YouTubeMapper` transforming provider DTOs into clean application-owned responses (`YouTubeVideoSearchResponse`, `YouTubeVideoSummaryResponse`) with high/medium/default thumbnail fallbacks and filtering of non-video entities.
+  - Implemented `YouTubeController` exposing authenticated `GET /api/youtube/videos/search` endpoint.
+  - Registered `IllegalArgumentException` in `GlobalExceptionHandler` mapping to standard `400 BAD_REQUEST` (`INVALID_REQUEST`).
+
+### Phase 3A–3H
 - **Phase 3A-3C**: Spotify API Foundation, Identity retrieval via Phase 2 tokens, and Paged Playlist Discovery implementation.
 - **Phase 3D**: Playlist Metadata Retrieval implemented targeting `/playlists/{playlistId}` via `SpotifyApiClient` retaining canonical models.
 - **Phase 3E**: Exhaustive page aggregation for `/playlists/{playlistId}/tracks`, securely ignoring local/null objects without crashing.
 - **Phase 3F**: Safe abstraction boundaries built into `SpotifyMapper` which translates Spotify provider DTOs firmly into standard `.domain.Playlist` / `.domain.Track` models, before flushing out as `PlaylistResponse`/`TrackResponse`.
 - **Phase 3G**: Application-level error handling implemented covering Spotify responses (400, 401, 403, 404, 429, 5xx), mapping timeouts, missing connections (via `InvalidStateException`), parsing bugs (via `RestClientException`), and relaying `Retry-After` headers faithfully without leaking provider structure payload internals.
-- **Phase 3H**: Full testing verification applied. `Testcontainers` are blocked entirely across multiple attempts since Docker is globally unavailable in this specific execution pipeline, however unit mapping tests completely execute.
+- **Phase 3H**: Full testing verification applied. Phase 3 FROZEN.
 
 ### Phase 2A–2H
 - **Phase 2A-2C**: Application Authentication, Session setup, and OAuth Infrastructure.
@@ -32,37 +46,21 @@ Current Subphase: PHASE 3G-3H COMPLETE (Spotify API error/rate-limit handling ex
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 4 YouTube Integration.
-- Matching and synchronization logic.
-- Background asynchronous queue execution for migrations.
+- Phase 4D+: YouTube Playlist Operations (Creation, insertion, OAuth token write delegation).
+- Matching and synchronization logic (Phase 5-7).
+- Background asynchronous queue execution for migrations (Phase 12).
 
 ## Current Verification
-- Backend Compilation: `mvn clean compile` — **PASS**
-- Checkstyle: `mvn checkstyle:check` — **PASS**
-- Controller & Service Unit Testing (`UserControllerTest`, `PlaylistControllerTest`, `MigrationControllerTest`, `SpotifyPlaylistServiceTest`, etc.): **PASS**
-- Domain Verification (`DomainTest`): **PASS**
+- Backend Compilation: `mvn clean test-compile` — **PASS**
+- Checkstyle: `mvn checkstyle:check` — **PASS** (0 violations)
+- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubeControllerTest`): **PASS** (100% passing)
+- Regression Unit/Slice Test Suite (`GlobalExceptionHandlerTest`, `SpotifyApiClientTest`, `SpotifyControllerTest`, `SpotifyPlaylistServiceTest`, `GoogleProviderAdapterTest`, etc.): **PASS**
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — environment unavailable
-- Transaction Boundary Verification: **BLOCKED** — environment unavailable
-- Cascade Verification: **BLOCKED** — environment unavailable
 
-To run verifying commands once Docker is available:
-`mvn clean verify` or `docker-compose up -d && mvn test`
-
-## Phase 2 Freeze Status
-- **Application Authentication**: FROZEN
-- **Session / CSRF Config**: FROZEN
-- **Provider Infrastructure/Lifecycle**: FROZEN
-- **Spotify/Google Adapters**: FROZEN
-- **OAuth Controller**: FROZEN
-- **Connection Storage/Status**: FROZEN
-
-## Phase 3 Freeze Status
-- **Spotify API Client**: FROZEN (Base implementation, Metadata, Tracks, Error Parsing)
-- **Spotify Identity Retrieval**: FROZEN
-- **Spotify Playlist Discovery**: FROZEN
-- **Provider-To-Safe-DTO Mapping**: FROZEN
-- **Domain Metadata & Track Mapping**: FROZEN
-- **API Error Contract**: FROZEN
+## Phase Freeze Status
+- **Phase 2 (Auth & Identity)**: FROZEN
+- **Phase 3 (Spotify Integration)**: FROZEN
+- **Phase 4A-4C (YouTube Search Foundation)**: FROZEN
 
 ## Next Recommended Work
-1. Phase 4 (YouTube Integration Setup).
+1. Phase 4D: YouTube Playlist Management / Write Operations (leveraging Google OAuth tokens for playlist creation and track insertion).

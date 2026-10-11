@@ -38,6 +38,11 @@ class GlobalExceptionHandlerTest {
             throw new ResourceNotFoundException("Playlist abc not found");
         }
 
+        @GetMapping("/test/illegal-argument")
+        public void illegalArgument() {
+            throw new IllegalArgumentException("Invalid argument provided");
+        }
+
         @GetMapping("/test/conflict")
         public void conflict() {
             throw new ConflictException("Resource already exists");
@@ -102,6 +107,14 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.message").value("Playlist abc not found"))
                 .andExpect(jsonPath("$.path").value("/test/not-found"))
                 .andExpect(jsonPath("$.timestamp").isNotEmpty());
+    }
+
+    @Test
+    void illegalArgumentException_shouldReturn400WithInvalidRequestCode() throws Exception {
+        mockMvc.perform(get("/test/illegal-argument").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid argument provided"));
     }
 
     @Test

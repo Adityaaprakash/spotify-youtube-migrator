@@ -11,6 +11,10 @@ public class ExternalProviderException extends RuntimeException {
         this.retryAfter = null;
     }
 
+    public ExternalProviderException(String message, Integer providerStatusCode) {
+        this(message, providerStatusCode, null);
+    }
+
     public ExternalProviderException(String message, Integer providerStatusCode, String retryAfter) {
         super(message);
         this.providerStatusCode = providerStatusCode;

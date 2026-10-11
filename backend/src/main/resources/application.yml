@@ -50,3 +50,12 @@ management:
   endpoint:
     health:
       show-details: always
+
+youtube:
+  api-key: ${YOUTUBE_API_KEY:mock-youtube-api-key}
+  base-url: ${YOUTUBE_BASE_URL:https://www.googleapis.com/youtube/v3}
+  connect-timeout-ms: ${YOUTUBE_CONNECT_TIMEOUT_MS:5000}
+  read-timeout-ms: ${YOUTUBE_READ_TIMEOUT_MS:10000}
+  max-results-limit: ${YOUTUBE_MAX_RESULTS_LIMIT:50}
+  default-max-results: ${YOUTUBE_DEFAULT_MAX_RESULTS:25}
+

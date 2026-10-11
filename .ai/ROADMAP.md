@@ -23,13 +23,17 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 2D-2F**: [COMPLETE] Provider Adapters (Spotify/Google) and encrypted Token Lifecycle logic.
 - **Phase 2G-2H**: [COMPLETE / FROZEN] Security hardening for sessions, state consumption race conditions, IDOR, and full unit test execution.
 
-### **Phase 3 — Spotify Integration** [IN PROGRESS]
+### **Phase 3 — Spotify Integration** [COMPLETE / FROZEN]
 - **Phase 3A-3C**: [COMPLETE] Spotify API Foundation, Identity retrieval, and Paged Playlist Discovery implementation.
 - **Phase 3D-3F**: [COMPLETE] Playlist Metadata Retrieval, Complete Paginated Track Retrieval, and safe Mapping boundaries enforcing canonical models.
 - **Phase 3G-3H**: [COMPLETE] Spotify API error/rate-limit handling expansion and full phase QA audit.
 
-## Future Phases
-- Phase 4 — YouTube Integration
+### **Phase 4 — YouTube Integration** [IN PROGRESS]
+- **Phase 4A**: [COMPLETE] YouTube API Feasibility, Quota Verification, and Configuration Properties.
+- **Phase 4B**: [COMPLETE] YouTube API Client Foundation (`YouTubeClient`) with typed provider DTOs and resilient HTTP/error handling.
+- **Phase 4C**: [COMPLETE] YouTube Video Search (`YouTubeSearchService`, `YouTubeMapper`, `YouTubeController` `/api/youtube/videos/search`).
+- **Phase 4D**: [PLANNED] YouTube Playlist Retrieval & Creation (OAuth write delegation).
+- **Phase 4E**: [PLANNED] YouTube Playlist Item Insertion & Error Resilience.
 - Phase 5 — Track Normalization
 - Phase 6 — Candidate Discovery
 - Phase 7 — Matching Engine
