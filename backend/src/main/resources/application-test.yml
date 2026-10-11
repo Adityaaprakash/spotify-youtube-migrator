@@ -23,7 +23,7 @@ oauth:
       client-id: "test-google-id"
       client-secret: "test-google-secret"
       redirect-uri: "http://localhost/api/oauth/google/callback"
-      scopes: "openid email profile"
+      scopes: "openid email profile https://www.googleapis.com/auth/youtube.force-ssl"
 
 youtube:
   api-key: "test-youtube-api-key"

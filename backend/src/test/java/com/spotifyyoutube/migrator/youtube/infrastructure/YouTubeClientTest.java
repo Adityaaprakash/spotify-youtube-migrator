@@ -5,11 +5,21 @@ import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePageInfoDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistItemDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistItemSnippetResponseDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistInsertRequestDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistSnippetDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistStatusDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeResourceIdDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeSearchListResponseDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeSearchResultDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeSearchSnippetDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeThumbnailDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoContentDetailsDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoItemDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoSnippetDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +39,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withException;
@@ -245,5 +256,304 @@ class YouTubeClientTest {
 
         assertThatThrownBy(() -> youTubeClient.searchVideos("test", 10, null))
                 .isInstanceOf(RestClientException.class);
+    }
+
+    @Test
+    void getVideoMetadata_shouldBuildCorrectRequestAndReturnMetadata_onSuccess() throws Exception {
+        YouTubeThumbnailDto thumb = new YouTubeThumbnailDto("https://i.ytimg.com/vi/v123/hqdefault.jpg", 480, 360);
+        YouTubeVideoSnippetDto snippet = new YouTubeVideoSnippetDto(
+                "2023-01-01T00:00:00Z",
+                "c123",
+                "Song Title",
+                "Song Description",
+                Map.of("high", thumb),
+                "Artist Channel"
+        );
+        YouTubeVideoContentDetailsDto contentDetails = new YouTubeVideoContentDetailsDto("PT3M45S");
+        YouTubeVideoItemDto item = new YouTubeVideoItemDto("youtube#video", "etag1", "v123", snippet, contentDetails);
+        YouTubeVideoListResponseDto responseDto = new YouTubeVideoListResponseDto(
+                "youtube#videoListResponse",
+                "etagRoot",
+                new YouTubePageInfoDto(1, 1),
+                List.of(item)
+        );
+
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=v123&key=test-api-key"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(objectMapper.writeValueAsString(responseDto), MediaType.APPLICATION_JSON));
+
+        YouTubeVideoListResponseDto result = youTubeClient.getVideoMetadata("v123");
+
+        assertThat(result).isNotNull();
+        assertThat(result.items()).hasSize(1);
+        assertThat(result.items().get(0).id()).isEqualTo("v123");
+        assertThat(result.items().get(0).snippet().title()).isEqualTo("Song Title");
+        assertThat(result.items().get(0).contentDetails().duration()).isEqualTo("PT3M45S");
+        mockServer.verify();
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowIllegalArgumentException_whenVideoIdIsBlank() {
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Video ID must not be blank");
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowInvalidStateException_whenApiKeyMissing() {
+        properties.setApiKey("");
+
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("v123"))
+                .isInstanceOf(InvalidStateException.class)
+                .hasMessageContaining("YouTube API key is not configured");
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowExternalProviderException_on401Unauthorized() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=v123&key=test-api-key"))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("v123"))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(401);
+                });
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowExternalProviderException_on403QuotaExceeded() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=v123&key=test-api-key"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("v123"))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(403);
+                });
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowExternalProviderException_on429RateLimit() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set(HttpHeaders.RETRY_AFTER, "30");
+
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=v123&key=test-api-key"))
+                .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).headers(headers));
+
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("v123"))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(429);
+                    assertThat(ex.getRetryAfter()).isEqualTo("30");
+                });
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowExternalProviderException_on400BadRequest() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=v123&key=test-api-key"))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST));
+
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("v123"))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(400);
+                });
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowResourceNotFound_on404() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=v123&key=test-api-key"))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("v123"))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void getVideoMetadata_shouldThrowExternalProviderException_on500ServerError() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=v123&key=test-api-key"))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> youTubeClient.getVideoMetadata("v123"))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(500);
+                });
+    }
+
+    @Test
+    void createPlaylist_shouldSendBearerTokenAndJsonBody_onSuccess() throws Exception {
+        YouTubePlaylistInsertRequestDto requestDto = new YouTubePlaylistInsertRequestDto(
+                new YouTubePlaylistSnippetDto("My New Playlist", "Description", null, null, null, null),
+                new YouTubePlaylistStatusDto("private")
+        );
+        YouTubePlaylistDto mockResponse = new YouTubePlaylistDto(
+                "youtube#playlist",
+                "etag1",
+                "PL123",
+                new YouTubePlaylistSnippetDto("My New Playlist", "Description", "2023-01-01T00:00:00Z", "chan1", "Channel", null),
+                new YouTubePlaylistStatusDto("private")
+        );
+
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlists?part=snippet,status"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer mock-access-token"))
+                .andRespond(withSuccess(objectMapper.writeValueAsString(mockResponse), MediaType.APPLICATION_JSON));
+
+        YouTubePlaylistDto result = youTubeClient.createPlaylist("mock-access-token", requestDto);
+
+        assertThat(result).isNotNull();
+        assertThat(result.id()).isEqualTo("PL123");
+        assertThat(result.snippet().title()).isEqualTo("My New Playlist");
+        mockServer.verify();
+    }
+
+    @Test
+    void createPlaylist_shouldThrowIllegalArgumentException_whenAccessTokenIsBlank() {
+        YouTubePlaylistInsertRequestDto requestDto = new YouTubePlaylistInsertRequestDto(null, null);
+
+        assertThatThrownBy(() -> youTubeClient.createPlaylist("", requestDto))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Access token must not be blank");
+    }
+
+    @Test
+    void createPlaylist_shouldThrowIllegalArgumentException_whenRequestBodyIsNull() {
+        assertThatThrownBy(() -> youTubeClient.createPlaylist("token", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Playlist request body must not be null");
+    }
+
+    @Test
+    void createPlaylist_shouldThrowExternalProviderException_on401Unauthorized() {
+        YouTubePlaylistInsertRequestDto requestDto = new YouTubePlaylistInsertRequestDto(null, null);
+
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlists?part=snippet,status"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+
+        assertThatThrownBy(() -> youTubeClient.createPlaylist("token", requestDto))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(401);
+                });
+    }
+
+    @Test
+    void createPlaylist_shouldThrowExternalProviderException_on403Forbidden() {
+        YouTubePlaylistInsertRequestDto requestDto = new YouTubePlaylistInsertRequestDto(null, null);
+
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlists?part=snippet,status"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        assertThatThrownBy(() -> youTubeClient.createPlaylist("token", requestDto))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(403);
+                });
+    }
+
+    @Test
+    void createPlaylist_shouldThrowResourceNotFound_on404() {
+        YouTubePlaylistInsertRequestDto requestDto = new YouTubePlaylistInsertRequestDto(null, null);
+
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlists?part=snippet,status"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThatThrownBy(() -> youTubeClient.createPlaylist("token", requestDto))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void addVideoToPlaylist_shouldSendBearerTokenAndJsonBody_onSuccess() throws Exception {
+        YouTubePlaylistItemDto mockResponse = new YouTubePlaylistItemDto(
+                "youtube#playlistItem",
+                "etag1",
+                "pli999",
+                new YouTubePlaylistItemSnippetResponseDto(
+                        "PL123",
+                        0,
+                        new YouTubeResourceIdDto("youtube#video", "vid123", null, null),
+                        "Video Title",
+                        "Desc",
+                        null
+                )
+        );
+
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer mock-access-token"))
+                .andRespond(withSuccess(objectMapper.writeValueAsString(mockResponse), MediaType.APPLICATION_JSON));
+
+        YouTubePlaylistItemDto result = youTubeClient.addVideoToPlaylist("mock-access-token", "PL123", "vid123", 0);
+
+        assertThat(result).isNotNull();
+        assertThat(result.id()).isEqualTo("pli999");
+        assertThat(result.snippet().playlistId()).isEqualTo("PL123");
+        assertThat(result.snippet().resourceId().videoId()).isEqualTo("vid123");
+        mockServer.verify();
+    }
+
+    @Test
+    void addVideoToPlaylist_shouldThrowIllegalArgumentException_whenParamsAreBlank() {
+        assertThatThrownBy(() -> youTubeClient.addVideoToPlaylist("", "PL123", "vid123", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Access token must not be blank");
+
+        assertThatThrownBy(() -> youTubeClient.addVideoToPlaylist("token", "", "vid123", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Playlist ID must not be blank");
+
+        assertThatThrownBy(() -> youTubeClient.addVideoToPlaylist("token", "PL123", "", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Video ID must not be blank");
+    }
+
+    @Test
+    void addVideoToPlaylist_shouldThrowResourceNotFound_on404() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.NOT_FOUND));
+
+        assertThatThrownBy(() -> youTubeClient.addVideoToPlaylist("token", "PL123", "vid123", null))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("not found");
+    }
+
+    @Test
+    void addVideoToPlaylist_shouldThrowExternalProviderException_on403Forbidden() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        assertThatThrownBy(() -> youTubeClient.addVideoToPlaylist("token", "PL123", "vid123", null))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(403);
+                });
+    }
+
+    @Test
+    void addVideoToPlaylist_shouldThrowExternalProviderException_on500ServerError() {
+        mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet"))
+                .andExpect(method(HttpMethod.POST))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> youTubeClient.addVideoToPlaylist("token", "PL123", "vid123", null))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(500);
+                });
     }
 }

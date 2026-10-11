@@ -41,7 +41,7 @@ oauth:
       client-id: ${GOOGLE_CLIENT_ID:mock-google-client-id}
       client-secret: ${GOOGLE_CLIENT_SECRET:mock-google-secret}
       redirect-uri: ${GOOGLE_REDIRECT_URI:http://localhost:8080/api/oauth/google/callback}
-      scopes: openid email profile
+      scopes: openid email profile https://www.googleapis.com/auth/youtube.force-ssl
 management:
   endpoints:
     web:

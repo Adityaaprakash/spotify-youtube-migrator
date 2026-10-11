@@ -149,4 +149,91 @@ class YouTubeSearchServiceTest {
                     assertThat(ex.getMessage()).contains("quota exceeded");
                 });
     }
+
+    @Test
+    void getVideoDetails_shouldReturnMappedResponse_whenVideoFound() {
+        com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoItemDto item =
+                new com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoItemDto("youtube#video", "etag", "vid123", null, null);
+        com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto responseDto =
+                new com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto(
+                        "youtube#videoListResponse", "etagRoot", null, List.of(item)
+                );
+        com.spotifyyoutube.migrator.youtube.api.dto.YouTubeVideoDetailsResponse expectedResponse =
+                new com.spotifyyoutube.migrator.youtube.api.dto.YouTubeVideoDetailsResponse(
+                        "vid123", "Title", "Channel", "Desc", "thumb", "2023-01-01", "PT3M30S"
+                );
+
+        when(youTubeClient.getVideoMetadata("vid123")).thenReturn(responseDto);
+        when(youTubeMapper.toVideoDetailsResponse(item)).thenReturn(expectedResponse);
+
+        com.spotifyyoutube.migrator.youtube.api.dto.YouTubeVideoDetailsResponse result = searchService.getVideoDetails("vid123");
+
+        assertThat(result).isNotNull();
+        assertThat(result.videoId()).isEqualTo("vid123");
+        assertThat(result.duration()).isEqualTo("PT3M30S");
+        verify(youTubeClient).getVideoMetadata("vid123");
+        verify(youTubeMapper).toVideoDetailsResponse(item);
+    }
+
+    @Test
+    void getVideoDetails_shouldThrowIllegalArgumentException_whenVideoIdIsBlank() {
+        assertThatThrownBy(() -> searchService.getVideoDetails(null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Video ID must not be blank");
+
+        assertThatThrownBy(() -> searchService.getVideoDetails("   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Video ID must not be blank");
+    }
+
+    @Test
+    void getVideoDetails_shouldThrowResourceNotFoundException_whenItemsEmptyOrNull() {
+        com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto emptyResponse =
+                new com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto(
+                        "youtube#videoListResponse", "etagRoot", null, List.of()
+                );
+        when(youTubeClient.getVideoMetadata("missing")).thenReturn(emptyResponse);
+
+        assertThatThrownBy(() -> searchService.getVideoDetails("missing"))
+                .isInstanceOf(com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException.class)
+                .hasMessageContaining("YouTube video not found: missing");
+
+        when(youTubeClient.getVideoMetadata("nullItems")).thenReturn(
+                new com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto(
+                        "youtube#videoListResponse", "etagRoot", null, null
+                )
+        );
+        assertThatThrownBy(() -> searchService.getVideoDetails("nullItems"))
+                .isInstanceOf(com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException.class)
+                .hasMessageContaining("YouTube video not found: nullItems");
+    }
+
+    @Test
+    void getVideoDetails_shouldThrowResourceNotFoundException_whenItemHasNullId() {
+        com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoItemDto itemWithNullId =
+                new com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoItemDto("youtube#video", "etag", null, null, null);
+        com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto responseDto =
+                new com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto(
+                        "youtube#videoListResponse", "etagRoot", null, List.of(itemWithNullId)
+                );
+        when(youTubeClient.getVideoMetadata("vNullId")).thenReturn(responseDto);
+
+        assertThatThrownBy(() -> searchService.getVideoDetails("vNullId"))
+                .isInstanceOf(com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException.class)
+                .hasMessageContaining("YouTube video not found: vNullId");
+    }
+
+    @Test
+    void getVideoDetails_shouldPropagateExternalProviderException_whenClientThrows() {
+        when(youTubeClient.getVideoMetadata("vid123"))
+                .thenThrow(new ExternalProviderException("YouTube rate limited", 429, "60"));
+
+        assertThatThrownBy(() -> searchService.getVideoDetails("vid123"))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(429);
+                    assertThat(ex.getRetryAfter()).isEqualTo("60");
+                });
+    }
 }

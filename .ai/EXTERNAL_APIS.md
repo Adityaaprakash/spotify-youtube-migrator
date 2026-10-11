@@ -57,31 +57,37 @@ YouTube provider DTOs (`YouTubeSearchListResponseDto`, `YouTubeSearchResultDto`,
 Internal domain or application response layers must only consume application-owned contracts (`YouTubeVideoSearchResponse`, `YouTubeVideoSummaryResponse`).
 
 Mapping:
-YouTube Provider DTO (`YouTubeSearchListResponseDto`)
+YouTube Provider DTO (`YouTubeSearchListResponseDto`, `YouTubeVideoListResponseDto`, `YouTubePlaylistDto`, `YouTubePlaylistItemDto`)
 → `YouTubeMapper`
-→ Application Response DTO (`YouTubeVideoSearchResponse`, `YouTubeVideoSummaryResponse`)
+→ Application Response DTO (`YouTubeVideoSearchResponse`, `YouTubeVideoDetailsResponse`, `YouTubePlaylistResponse`, `YouTubePlaylistItemResponse`)
 
 Endpoints Used:
-- `GET /search`: Search for video candidates (`part=snippet`, `type=video`, `q`, `maxResults`, `key`, `pageToken`).
+- `GET /search`: Search for video candidates (`part=snippet`, `type=video`, `q`, `maxResults`, `key`, `pageToken`). Costs 100 quota units.
+- `GET /videos`: Retrieve detailed video metadata including ISO-8601 duration (`part=snippet,contentDetails`, `id`, `key`). Costs 1 quota unit.
+- `POST /playlists`: Create a new YouTube playlist (`part=snippet,status`, Bearer access token). Costs 50 quota units.
+- `POST /playlistItems`: Add a video track to a YouTube playlist (`part=snippet`, Bearer access token, payload with playlistId, videoId, position). Costs 50 quota units.
 
 Quota Policy:
 - The YouTube Data API v3 allocates a default project quota of 10,000 units/day.
 - `search.list` costs **100 units** per call (1% of daily standard quota).
+- `videos.list` costs **1 unit** per call.
+- `playlists.insert` costs **50 units** per call.
+- `playlistItems.insert` costs **50 units** per call.
 - Search queries must be validated strictly (non-blank, max 500 chars, maxResults bounded between 1 and 50) to prevent quota exhaustion.
 - Results should be cached whenever possible in downstream matching phases (Phase 6/7).
 
 Authentication & Credential Policy:
-- Read-only video discovery (`/search`) uses the project API key (`YOUTUBE_API_KEY`).
-- User playlist management operations (Phase 4D+) leverage the Phase 2 Google OAuth tokens (`GoogleProviderAdapter`, `OAuthTokenLifecycleService`).
+- Read-only video discovery (`/search`) and metadata (`/videos`) use the project API key (`YOUTUBE_API_KEY`).
+- User playlist management operations (`POST /playlists`, `POST /playlistItems`) leverage the Phase 2 Google OAuth tokens (`GoogleProviderAdapter`, `OAuthTokenLifecycleService`).
 - API keys and OAuth tokens are never returned to the frontend or logged.
 
 Error Mappings:
 - HTTP 400: `ExternalProviderException` ("YouTube API request invalid", 400)
-- HTTP 401: `ExternalProviderException` ("YouTube API authentication failed: invalid API key", 401)
+- HTTP 401: `ExternalProviderException` ("YouTube API authentication failed: invalid API key or expired token", 401)
 - HTTP 403: `ExternalProviderException` ("YouTube API request forbidden or quota exceeded", 403, retryAfter)
-- HTTP 404: `ResourceNotFoundException` ("YouTube search endpoint or resource not found")
+- HTTP 404: `ResourceNotFoundException` ("YouTube endpoint or resource not found")
 - HTTP 429: `ExternalProviderException` ("YouTube API rate limit exceeded", 429, retryAfter)
-- HTTP 5xx: `ExternalProviderException` ("Failed to search YouTube videos", 5xx, retryAfter)
+- HTTP 5xx: `ExternalProviderException` ("YouTube API service error", 5xx, retryAfter)
 - Network Timeouts / Connection drops: Handled via Spring RestClient and GlobalExceptionHandler (`504 Gateway Timeout` or `502 Bad Gateway`).
 
 YouTube Music Limitations:

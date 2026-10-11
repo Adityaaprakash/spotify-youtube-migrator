@@ -28,12 +28,13 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 3D-3F**: [COMPLETE] Playlist Metadata Retrieval, Complete Paginated Track Retrieval, and safe Mapping boundaries enforcing canonical models.
 - **Phase 3G-3H**: [COMPLETE] Spotify API error/rate-limit handling expansion and full phase QA audit.
 
-### **Phase 4 — YouTube Integration** [IN PROGRESS]
+### **Phase 4 — YouTube Integration** [COMPLETE / FROZEN]
 - **Phase 4A**: [COMPLETE] YouTube API Feasibility, Quota Verification, and Configuration Properties.
 - **Phase 4B**: [COMPLETE] YouTube API Client Foundation (`YouTubeClient`) with typed provider DTOs and resilient HTTP/error handling.
 - **Phase 4C**: [COMPLETE] YouTube Video Search (`YouTubeSearchService`, `YouTubeMapper`, `YouTubeController` `/api/youtube/videos/search`).
-- **Phase 4D**: [PLANNED] YouTube Playlist Retrieval & Creation (OAuth write delegation).
-- **Phase 4E**: [PLANNED] YouTube Playlist Item Insertion & Error Resilience.
+- **Phase 4D**: [COMPLETE] YouTube Video Metadata Retrieval (`YouTubeClient.getVideoMetadata`, `YouTubeSearchService.getVideoDetails`, `/api/youtube/videos/{videoId}`).
+- **Phase 4E**: [COMPLETE] YouTube Playlist Creation (`YouTubeClient.createPlaylist`, `YouTubePlaylistService.createPlaylist`, `/api/youtube/playlists`).
+- **Phase 4F**: [COMPLETE] Adding Videos to Playlists (`YouTubeClient.addVideoToPlaylist`, `YouTubePlaylistService.addVideoToPlaylist`, `/api/youtube/playlists/{playlistId}/videos`).
 - Phase 5 — Track Normalization
 - Phase 6 — Candidate Discovery
 - Phase 7 — Matching Engine

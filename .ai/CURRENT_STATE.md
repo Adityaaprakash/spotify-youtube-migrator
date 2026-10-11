@@ -3,9 +3,28 @@
 Last Updated: 2026-10-11
 
 Current Phase: Phase 4 — YouTube Integration
-Current Subphase: Phase 4A + 4B + 4C COMPLETE (YouTube Feasibility/Configuration, Client Foundation & Video Search)
+Current Subphase: Phase 4A–4F COMPLETE (YouTube Feasibility, Search, Video Metadata, Playlist Creation & Track Insertion)
 
 ## Completed
+### Phase 4D–4F
+- **Phase 4D (YouTube Video Metadata Retrieval)**:
+  - Extended `YouTubeClient.getVideoMetadata(videoId)` targeting YouTube Data API v3 `/videos?part=snippet,contentDetails&id={videoId}&key={apiKey}` with resilient provider error handling.
+  - Implemented typed DTOs: `YouTubeVideoListResponseDto`, `YouTubeVideoItemDto`, `YouTubeVideoSnippetDto`, `YouTubeVideoContentDetailsDto`, and `YouTubeVideoDetailsResponse`.
+  - Added `YouTubeSearchService.getVideoDetails(videoId)` with parameter validation (non-blank ID) and 404 mapping when video is missing or deleted.
+  - Added endpoint `GET /api/youtube/videos/{videoId}` in `YouTubeController` returning mapped video summary including ISO-8601 duration.
+- **Phase 4E (YouTube Playlist Creation)**:
+  - Extended `YouTubeClient.createPlaylist(accessToken, request)` targeting `/playlists?part=snippet,status` authenticated via Google OAuth Bearer token.
+  - Implemented typed DTOs: `YouTubePlaylistInsertRequestDto`, `YouTubePlaylistSnippetDto`, `YouTubePlaylistStatusDto`, `YouTubePlaylistDto`, `CreateYouTubePlaylistRequest`, and `YouTubePlaylistResponse`.
+  - Implemented `YouTubePlaylistService.createPlaylist(userId, request)` integrating `OAuthTokenLifecycleService` for Google token verification and auto-refresh, validating title/description bounds (max 150/5000 chars) and default privacy status (`private`).
+  - Added endpoint `POST /api/youtube/playlists` in `YouTubeController` returning `201 CREATED`.
+- **Phase 4F (Adding Videos to YouTube Playlists)**:
+  - Extended `YouTubeClient.addVideoToPlaylist(accessToken, playlistId, videoId, position)` targeting `/playlistItems?part=snippet` authenticated via Google OAuth Bearer token.
+  - Implemented typed DTOs: `YouTubePlaylistItemInsertRequestDto`, `YouTubePlaylistItemSnippetRequestDto`, `YouTubePlaylistItemDto`, `YouTubePlaylistItemSnippetResponseDto`, `AddVideoToPlaylistRequest`, and `YouTubePlaylistItemResponse`.
+  - Implemented `YouTubePlaylistService.addVideoToPlaylist(userId, playlistId, request)` with token lifecycle validation, playlist/video parameter validation, and error propagation.
+  - Added endpoint `POST /api/youtube/playlists/{playlistId}/videos` in `YouTubeController` returning `201 CREATED`.
+- **Testing Verification**:
+  - Full suite of unit and slice tests (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeControllerTest`) verified with 100% passing tests and 0 Checkstyle violations.
+
 ### Phase 4A–4C
 - **Phase 4A**: YouTube API Feasibility & Configuration:
   - Confirmed YouTube Data API v3 (`search.list`) capabilities, quota limits (100 units/call against 10,000 default units/day), and YouTube Music non-public API boundaries.
@@ -29,8 +48,8 @@ Current Subphase: Phase 4A + 4B + 4C COMPLETE (YouTube Feasibility/Configuration
 - **Phase 3H**: Full testing verification applied. Phase 3 FROZEN.
 
 ### Phase 2A–2H
-- **Phase 2A-2C**: Application Authentication, Session setup, and OAuth Infrastructure.
-- **Phase 2D-2F**: Spotify and Google Provider Adapters implemented cleanly wrapped in Token Lifecycle engine.
+- **Phase 2A-2C**: Application Identity, Authentication, and OAuth Infrastructure.
+- **Phase 2D-2F**: Provider Adapters (Spotify/Google) and encrypted Token Lifecycle logic.
 - **Phase 2G-2H**: Complete Security Hardening, checking CSRF, State Atomicity, token leakage, and passing unit tests suite. Phase 2 FROZEN.
 
 ### Phase 0 / 1A / 1B / 1C
@@ -46,21 +65,21 @@ Current Subphase: Phase 4A + 4B + 4C COMPLETE (YouTube Feasibility/Configuration
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 4D+: YouTube Playlist Operations (Creation, insertion, OAuth token write delegation).
-- Matching and synchronization logic (Phase 5-7).
-- Background asynchronous queue execution for migrations (Phase 12).
+- Track Normalization & Candidate Discovery (Phase 5 & Phase 6).
+- Matching Engine & Benchmarking (Phase 7 & Phase 8).
+- Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
 ## Current Verification
 - Backend Compilation: `mvn clean test-compile` — **PASS**
 - Checkstyle: `mvn checkstyle:check` — **PASS** (0 violations)
-- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubeControllerTest`): **PASS** (100% passing)
+- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeControllerTest`): **PASS** (100% passing)
 - Regression Unit/Slice Test Suite (`GlobalExceptionHandlerTest`, `SpotifyApiClientTest`, `SpotifyControllerTest`, `SpotifyPlaylistServiceTest`, `GoogleProviderAdapterTest`, etc.): **PASS**
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — environment unavailable
 
 ## Phase Freeze Status
 - **Phase 2 (Auth & Identity)**: FROZEN
 - **Phase 3 (Spotify Integration)**: FROZEN
-- **Phase 4A-4C (YouTube Search Foundation)**: FROZEN
+- **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
 
 ## Next Recommended Work
-1. Phase 4D: YouTube Playlist Management / Write Operations (leveraging Google OAuth tokens for playlist creation and track insertion).
+1. Phase 5: Track Normalization Engine (cleaning song titles, removing remaster/featuring tags, canonical representation for matching).
