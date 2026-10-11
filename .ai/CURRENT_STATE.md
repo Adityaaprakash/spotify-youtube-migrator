@@ -2,11 +2,35 @@
 
 Last Updated: 2026-10-11
 
-Current Phase: Phase 4 — YouTube Integration
-Current Subphase: Phase 4 COMPLETE & FROZEN (Phases 4A–4H)
+Current Phase: Phase 5 — Track Normalization Engine
+Current Subphase: Phase 5A–5C COMPLETE (Phases 5D–5H Pending)
 
 ## Completed
-### Phase 4G–4H
+### Phase 5A–5C (Track Normalization Engine: Foundation, Title & Artist Normalization)
+- **Phase 5A (Repository Audit & Normalization Design)**:
+  - Audited existing codebase and established ADR-010 (`.ai/ADR/ADR-010-track-normalization-design.md`).
+  - Placed normalization in `com.spotifyyoutube.migrator.matching.normalization` within the modular monolith.
+  - Implemented normalizers as stateless Spring `@Component`s with pure, deterministic functions, requiring no external dependencies, database, or network calls, fully testable as POJOs.
+  - Preserved strict provider isolation: inputs are standard Java types (`String`, `List<String>`), zero imports from Spotify or YouTube DTO packages.
+  - Enforced source immutability: inputs are never mutated, original source metadata in `Track` or destination candidate objects is preserved untouched.
+- **Phase 5B (Title Normalization — TitleNormalizer)**:
+  - Implemented `TitleNormalizer` in `com.spotifyyoutube.migrator.matching.normalization`.
+  - Whitespace handling: trims leading/trailing whitespace, collapses consecutive whitespace (`\s+`) including tabs and newlines to a single space.
+  - Null/blank policy: returns `""` (empty string) for `null`, empty, or whitespace-only inputs.
+  - Casing: deterministic case folding using `Locale.ROOT`.
+  - Unicode policy: canonical composition via `Normalizer.Form.NFC`, ensuring canonical equivalence (composed vs. decomposed accents) while strictly preserving non-Latin scripts (Japanese, Cyrillic, Korean, Arabic).
+  - Punctuation & separators: standardizes curly/smart apostrophes (`’`, `‘`) to `'`, quotes (`“`, `”`, `„`) to `"`, and dash variants (en-dash, em-dash, minus) to `-`.
+  - Conservative promotional annotation removal: strips bracketed/parenthetical suffixes (`(Official Audio)`, `[Official Video]`, `(Official Music Video)`, `(Official Lyric Video)`, `(Official Visualizer)`) and trailing separator-delimited suffixes (`- Official Video`, `| Official Audio`) only when substantive title content remains. Preserves promotional words in legitimate titles (e.g. `Official Secrets`, `The Official Song`).
+  - Meaningful version preservation: strictly preserves version variants (`(Live)`, `(Acoustic)`, `(Remix)`, `(Karaoke)`, `(Nightcore)`, `(Sped Up)`, `(Slowed)`) to prevent false identity collapse.
+- **Phase 5C (Artist Normalization — ArtistNormalizer & NormalizedArtistCredit)**:
+  - Implemented `ArtistNormalizer` and `NormalizedArtistCredit` record in `com.spotifyyoutube.migrator.matching.normalization`.
+  - Basic normalization: Unicode NFC, `Locale.ROOT` lowercasing, smart apostrophes/quotes and dash normalization, whitespace collapsing.
+  - Featured artist conventions: recognizes token-bounded `feat.`, `feat`, `ft.`, `ft`, `featuring` in parenthetical or trailing positions into `NormalizedArtistCredit(primaryArtist, featuredArtists)`.
+  - Identity & collaboration preservation: preserves bands and collaborations with ampersands, commas, and plus signs (e.g., `Simon & Garfunkel`, `Earth, Wind & Fire`, `AC/DC`, `Florence + the Machine`, `Crosby, Stills, Nash & Young`) without naive splitting.
+  - Word-boundary safety: prevents false positives on legitimate artist names containing similar character sequences (e.g., `Soft Cell`, `Kraftwerk`, `Leftfield`, `Afterlife`, `Future`, `Def Leppard`, `Aerosmith`, `The Feat`).
+  - List normalization: `normalizeArtistList(List<String>)` normalizes discrete artist lists while strictly preserving original artist order and omitting blanks.
+
+### Phase 4G–4H (YouTube Integration — MusicDestination & Verification)
 - **Phase 4G (MusicDestination Abstraction & YouTube Adapter)**:
   - Defined provider-neutral `MusicDestination` interface in `migration.application.destination` decoupled from YouTube/Spotify SDK details.
   - Implemented domain models: `DestinationPlaylist`, `DestinationTrackCandidate`, `DestinationSearchResult`, `DestinationTrackDetails`, `CreateDestinationPlaylistRequest`, `AddTrackToDestinationPlaylistRequest`, `DestinationPlaylistItem`, `DestinationPlaylistVerification`, and `PlaylistVerificationStatus`.
@@ -78,21 +102,25 @@ Current Subphase: Phase 4 COMPLETE & FROZEN (Phases 4A–4H)
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Track Normalization & Candidate Discovery (Phase 5 & Phase 6).
+- Phase 5D–5H: Album normalizer, duration normalizer, normalization orchestration service, and variant-token classification.
+- Candidate Discovery (Phase 6).
 - Matching Engine & Benchmarking (Phase 7 & Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
 ## Current Verification
-- Backend Compilation: `mvn clean test-compile` — **PASS**
-- Checkstyle: `mvn checkstyle:check` — **PASS** (0 violations)
-- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeControllerTest`): **PASS** (100% passing)
+- Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
+- Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
+- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`): **PASS** (61 tests passing across 13 nested test categories)
+- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing)
 - Regression Unit/Slice Test Suite (`GlobalExceptionHandlerTest`, `SpotifyApiClientTest`, `SpotifyControllerTest`, `SpotifyPlaylistServiceTest`, `GoogleProviderAdapterTest`, etc.): **PASS**
-- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — environment unavailable
+- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
 
 ## Phase Freeze Status
 - **Phase 2 (Auth & Identity)**: FROZEN
 - **Phase 3 (Spotify Integration)**: FROZEN
 - **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
+- **Phase 5 (Track Normalization Engine)**: Phase 5A–5C COMPLETE; Phase 5D–5H PENDING
 
 ## Next Recommended Work
-1. Phase 5: Track Normalization Engine (cleaning song titles, removing remaster/featuring tags, canonical representation for matching).
+1. Phase 5D: `AlbumNormalizer` (cleaning release qualifiers, deluxe editions, remastered suffixes).
+2. Phase 5E: `DurationNormalizer` (second/millisecond tolerance calculation and duration comparison utilities).

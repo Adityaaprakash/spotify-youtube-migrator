@@ -45,3 +45,12 @@ Controllers MUST NOT:
 - contain business logic
 - access JPA repositories directly
 - expose provider DTOs
+
+## Matching & Normalization Layer
+
+- Package: `com.spotifyyoutube.migrator.matching.normalization`
+- Purpose: Provider-neutral normalization of raw track metadata for deterministic similarity comparisons.
+- Architecture Rules:
+  - Normalizers (`TitleNormalizer`, `ArtistNormalizer`) MUST NOT depend on provider DTOs (`spotify`, `youtube`).
+  - Normalizers MUST NOT mutate incoming objects or domain models.
+  - Normalizers MUST be pure, deterministic, and independently testable without database or network infrastructure.
