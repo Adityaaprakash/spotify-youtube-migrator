@@ -51,8 +51,10 @@ Controllers MUST NOT:
 - Package: `com.spotifyyoutube.migrator.matching.normalization`
 - Purpose: Provider-neutral normalization of raw track metadata for deterministic similarity comparisons.
 - Architecture Rules:
-  - Normalizers and tokenizers (`TitleNormalizer`, `ArtistNormalizer`, `AlbumNormalizer`, `DurationNormalizer`, `MetadataTokenizer`) MUST NOT depend on provider DTOs (`spotify`, `youtube`).
+  - Normalizers, tokenizers, and orchestrator (`TitleNormalizer`, `ArtistNormalizer`, `AlbumNormalizer`, `DurationNormalizer`, `MetadataTokenizer`, `NormalizationOrchestrator`) MUST NOT depend on provider DTOs (`spotify`, `youtube`).
   - Normalizers and tokenizers MUST NOT mutate incoming objects or domain models.
   - Normalizers and tokenizers MUST be pure, deterministic, and independently testable without database or network infrastructure.
   - Duration representation is standardized on canonical `java.time.Duration`, maintaining millisecond and nanosecond precision while strictly validating inputs.
   - Tokenizer decomposes metadata into immutable `TokenizedTitle` records classifying `VariantType`, `MediaFormat`, `TokenCategory`, `RemasterDetails`, `LivePerformanceDetails`, and preserved unclassified annotations.
+  - Orchestration is unified under `NormalizationOrchestrator`, accepting `RawTrackMetadata` and producing immutable, comparison-oriented `NormalizedTrackMetadata` aggregating titles, artist credits, list normalizations, consolidated featured artists, canonical durations, and tokenized metadata.
+  - Downstream matching and candidate discovery layers consume `NormalizedTrackMetadata` as their standard comparison model.

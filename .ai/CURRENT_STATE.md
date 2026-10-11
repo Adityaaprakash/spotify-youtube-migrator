@@ -3,10 +3,10 @@
 Last Updated: 2026-10-11
 
 Current Phase: Phase 5 — Track Normalization Engine
-Current Subphase: Phase 5A–5F COMPLETE (Phases 5G–5H Pending)
+Current Subphase: Phase 5A–5G COMPLETE (Phase 5H Pending)
 
 ## Completed
-### Phase 5A–5F (Track Normalization Engine: Foundation, Title, Artist, Album, Duration Normalization & MetadataTokenizer)
+### Phase 5A–5G (Track Normalization Engine: Foundation, Title, Artist, Album, Duration, MetadataTokenizer & Orchestration)
 - **Phase 5A (Repository Audit & Normalization Design)**:
   - Audited existing codebase and established ADR-010 (`.ai/ADR/ADR-010-track-normalization-design.md`).
   - Placed normalization in `com.spotifyyoutube.migrator.matching.normalization` within the modular monolith.
@@ -54,6 +54,14 @@ Current Subphase: Phase 5A–5F COMPLETE (Phases 5G–5H Pending)
   - Conservative preservation: unclassified bracketed annotations are retained in `unknownAnnotations` and kept within `cleanTitle` to prevent information loss.
   - Featured artist routing: parenthetical and unbracketed guest credits (`feat. DaBaby`, `feat. Artist 1 & Artist 2`) extracted into `featuredArtists` with delimiter splitting and stripped from title without misclassification.
   - Multi-annotation parsing: correctly decomposes compound bracketed qualifiers separated by comma, slash, semicolon, or pipe (e.g. `[Live at Wembley, Remastered 2024]`).
+- **Phase 5G (Normalization Pipeline Orchestration — NormalizationOrchestrator)**:
+  - Implemented `NormalizationOrchestrator` in `com.spotifyyoutube.migrator.matching.normalization` as the single unified entry point for track metadata normalization.
+  - Coordinates all specialized normalizers (`TitleNormalizer`, `ArtistNormalizer`, `AlbumNormalizer`, `DurationNormalizer`, `MetadataTokenizer`) without duplicating normalization algorithms or regex patterns.
+  - Introduced immutable containers: `RawTrackMetadata` (builder pattern, polymorphic provider duration inputs) and `NormalizedTrackMetadata` (structured result aggregating clean title, normalized artist credit, list normalization, consolidated featured artists, canonical duration, and tokenized variants).
+  - Robust error semantics: propagates `IllegalArgumentException` on invalid/negative durations and conflicting multi-format durations; null/blank raw fields yield empty strings/null duration without throw or synthetic text.
+  - Consolidated multi-source featured artists: merges featured artists from structured credit, discrete artist list, and title tokenization in deterministic encounter order, deduplicating and excluding the primary artist.
+  - Clear syntactic cleanliness contracts: `cleanTitle()` strips variants and promotional markers; `isClean()` indicates absence of variants, media formats, or promotional suffixes without conflating with explicit-content parental advisories.
+  - Thread-safe, stateless Spring `@Component` with zero side effects or caching.
 
 ### Phase 4G–4H (YouTube Integration — MusicDestination & Verification)
 - **Phase 4G (MusicDestination Abstraction & YouTube Adapter)**:
@@ -127,7 +135,6 @@ Current Subphase: Phase 5A–5F COMPLETE (Phases 5G–5H Pending)
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 5G: Normalization Pipeline Orchestration.
 - Phase 5H: Phase 5 Verification & Freeze.
 - Candidate Discovery (Phase 6).
 - Matching Engine & Benchmarking (Phase 7 & Phase 8).
@@ -136,7 +143,7 @@ Current Subphase: Phase 5A–5F COMPLETE (Phases 5G–5H Pending)
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`): **PASS** (201 tests passing: 29 title tests, 31 artist tests, 36 album tests, 47 duration tests, 58 metadata tokenizer tests)
+- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`, `NormalizationOrchestratorTest`): **PASS** (227 tests passing: 30 title tests, 31 artist tests, 32 album tests, 47 duration tests, 61 metadata tokenizer tests, 26 orchestration tests)
 - Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing)
 - Regression Unit/Slice Test Suite (`GlobalExceptionHandlerTest`, `SpotifyApiClientTest`, `SpotifyControllerTest`, `SpotifyPlaylistServiceTest`, `GoogleProviderAdapterTest`, etc.): **PASS**
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
@@ -145,8 +152,8 @@ Current Subphase: Phase 5A–5F COMPLETE (Phases 5G–5H Pending)
 - **Phase 2 (Auth & Identity)**: FROZEN
 - **Phase 3 (Spotify Integration)**: FROZEN
 - **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
-- **Phase 5 (Track Normalization Engine)**: Phase 5A–5F COMPLETE; Phase 5G–5H PENDING
+- **Phase 5 (Track Normalization Engine)**: Phase 5A–5G COMPLETE; Phase 5H PENDING
 
 ## Next Recommended Work
-1. Phase 5G: `NormalizationOrchestrator` (composed normalization pipeline integrating `TitleNormalizer`, `ArtistNormalizer`, `AlbumNormalizer`, `DurationNormalizer`, and `MetadataTokenizer`).
-2. Phase 5H: Phase 5 Verification & Freeze.
+1. Phase 5H: Phase 5 Verification & Freeze.
+2. Phase 6: Candidate Discovery.

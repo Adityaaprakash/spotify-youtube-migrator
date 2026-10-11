@@ -76,4 +76,18 @@ public record TokenizedTitle(
     public boolean isInstrumental() {
         return variants.contains(VariantType.INSTRUMENTAL);
     }
+
+    /**
+     * Indicates whether the title is clean of any recognized recording or release variants,
+     * promotional annotations, or media format indicators.
+     * <p>
+     * <b>Note on semantics:</b> Refers strictly to syntactic title cleanliness (absence of
+     * variant modifiers, promotional suffixes, or media format indicators in the title), and
+     * does <i>not</i> represent parental advisory or explicit-content status (clean vs. explicit lyrics).
+     *
+     * @return true if no variants, media formats, or promotional tokens were detected in the title
+     */
+    public boolean isClean() {
+        return variants.isEmpty() && mediaFormats.isEmpty() && !isOfficial;
+    }
 }
