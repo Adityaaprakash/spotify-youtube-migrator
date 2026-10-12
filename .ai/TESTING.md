@@ -62,8 +62,20 @@ Implemented and verified (227 total normalization tests across 6 suites, 454 tot
   - Error semantics and validation: verifies rejection of negative durations, malformed ISO-8601 durations, conflicting duration representations (e.g. milliseconds vs ISO-8601 strings mismatch), preservation of underlying normalizer exception contracts, and acceptance of matching multi-format duration inputs.
   - Immutability and determinism: verifies unmodifiable lists and sets in `NormalizedTrackMetadata`, identical repeated outputs, and zero mutation of raw input objects.
 
-### Candidate Discovery Testing Scope (Phase 6A & 6B)
-Implemented and verified (76 total candidate discovery tests, 530 total non-repository unit tests across all modules):
+### Candidate Discovery Testing Scope (Phase 6A, 6B & 6C)
+Implemented and verified (101 total candidate discovery tests, 555 total non-repository unit tests across all modules):
+- `DefaultCandidateDiscoveryServiceTest`: 25 test methods across 11 nested categories covering all 10 standard execution & error scenarios:
+  - Validation: constructor null guards for `SearchQueryGenerator` and `MusicDestination`, request null check, convenience overload delegations with default and custom options.
+  - Empty query generation: returns legitimate `EMPTY` result with zero executions when generator yields empty list or null, verifying `musicDestination` is never called.
+  - Case 1 (SUCCESS): single query and multiple query execution, accumulating candidates and preserving encounter order.
+  - Case 2 (EMPTY): all queries return 0 candidates, producing `EMPTY` status with successful executions and zero candidates.
+  - Case 3 (PARTIAL_FAILURE): queries failing while others produce candidates, preserving earlier and later candidates, capturing error messages.
+  - Case 4 (FAILED): some queries fail while successful queries return 0 candidates (ensuring failure is not disguised as empty).
+  - Case 5 (FAILED): all queries fail due to provider errors (`ExternalProviderException`), aggregating error diagnostics.
+  - Case 6 (Invalid / Empty responses): null `DestinationSearchResult`, null candidates list, and malformed candidates with null/blank IDs safely filtered without throwing.
+  - Case 7 (Quota Bounding & Limits): strictly respects `DiscoveryOptions.maxQueries()`, early termination when `maxCandidates` quota is reached (skipping remaining queries to save quota), candidate truncation to `maxCandidates`, passing `resultsPerQuery` directly to provider.
+  - Case 8 (Deduplication & Provenance): ignores within-query duplicate candidate IDs, preserves cross-query duplicate candidates in `discoveredCandidates` while deduplicating in `candidates`.
+  - Case 9 (Exception Handling): records `ResourceNotFoundException` and exceptions with null messages gracefully in diagnostics.
 - `DefaultSearchQueryGeneratorTest`: 25 test methods (29 test executions) across 13 nested categories:
   - Ordinary title and artist: primary artist and clean title query formulation (`PRIMARY_TITLE_ARTIST`), single-argument overload defaults.
   - Featured artists: multi-artist joining (`dua lipa feat. dababy - levitating`), discrete featured list aggregation.
@@ -86,9 +98,8 @@ Implemented and verified (76 total candidate discovery tests, 530 total non-repo
   - `SearchQueryExecutionTest`: 5 tests (telemetry, duration tracking, error capturing, yield metrics).
   - `CandidateDiscoveryResultTest`: 7 tests (encounter-order ID deduplication, candidate bounding, status evaluation).
 
-## Future Testing Scope (Phase 6C+)
+## Future Testing Scope (Phase 6D+)
 As the migrator logic scales, testing will expand to:
-- Candidate Discovery Provider Orchestration Suite (Phase 6C)
 - Candidate Bounding & Processing Suite (Phase 6D)
 - Discovery Pipeline Integration Suite (Phase 6E)
 - Matching Engine & Scorer Test Suite (Phase 7)
@@ -97,6 +108,7 @@ As the migrator logic scales, testing will expand to:
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
+- **Phase 6C Complete**: `DefaultCandidateDiscoveryService` implemented and verified with 25 test methods across 11 test categories.
 - **Phase 6B Complete**: `DefaultSearchQueryGenerator` implemented and fully verified with 29 test executions across 13 test categories.
 - **Phase 6A Complete**: Discovery contracts, models, and ADR-011 established with 51 passing tests.
 - **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is FROZEN.

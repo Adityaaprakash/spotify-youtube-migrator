@@ -3,9 +3,35 @@
 Last Updated: 2026-10-12
 
 Current Phase: Phase 6 — Candidate Discovery
-Current Subphase: Phase 6B COMPLETE (Search Query Generation Implemented & Verified)
+Current Subphase: Phase 6C COMPLETE (YouTube Search Orchestration Implemented & Verified)
 
 ## Completed
+### Phase 6C (YouTube Search Orchestration)
+- **Concrete Orchestration Service**: `DefaultCandidateDiscoveryService` implements `CandidateDiscoveryService` in `com.spotifyyoutube.migrator.matching.discovery`.
+- **Bounded Multi-Query Execution**:
+  - Consumes Phase 5 `NormalizedTrackMetadata` and Phase 6A `DiscoveryOptions`.
+  - Dispatches generated queries via provider-neutral `MusicDestination.searchTracks()`.
+  - Strictly enforces `options.maxQueries()` limit (1–5) and `options.resultsPerQuery()`.
+  - Early termination: dynamically skips downstream queries once `options.maxCandidates()` quota is satisfied, conserving YouTube Data API v3 quota (100 units/search).
+  - Truncates candidate collection to `options.maxCandidates()` even if an individual query returns more candidates.
+- **Deduplication & Provenance**:
+  - Filters malformed candidates (null or blank IDs).
+  - Eliminates duplicate candidate IDs within a single query response.
+  - Preserves provenance across queries in `discoveredCandidates()` while deduplicating in encounter order in `candidates()`.
+- **Error Semantics & Resilience**:
+  - Handles 10 standard execution and error scenarios:
+    1. `SUCCESS`: All queries succeed and produce candidates.
+    2. `EMPTY`: All queries succeed legitimately with zero candidates found (distinguished from provider outages).
+    3. `PARTIAL_FAILURE`: Some queries fail, but candidates discovered by earlier/successful queries are preserved.
+    4. `FAILED`: Some queries fail while successful queries return no candidates (not masked as empty).
+    5. `FAILED`: All queries fail due to provider errors.
+    6. Malformed/null responses handled gracefully without throwing.
+    7. Quota bounding and early termination strictly enforced.
+    8. Deterministic query execution order and encounter-order diagnostics.
+    9. Authentication, quota, and transient exceptions recorded in `SearchQueryExecution` diagnostics.
+    10. Query failures never erase earlier successful results.
+- **Spring Integration**: Annotated with `@Service`, constructor-injects `SearchQueryGenerator` and `MusicDestination` (`YouTubeMusicDestinationAdapter`).
+
 ### Phase 6B (Deterministic Search Query Generation)
 - **Concrete Implementation**: `DefaultSearchQueryGenerator` implements `SearchQueryGenerator` in `com.spotifyyoutube.migrator.matching.discovery`.
 - **Pure & Deterministic**: Stateless, thread-safe, pure function execution operating exclusively on Phase 5 `NormalizedTrackMetadata` and Phase 6A `DiscoveryOptions`. Zero external dependencies or I/O.
@@ -174,16 +200,16 @@ Current Subphase: Phase 6B COMPLETE (Search Query Generation Implemented & Verif
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Candidate Discovery Execution Subphases (Phase 6C: Provider Search Orchestration, Phase 6D: Candidate Bounding & Processing, Phase 6E: Pipeline Integration).
+- Candidate Discovery Execution Subphases (Phase 6D: Candidate Bounding & Processing, Phase 6E: Pipeline Integration).
 - Matching Engine & Benchmarking (Phase 7 & Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Candidate Discovery Suite (`DefaultSearchQueryGeneratorTest`, `SearchQueryTest`, `DiscoveryOptionsTest`, `CandidateDiscoveryRequestTest`, `DiscoveredCandidateTest`, `SearchQueryExecutionTest`, `CandidateDiscoveryResultTest`): **PASS** (76 tests passing: 25 query generator tests [29 executions], 10 search query tests, 19 discovery options tests, 4 request tests, 3 candidate tests, 5 query execution tests, 7 result tests with deduplication/immutability validation)
+- Focused Candidate Discovery Suite (`DefaultCandidateDiscoveryServiceTest`, `DefaultSearchQueryGeneratorTest`, `SearchQueryTest`, `DiscoveryOptionsTest`, `CandidateDiscoveryRequestTest`, `DiscoveredCandidateTest`, `SearchQueryExecutionTest`, `CandidateDiscoveryResultTest`): **PASS** (101 tests passing: 25 orchestration service tests, 25 query generator tests [29 executions], 10 search query tests, 19 discovery options tests, 4 request tests, 3 candidate tests, 5 query execution tests, 7 result tests with deduplication/immutability validation)
 - Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`, `NormalizationOrchestratorTest`): **PASS** (227 tests passing)
-- Full Non-Repository Unit Test Suite: **PASS** (530 tests across common, domain, identity, spotify, youtube, migration, playlist, matching - 100% passing)
+- Full Non-Repository Unit Test Suite: **PASS** (555 tests across common, domain, identity, spotify, youtube, migration, playlist, matching - 100% passing)
 - Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing)
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
 
@@ -194,6 +220,7 @@ Current Subphase: Phase 6B COMPLETE (Search Query Generation Implemented & Verif
 - **Phase 5 (Track Normalization Engine)**: COMPLETE / FROZEN
 - **Phase 6A (Candidate Discovery Architecture & Contracts)**: COMPLETE
 - **Phase 6B (Deterministic Search Query Generation)**: COMPLETE
+- **Phase 6C (YouTube Search Orchestration)**: COMPLETE
 
 ## Next Recommended Work
-1. Phase 6C: Provider Search Orchestration (Quota-aware multi-query dispatching via `MusicDestination`, batch query execution, partial failure resilience).
+1. Phase 6D: Candidate Processing & Bounding (Validation, ID deduplication, encounter order preservation, collection limits).
