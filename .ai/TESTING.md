@@ -62,16 +62,44 @@ Implemented and verified (227 total normalization tests across 6 suites, 454 tot
   - Error semantics and validation: verifies rejection of negative durations, malformed ISO-8601 durations, conflicting duration representations (e.g. milliseconds vs ISO-8601 strings mismatch), preservation of underlying normalizer exception contracts, and acceptance of matching multi-format duration inputs.
   - Immutability and determinism: verifies unmodifiable lists and sets in `NormalizedTrackMetadata`, identical repeated outputs, and zero mutation of raw input objects.
 
-## Future Testing Scope (Phase 6+)
+### Candidate Discovery Testing Scope (Phase 6A & 6B)
+Implemented and verified (76 total candidate discovery tests, 530 total non-repository unit tests across all modules):
+- `DefaultSearchQueryGeneratorTest`: 25 test methods (29 test executions) across 13 nested categories:
+  - Ordinary title and artist: primary artist and clean title query formulation (`PRIMARY_TITLE_ARTIST`), single-argument overload defaults.
+  - Featured artists: multi-artist joining (`dua lipa feat. dababy - levitating`), discrete featured list aggregation.
+  - Album-qualified queries: album appending (`daft punk - get lucky random access memories`), suppression when album matches track title.
+  - Version tokens: live performance (`eagles - hotel california live at wembley`), remaster with year (`phil collins - in the air tonight 2015 remaster`), variant type fallback.
+  - Missing or blank metadata: clean title only for missing artist or compilation credits (`Various Artists`), empty output for blank title+artist, null safety validations.
+  - Unicode and punctuation safety: non-Latin script preservation (Japanese, Cyrillic), ampersands, slashes.
+  - Duplicate suppression: case-insensitive and whitespace duplicate elimination, selective raw query retention for stripped promotional markers (`The Weeknd - Blinding Lights (Official Video)`).
+  - Disabled strategies: strict adherence to `options.enabledStrategies()`.
+  - MaxQueries boundaries: strict adherence to configured query bounds (1–5) without artificial padding.
+  - Max query length: safe truncation at `SearchQuery.MAX_QUERY_LENGTH` (500 chars).
+  - Determinism and stability: reproducible query strings, strategies, and sequential 1-based priorities across repeated invocations.
+  - No fabricated metadata: omission of missing attributes without placeholder generation.
+  - Hygiene and immutability: unmodifiable query list return, non-blank query string enforcement.
+- Discovery Contracts & Model Suites (51 tests):
+  - `SearchQueryTest`: 10 tests (validation, immutability, trimming, length bounding).
+  - `DiscoveryOptionsTest`: 19 tests (default values, custom bounds, strategy filtering, immutable sets).
+  - `CandidateDiscoveryRequestTest`: 4 tests (track metadata validation, default and custom options).
+  - `DiscoveredCandidateTest`: 3 tests (candidate-to-query provenance pairing, null rejections).
+  - `SearchQueryExecutionTest`: 5 tests (telemetry, duration tracking, error capturing, yield metrics).
+  - `CandidateDiscoveryResultTest`: 7 tests (encounter-order ID deduplication, candidate bounding, status evaluation).
+
+## Future Testing Scope (Phase 6C+)
 As the migrator logic scales, testing will expand to:
-- Candidate Discovery Test Suite (Phase 6)
+- Candidate Discovery Provider Orchestration Suite (Phase 6C)
+- Candidate Bounding & Processing Suite (Phase 6D)
+- Discovery Pipeline Integration Suite (Phase 6E)
 - Matching Engine & Scorer Test Suite (Phase 7)
 - Matching Benchmark Test Suite (Phase 8)
 - Migration State Machine Test Suite (Phase 9)
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
-- **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests, 454 total passing unit tests, and 0 Checkstyle violations. Phase 5 is FROZEN.
+- **Phase 6B Complete**: `DefaultSearchQueryGenerator` implemented and fully verified with 29 test executions across 13 test categories.
+- **Phase 6A Complete**: Discovery contracts, models, and ADR-011 established with 51 passing tests.
+- **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is FROZEN.
 - **Phase 4 Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.
 - **Docker Dependency**: Repository and full context integration testing (e.g., `PlaylistRepositoryTest`, `MigratorApplicationTests`) via `Testcontainers` is failing strictly due to the current execution environment lacking a functional Docker daemon binding. (Use focused tests e.g. `$ mvnw test -Dtest=...` to avoid Docker tests).
 - **Format Verification**: `mvnw checkstyle:check` is completely passing with 0 violations.

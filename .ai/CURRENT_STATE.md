@@ -2,10 +2,43 @@
 
 Last Updated: 2026-10-12
 
-Current Phase: Phase 5 — Track Normalization Engine
-Current Subphase: Phase 5 COMPLETE / FROZEN (Phases 5A–5H COMPLETE)
+Current Phase: Phase 6 — Candidate Discovery
+Current Subphase: Phase 6B COMPLETE (Search Query Generation Implemented & Verified)
 
 ## Completed
+### Phase 6B (Deterministic Search Query Generation)
+- **Concrete Implementation**: `DefaultSearchQueryGenerator` implements `SearchQueryGenerator` in `com.spotifyyoutube.migrator.matching.discovery`.
+- **Pure & Deterministic**: Stateless, thread-safe, pure function execution operating exclusively on Phase 5 `NormalizedTrackMetadata` and Phase 6A `DiscoveryOptions`. Zero external dependencies or I/O.
+- **Canonical Strategy Prioritization**:
+  1. `PRIMARY_TITLE_ARTIST`: Primary artist and clean title (e.g., `daft punk - get lucky`).
+  2. `TITLE_ARTIST_FEATURED`: Primary artist, aggregated featured artists, and clean title (e.g., `dua lipa feat. dababy - levitating`).
+  3. `TITLE_ARTIST_ALBUM`: Primary artist, clean title, and album qualifier (e.g., `daft punk - get lucky random access memories`), suppressed when album is identical to title.
+  4. `TITLE_ARTIST_VERSION`: Primary artist, clean title, and structured version details extracted from `TokenizedTitle`, `RemasterDetails`, `LivePerformanceDetails`, and `VariantType` (e.g., `eagles - hotel california live at wembley`).
+  5. `RAW_TITLE_AND_ARTIST`: High-fidelity raw title fallback retaining stripped promotional markers (e.g., `The Weeknd - Blinding Lights (Official Video)`) or as safety fallback when clean queries cannot be formed.
+  6. `CLEAN_TITLE_ONLY`: Clean title fallback for artist-less tracks or compilation/soundtrack tracks (e.g., `Various Artists`).
+- **Quota & Boundary Enforcement**:
+  - Strictly caps generated queries at `options.maxQueries()` (1–5).
+  - Filters strategies by `options.enabledStrategies()`.
+  - Enforces string bounds: 1 to 500 characters, whitespace-collapsed, non-blank.
+  - Returns unmodifiable `List<SearchQuery>` with deterministic 1-based sequential priority rankings.
+- **Deduplication Policy**: Case-insensitive and whitespace-collapsed normalization prevents duplicate or semantically redundant queries from consuming search quotas.
+
+### Phase 6A (Candidate Discovery Architecture & Contracts)
+- **Architecture & ADR-011**: Defined candidate discovery architecture in `.ai/ADR/ADR-011-candidate-discovery-architecture.md`, addressing YouTube Data API v3 quota economics (100 units/search vs 1 unit/video, 10,000 units/day project quota).
+- **Public Contracts & Models**: Established in `com.spotifyyoutube.migrator.matching.discovery`:
+  - `CandidateDiscoveryRequest`: Immutable input contract taking `NormalizedTrackMetadata` (from frozen Phase 5) and `DiscoveryOptions`.
+  - `DiscoveryOptions`: Configurable quota bounds enforcing limits on `maxCandidates` (1–50, default 20), `maxQueries` (1–5, default 2), `resultsPerQuery` (1–50, default 10), and `enabledStrategies`.
+  - `SearchQueryStrategy`: Categorized query generation enum (`PRIMARY_TITLE_ARTIST`, `TITLE_ARTIST_FEATURED`, `TITLE_ARTIST_ALBUM`, `TITLE_ARTIST_VERSION`, `RAW_TITLE_AND_ARTIST`, `CLEAN_TITLE_ONLY`).
+  - `SearchQuery`: Immutable query value object validating non-blank strings and <= 500 characters.
+  - `SearchQueryGenerator`: Interface contract for deterministic multi-query generation.
+  - `DiscoveredCandidate`: Pairs candidate with discovering `SearchQuery` to retain full search provenance.
+  - `SearchQueryExecution`: Captures execution telemetry, candidate yield, and error diagnostics per query.
+  - `CandidateDiscoveryStatus`: Explicit outcome enum distinguishing `SUCCESS`, `EMPTY` (legitimate zero-match), `PARTIAL_FAILURE` (secondary query error with preserved candidates), and `FAILED`.
+  - `CandidateDiscoveryResult`: Immutable, structured outcome with encounter-order candidate ID deduplication, candidate bounding, and status helpers.
+  - `CandidateDiscoveryService`: Core service contract for orchestrating discovery.
+- **Provider Neutrality & Model Reuse**: Reuses provider-neutral `MusicDestination` and `DestinationTrackCandidate` from `com.spotifyyoutube.migrator.migration.application.destination.model` without leaking YouTube DTOs or duplicating models.
+- **Phase Boundary Discipline**: Zero scoring, ranking, confidence estimation, or playlist mutations implemented (reserved for Phase 7+).
+
 ### Phase 5A–5H (Track Normalization Engine: Foundation, Title, Artist, Album, Duration, MetadataTokenizer, Orchestration & Freeze)
 - **Phase 5A (Repository Audit & Normalization Design)**:
   - Audited existing codebase and established ADR-010 (`.ai/ADR/ADR-010-track-normalization-design.md`).
@@ -141,15 +174,16 @@ Current Subphase: Phase 5 COMPLETE / FROZEN (Phases 5A–5H COMPLETE)
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Candidate Discovery (Phase 6).
+- Candidate Discovery Execution Subphases (Phase 6C: Provider Search Orchestration, Phase 6D: Candidate Bounding & Processing, Phase 6E: Pipeline Integration).
 - Matching Engine & Benchmarking (Phase 7 & Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`, `NormalizationOrchestratorTest`): **PASS** (227 tests passing: 30 title tests, 31 artist tests, 32 album tests, 47 duration tests, 61 metadata tokenizer tests, 26 orchestration tests)
-- Full Non-Repository Unit Test Suite (454 tests across common, domain, identity, spotify, youtube, migration, playlist, matching): **PASS** (100% passing)
+- Focused Candidate Discovery Suite (`DefaultSearchQueryGeneratorTest`, `SearchQueryTest`, `DiscoveryOptionsTest`, `CandidateDiscoveryRequestTest`, `DiscoveredCandidateTest`, `SearchQueryExecutionTest`, `CandidateDiscoveryResultTest`): **PASS** (76 tests passing: 25 query generator tests [29 executions], 10 search query tests, 19 discovery options tests, 4 request tests, 3 candidate tests, 5 query execution tests, 7 result tests with deduplication/immutability validation)
+- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`, `NormalizationOrchestratorTest`): **PASS** (227 tests passing)
+- Full Non-Repository Unit Test Suite: **PASS** (530 tests across common, domain, identity, spotify, youtube, migration, playlist, matching - 100% passing)
 - Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing)
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
 
@@ -158,6 +192,8 @@ Current Subphase: Phase 5 COMPLETE / FROZEN (Phases 5A–5H COMPLETE)
 - **Phase 3 (Spotify Integration)**: FROZEN
 - **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
 - **Phase 5 (Track Normalization Engine)**: COMPLETE / FROZEN
+- **Phase 6A (Candidate Discovery Architecture & Contracts)**: COMPLETE
+- **Phase 6B (Deterministic Search Query Generation)**: COMPLETE
 
 ## Next Recommended Work
-1. Phase 6: Candidate Discovery.
+1. Phase 6C: Provider Search Orchestration (Quota-aware multi-query dispatching via `MusicDestination`, batch query execution, partial failure resilience).

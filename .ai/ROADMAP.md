@@ -46,7 +46,11 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 5F**: [COMPLETE] MetadataTokenizer & Variant Detection (`MetadataTokenizer`: token extraction, `TokenizedTitle`, `VariantType`, `MediaFormat`, `TokenCategory`, `RemasterDetails`, `LivePerformanceDetails`, unknown annotation preservation).
 - **Phase 5G**: [COMPLETE] Normalization Pipeline Orchestration (`NormalizationOrchestrator`, `RawTrackMetadata`, `NormalizedTrackMetadata`, pipeline composition, immutability, determinism).
 - **Phase 5H**: [COMPLETE / FROZEN] Phase 5 Verification & Freeze (cross-phase audit, 227 normalization tests, 454 regression tests, zero Checkstyle violations, documentation reconciled).
-- Phase 6 — Candidate Discovery [NEXT ACTIVE PHASE]
+### **Phase 6 — YouTube Candidate Discovery** [ACTIVE]
+- **Phase 6B**: [COMPLETE] Search Query Generation (`DefaultSearchQueryGenerator`, deterministic query formulation from `NormalizedTrackMetadata`, tiered strategies, priority ranking, quota bounding, deduplication).
+- **Phase 6C**: Provider Search Orchestration (Quota-aware multi-query dispatching via `MusicDestination`). [NEXT ACTIVE SUBPHASE]
+- **Phase 6D**: Candidate Processing & Bounding (Validation, ID deduplication, encounter order preservation, collection limits).
+- **Phase 6E**: Discovery Pipeline Integration & Verification (End-to-end orchestration, partial failure handling, contract tests).
 - Phase 7 — Matching Engine
 - Phase 8 — Matching Evaluation & Benchmark
 - Phase 9 — Migration Engine
