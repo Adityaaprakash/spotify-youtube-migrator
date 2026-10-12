@@ -692,6 +692,55 @@ class DefaultCandidateDiscoveryServiceTest {
             assertThat(result.executedQueries().get(1).successful()).isFalse();
             assertThat(result.executedQueries().get(1).errorMessage()).contains("exceeded your quota");
         }
+
+        @Test
+        @DisplayName("Sanitizes credentials across access_token, client_secret, api_key, and URL parameters")
+        void sanitizesCredentialsInVariousFormats() {
+            NormalizedTrackMetadata track = sampleSourceTrack();
+            DiscoveryOptions options = new DiscoveryOptions(10, 1, 10, null);
+            SearchQuery q1 = query("Q1", SearchQueryStrategy.PRIMARY_TITLE_ARTIST, 1);
+            when(queryGenerator.generateQueries(track, options)).thenReturn(List.of(q1));
+
+            when(musicDestination.searchTracks("Q1", null, 10))
+                    .thenThrow(new ExternalProviderException(
+                            "Failed request to \"https://api.youtube.com?key=AIzaSySecret123&access_token=ya29.tokenXYZ&client_secret=sec789\": 403 Forbidden",
+                            403
+                    ));
+
+            CandidateDiscoveryResult result = discoveryService.discoverCandidates(new CandidateDiscoveryRequest(track, options));
+
+            assertThat(result.status()).isEqualTo(CandidateDiscoveryStatus.FAILED);
+            assertThat(result.errorMessage()).doesNotContain("AIzaSySecret123");
+            assertThat(result.errorMessage()).doesNotContain("ya29.tokenXYZ");
+            assertThat(result.errorMessage()).doesNotContain("sec789");
+            assertThat(result.errorMessage()).contains("key=***");
+            assertThat(result.errorMessage()).contains("access_token=***");
+            assertThat(result.errorMessage()).contains("client_secret=***");
+            assertThat(result.errorMessage()).contains("403 Forbidden");
+        }
+
+        @Test
+        @DisplayName("Sanitizes Authorization headers and Bearer tokens while preserving context")
+        void sanitizesAuthorizationHeadersAndBearerTokens() {
+            NormalizedTrackMetadata track = sampleSourceTrack();
+            DiscoveryOptions options = new DiscoveryOptions(10, 1, 10, null);
+            SearchQuery q1 = query("Q1", SearchQueryStrategy.PRIMARY_TITLE_ARTIST, 1);
+            when(queryGenerator.generateQueries(track, options)).thenReturn(List.of(q1));
+
+            when(musicDestination.searchTracks("Q1", null, 10))
+                    .thenThrow(new ExternalProviderException(
+                            "Provider returned error with Authorization: Bearer secretBearer123 and Authorization: Basic dXNlcjpwYXNz",
+                            401
+                    ));
+
+            CandidateDiscoveryResult result = discoveryService.discoverCandidates(new CandidateDiscoveryRequest(track, options));
+
+            assertThat(result.status()).isEqualTo(CandidateDiscoveryStatus.FAILED);
+            assertThat(result.errorMessage()).doesNotContain("secretBearer123");
+            assertThat(result.errorMessage()).doesNotContain("dXNlcjpwYXNz");
+            assertThat(result.errorMessage()).contains("Authorization: Bearer ***");
+            assertThat(result.errorMessage()).contains("Authorization: Basic ***");
+        }
     }
 
     @Nested

@@ -134,7 +134,9 @@ public class DefaultCandidateDiscoveryService implements CandidateDiscoveryServi
             return "Unknown error";
         }
         return rawMessage
-                .replaceAll("(?i)(key|token|secret|password)=[^&\\s]+", "$1=***")
-                .replaceAll("(?i)bearer\\s+[A-Za-z0-9._~+/-]+", "Bearer ***");
+                .replaceAll("(?i)(access_token|client_secret|api_key|key|token|secret|password)=[^&\\s\"';,]+", "$1=***")
+                .replaceAll("(?i)bearer\\s+[A-Za-z0-9._~+/-]+", "Bearer ***")
+                .replaceAll("(?i)basic\\s+[A-Za-z0-9+/=]+", "Basic ***")
+                .replaceAll("(?i)(authorization:\\s*)(?!bearer|basic|\\*\\*\\*)[^\\s\"';,]+", "$1***");
     }
 }

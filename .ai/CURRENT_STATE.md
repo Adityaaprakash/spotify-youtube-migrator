@@ -8,15 +8,15 @@ Current Subphase: Phase 6 COMPLETE & FROZEN (Audited, Hardened, Pipeline Verifie
 ## Completed
 ### Phase 6G (Final Candidate Discovery Audit, Hardening & Phase Freeze)
 - **Credential & Token Sanitization**:
-  - `DefaultCandidateDiscoveryService` implements sanitization of query execution error diagnostics to prevent leaking API keys (`key=***`), Bearer tokens (`Bearer ***`), or sensitive parameters.
+  - `DefaultCandidateDiscoveryService` implements sanitization of query execution error diagnostics to prevent leaking API keys (`key=***`, `api_key=***`), tokens (`token=***`, `access_token=***`), secrets (`client_secret=***`, `password=***`), Bearer tokens (`Bearer ***`), Basic auth (`Authorization: Basic ***`), or URL parameters with surrounding delimiters.
 - **Edge-Case Hardening & Integration Verification**:
   - Empty-first query handling: verified that an initial query yielding zero results does not disrupt subsequent queries; downstream queries proceed normally to fulfill candidate quotas and yield `SUCCESS`.
   - Failed-first query handling: verified that an initial query failing due to transient network or provider errors preserves subsequent candidates and appropriately produces `PARTIAL_FAILURE`.
   - Missing duration resilience: candidates lacking duration or optional metadata fields flow cleanly through the pipeline without NPE or synthetic coercion.
 - **Test Suite Metrics**:
   - `CandidateDiscoveryIntegrationTest` expanded to 12 comprehensive end-to-end integration test scenarios.
-  - 131 total candidate discovery and mapping tests passing.
-  - 358 total matching subsystem tests (227 normalization + 131 discovery) passing.
+  - 133 total candidate discovery tests passing (34 in `DefaultCandidateDiscoveryServiceTest`, 29 in `DefaultSearchQueryGeneratorTest`, 12 integration tests, 58 contracts & models).
+  - 360 total matching subsystem tests (227 normalization + 133 discovery) passing.
   - Full non-container test suite passes cleanly with 0 failures and 0 errors.
   - Zero Checkstyle violations across all packages.
 - **Phase 6 Freeze**: Candidate Discovery subsystem is complete, audited, robust, and frozen for Phase 7 consumption.

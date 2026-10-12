@@ -89,7 +89,7 @@ Implemented and verified (127 total candidate discovery and mapping tests, 577+ 
   - Case 6 (Invalid / Empty responses): null `DestinationSearchResult`, null candidates list, and malformed candidates with null/blank IDs safely filtered without throwing.
   - Case 7 (Quota Bounding & Limits): strictly respects `DiscoveryOptions.maxQueries()`, early termination when `maxCandidates` quota is reached (skipping remaining queries to save quota), candidate truncation to `maxCandidates`, passing `resultsPerQuery` directly to provider.
   - Case 8 (Deduplication & Provenance): ignores within-query duplicate candidate IDs, preserves cross-query duplicate candidates in `discoveredCandidates` while deduplicating in `candidates`.
-  - Case 9 (Exception Handling): records `ResourceNotFoundException` and exceptions with null messages gracefully in diagnostics.
+  - Case 9 (Exception Handling): records `ResourceNotFoundException` and exceptions with null messages gracefully in diagnostics; sanitizes sensitive credentials across API keys (`key=***`, `api_key=***`), tokens (`token=***`, `access_token=***`), secrets (`client_secret=***`), and Authorization headers (Bearer and Basic) without leaking secrets into logs or error diagnostics.
 - `DefaultSearchQueryGeneratorTest`: 25 test methods (29 test executions) across 13 nested categories:
   - Ordinary title and artist: primary artist and clean title query formulation (`PRIMARY_TITLE_ARTIST`), single-argument overload defaults.
   - Featured artists: multi-artist joining (`dua lipa feat. dababy - levitating`), discrete featured list aggregation.
