@@ -22,6 +22,7 @@ import com.spotifyyoutube.migrator.youtube.application.YouTubePlaylistService;
 import com.spotifyyoutube.migrator.youtube.application.YouTubeSearchService;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -54,13 +55,17 @@ public class YouTubeMusicDestinationAdapter implements MusicDestination {
 
         if (response != null && response.items() != null) {
             for (YouTubeVideoSummaryResponse item : response.items()) {
+                if (item == null || item.videoId() == null || item.videoId().isBlank()) {
+                    continue;
+                }
                 candidates.add(new DestinationTrackCandidate(
-                        item.videoId(),
+                        item.videoId().trim(),
                         item.title(),
                         item.channelTitle(),
                         item.description(),
                         item.thumbnailUrl(),
-                        item.publishedAt()
+                        item.publishedAt(),
+                        (Duration) null
                 ));
             }
         }

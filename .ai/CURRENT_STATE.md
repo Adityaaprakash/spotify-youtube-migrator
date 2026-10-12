@@ -3,9 +3,24 @@
 Last Updated: 2026-10-12
 
 Current Phase: Phase 6 — Candidate Discovery
-Current Subphase: Phase 6C COMPLETE (YouTube Search Orchestration Implemented & Verified)
+Current Subphase: Phase 6D COMPLETE (Candidate Mapping & Metadata Enrichment Implemented & Verified)
 
 ## Completed
+### Phase 6D (Candidate Mapping & Metadata Enrichment)
+- **Candidate Model Enrichment**:
+  - `DestinationTrackCandidate` in `com.spotifyyoutube.migrator.migration.application.destination.model` updated with `java.time.Duration duration`.
+  - Backward compatibility preserved via 6-argument constructor delegating with `null` duration.
+  - Added convenience constructor parsing ISO-8601 strings into `Duration` (e.g., `PT3M45S` -> 225s, `PT1H2M3S` -> 3723s).
+  - Added `fromDetails(DestinationTrackDetails)` factory method converting details and parsing duration safely.
+  - Strict duration semantics: negative durations rejected/handled safely, null/blank strings preserved as `null` (never coerced to `Duration.ZERO`), legitimate `Duration.ZERO` preserved, malformed ISO-8601 strings safely yield `null` without throwing.
+- **Provenance & Accessor Extension**:
+  - `DiscoveredCandidate` exposes `duration()` accessor delegating to candidate duration.
+- **Provider Isolation & Zero-Quota-Overhead Mapping**:
+  - Zero additional API calls introduced during candidate discovery search (0 extra quota units consumed). Search candidates retain `null` duration until explicitly hydrated or inspected.
+  - `YouTubeMusicDestinationAdapter.searchTracks()` filters out `null` items, items with `null` video IDs, and items with blank video IDs, while trimming valid video IDs.
+  - `YouTubeMapper.toSummaryResponse()` filters out non-video records and blank video IDs, and trims video IDs.
+  - Malformed provider records do not corrupt or crash candidate discovery. Provider outages continue to propagate to `DefaultCandidateDiscoveryService` for proper error classification.
+
 ### Phase 6C (YouTube Search Orchestration)
 - **Concrete Orchestration Service**: `DefaultCandidateDiscoveryService` implements `CandidateDiscoveryService` in `com.spotifyyoutube.migrator.matching.discovery`.
 - **Bounded Multi-Query Execution**:
@@ -200,17 +215,17 @@ Current Subphase: Phase 6C COMPLETE (YouTube Search Orchestration Implemented & 
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Candidate Discovery Execution Subphases (Phase 6D: Candidate Bounding & Processing, Phase 6E: Pipeline Integration).
+- Candidate Discovery Execution Subphases (Phase 6E: Discovery Pipeline Integration & Verification).
 - Matching Engine & Benchmarking (Phase 7 & Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Candidate Discovery Suite (`DefaultCandidateDiscoveryServiceTest`, `DefaultSearchQueryGeneratorTest`, `SearchQueryTest`, `DiscoveryOptionsTest`, `CandidateDiscoveryRequestTest`, `DiscoveredCandidateTest`, `SearchQueryExecutionTest`, `CandidateDiscoveryResultTest`): **PASS** (101 tests passing: 25 orchestration service tests, 25 query generator tests [29 executions], 10 search query tests, 19 discovery options tests, 4 request tests, 3 candidate tests, 5 query execution tests, 7 result tests with deduplication/immutability validation)
+- Focused Candidate Discovery & Mapping Suite: **PASS** (127 tests passing: 22 `DestinationTrackCandidateTest`, 25 `DefaultCandidateDiscoveryServiceTest`, 25 `DefaultSearchQueryGeneratorTest` [29 executions], 10 `SearchQueryTest`, 19 `DiscoveryOptionsTest`, 4 `CandidateDiscoveryRequestTest`, 4 `DiscoveredCandidateTest`, 5 `SearchQueryExecutionTest`, 7 `CandidateDiscoveryResultTest`, 6 `DestinationSearchResultTest`)
+- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing, 12 adapter tests, 15 mapper tests)
 - Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`, `NormalizationOrchestratorTest`): **PASS** (227 tests passing)
-- Full Non-Repository Unit Test Suite: **PASS** (555 tests across common, domain, identity, spotify, youtube, migration, playlist, matching - 100% passing)
-- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing)
+- Full Non-Repository Unit Test Suite: **PASS** (577+ tests across common, domain, identity, spotify, youtube, migration, playlist, matching - 100% passing)
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
 
 ## Phase Freeze Status
@@ -221,6 +236,7 @@ Current Subphase: Phase 6C COMPLETE (YouTube Search Orchestration Implemented & 
 - **Phase 6A (Candidate Discovery Architecture & Contracts)**: COMPLETE
 - **Phase 6B (Deterministic Search Query Generation)**: COMPLETE
 - **Phase 6C (YouTube Search Orchestration)**: COMPLETE
+- **Phase 6D (Candidate Mapping & Metadata Enrichment)**: COMPLETE
 
 ## Next Recommended Work
-1. Phase 6D: Candidate Processing & Bounding (Validation, ID deduplication, encounter order preservation, collection limits).
+1. Phase 6E: Discovery Pipeline Integration & Verification (End-to-end orchestration, partial failure handling, contract tests).

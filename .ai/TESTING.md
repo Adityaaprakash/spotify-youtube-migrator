@@ -62,8 +62,22 @@ Implemented and verified (227 total normalization tests across 6 suites, 454 tot
   - Error semantics and validation: verifies rejection of negative durations, malformed ISO-8601 durations, conflicting duration representations (e.g. milliseconds vs ISO-8601 strings mismatch), preservation of underlying normalizer exception contracts, and acceptance of matching multi-format duration inputs.
   - Immutability and determinism: verifies unmodifiable lists and sets in `NormalizedTrackMetadata`, identical repeated outputs, and zero mutation of raw input objects.
 
-### Candidate Discovery Testing Scope (Phase 6A, 6B & 6C)
-Implemented and verified (101 total candidate discovery tests, 555 total non-repository unit tests across all modules):
+### Candidate Discovery Testing Scope (Phase 6A, 6B, 6C & 6D)
+Implemented and verified (127 total candidate discovery and mapping tests, 577+ total non-repository unit tests across all modules):
+- `DestinationTrackCandidateTest`: 22 test executions:
+  - 6-arg constructor: creates candidate with `null` duration, preserves all metadata fields.
+  - 7-arg constructor with `Duration`: accurately preserves non-null duration, handles `null` duration safely, preserves `Duration.ZERO`, rejects negative durations with `IllegalArgumentException`.
+  - ISO-8601 string parsing constructor: accurately parses standard duration formats (`PT3M45S`, `PT1H2M3S`, `PT45S`, trimmed strings), preserves `PT0S` as `Duration.ZERO`, treats blank and null strings as `null` (not zero), and gracefully handles malformed strings (`invalid`, `PT`, `abc`, `-PT5M`) by returning `null` without throwing.
+  - `fromDetails(DestinationTrackDetails)`: converts details to candidate, parses duration string safely, handles null/malformed durations, and returns `null` on null input.
+  - Metadata resilience: accepts null optional metadata (title, channel, description, etc.) safely.
+  - Value semantics: verifies record equality and `hashCode` consistency.
+- `YouTubeMusicDestinationAdapterTest`: 12 test methods:
+  - Verifies zero additional API calls to `getVideoDetails` during `searchTracks`, preserving API quota.
+  - Filters out malformed records (null item, null video ID, empty video ID, blank video ID).
+  - Trims video IDs with surrounding whitespace.
+  - Handles null responses and null item lists gracefully.
+  - Preserves null optional metadata without throwing.
+- `YouTubeMapperTest`: 15 test methods (verifying response mapping, thumbnail fallbacks, and video ID trimming / blank ID filtering).
 - `DefaultCandidateDiscoveryServiceTest`: 25 test methods across 11 nested categories covering all 10 standard execution & error scenarios:
   - Validation: constructor null guards for `SearchQueryGenerator` and `MusicDestination`, request null check, convenience overload delegations with default and custom options.
   - Empty query generation: returns legitimate `EMPTY` result with zero executions when generator yields empty list or null, verifying `musicDestination` is never called.
@@ -90,17 +104,16 @@ Implemented and verified (101 total candidate discovery tests, 555 total non-rep
   - Determinism and stability: reproducible query strings, strategies, and sequential 1-based priorities across repeated invocations.
   - No fabricated metadata: omission of missing attributes without placeholder generation.
   - Hygiene and immutability: unmodifiable query list return, non-blank query string enforcement.
-- Discovery Contracts & Model Suites (51 tests):
+- Discovery Contracts & Model Suites (52 tests):
   - `SearchQueryTest`: 10 tests (validation, immutability, trimming, length bounding).
   - `DiscoveryOptionsTest`: 19 tests (default values, custom bounds, strategy filtering, immutable sets).
   - `CandidateDiscoveryRequestTest`: 4 tests (track metadata validation, default and custom options).
-  - `DiscoveredCandidateTest`: 3 tests (candidate-to-query provenance pairing, null rejections).
+  - `DiscoveredCandidateTest`: 4 tests (candidate-to-query provenance pairing, null rejections, duration accessor delegation).
   - `SearchQueryExecutionTest`: 5 tests (telemetry, duration tracking, error capturing, yield metrics).
   - `CandidateDiscoveryResultTest`: 7 tests (encounter-order ID deduplication, candidate bounding, status evaluation).
 
-## Future Testing Scope (Phase 6D+)
+## Future Testing Scope (Phase 6E+)
 As the migrator logic scales, testing will expand to:
-- Candidate Bounding & Processing Suite (Phase 6D)
 - Discovery Pipeline Integration Suite (Phase 6E)
 - Matching Engine & Scorer Test Suite (Phase 7)
 - Matching Benchmark Test Suite (Phase 8)
@@ -108,6 +121,7 @@ As the migrator logic scales, testing will expand to:
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
+- **Phase 6D Complete**: Candidate Mapping & Metadata Enrichment implemented with `DestinationTrackCandidate` duration parsing, adapter hardening, and 0 additional API quota overhead.
 - **Phase 6C Complete**: `DefaultCandidateDiscoveryService` implemented and verified with 25 test methods across 11 test categories.
 - **Phase 6B Complete**: `DefaultSearchQueryGenerator` implemented and fully verified with 29 test executions across 13 test categories.
 - **Phase 6A Complete**: Discovery contracts, models, and ADR-011 established with 51 passing tests.

@@ -60,11 +60,11 @@ public class YouTubeMapper {
     }
 
     public YouTubeVideoSummaryResponse toSummaryResponse(YouTubeSearchResultDto itemDto) {
-        if (itemDto == null || itemDto.id() == null || itemDto.id().videoId() == null) {
+        if (itemDto == null || itemDto.id() == null || itemDto.id().videoId() == null || itemDto.id().videoId().isBlank()) {
             return null;
         }
 
-        String videoId = itemDto.id().videoId();
+        String videoId = itemDto.id().videoId().trim();
         YouTubeSearchSnippetDto snippet = itemDto.snippet();
 
         String title = null;

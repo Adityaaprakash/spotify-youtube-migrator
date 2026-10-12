@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.matching.discovery;
 
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackCandidate;
 
+import java.time.Duration;
 import java.util.Objects;
 
 /**
@@ -42,5 +43,9 @@ public record DiscoveredCandidate(
 
     public String publishedAt() {
         return candidate.publishedAt();
+    }
+
+    public Duration duration() {
+        return candidate.duration();
     }
 }

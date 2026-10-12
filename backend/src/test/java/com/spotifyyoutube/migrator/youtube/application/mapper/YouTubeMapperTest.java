@@ -107,14 +107,17 @@ class YouTubeMapperTest {
         YouTubeSearchResultDto itemWithNullVideoId = new YouTubeSearchResultDto(
                 "youtube#searchResult", "etag", new YouTubeResourceIdDto("youtube#video", null, null, null), null
         );
+        YouTubeSearchResultDto itemWithBlankVideoId = new YouTubeSearchResultDto(
+                "youtube#searchResult", "etag", new YouTubeResourceIdDto("youtube#video", "   ", null, null), null
+        );
         YouTubeSearchResultDto validItem = new YouTubeSearchResultDto(
-                "youtube#searchResult", "etag", new YouTubeResourceIdDto("youtube#video", "v1", null, null), null
+                "youtube#searchResult", "etag", new YouTubeResourceIdDto("youtube#video", "  v1  ", null, null), null
         );
 
         YouTubeSearchListResponseDto providerDto = new YouTubeSearchListResponseDto(
                 "youtube#searchListResponse", "etag", null, null, null,
                 new YouTubePageInfoDto(1, 1),
-                java.util.Arrays.asList(nullItem, itemWithNullId, itemWithNullVideoId, validItem)
+                java.util.Arrays.asList(nullItem, itemWithNullId, itemWithNullVideoId, itemWithBlankVideoId, validItem)
         );
 
         YouTubeVideoSearchResponse response = mapper.toSearchResponse(providerDto);

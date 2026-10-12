@@ -6,6 +6,7 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.Desti
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistVerification;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationSearchResult;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackCandidate;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackDetails;
 import com.spotifyyoutube.migrator.migration.application.destination.model.PlaylistVerificationStatus;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
@@ -74,9 +75,109 @@ class YouTubeMusicDestinationAdapterTest {
         assertThat(result.candidates().get(0).id()).isEqualTo("vid123");
         assertThat(result.candidates().get(0).title()).isEqualTo("Song Title");
         assertThat(result.candidates().get(0).channelOrArtist()).isEqualTo("Artist Channel");
+        assertThat(result.candidates().get(0).description()).isEqualTo("Song description");
         assertThat(result.candidates().get(0).thumbnailUrl()).isEqualTo("https://thumbnail.url");
+        assertThat(result.candidates().get(0).publishedAt()).isEqualTo("2026-10-10T00:00:00Z");
+        assertThat(result.candidates().get(0).duration()).isNull();
         assertThat(result.nextPageToken()).isEqualTo("token456");
         assertThat(result.totalResults()).isEqualTo(1);
+    }
+
+    @Test
+    void searchTracks_shouldFilterOutNullAndBlankVideoIdsAndPreserveValidCandidates() {
+        YouTubeVideoSummaryResponse valid1 = new YouTubeVideoSummaryResponse(
+                "vid1", "Title 1", "Artist 1", "Desc 1", "https://thumb1.jpg", "2023-01-01"
+        );
+        YouTubeVideoSummaryResponse nullId = new YouTubeVideoSummaryResponse(
+                null, "Title 2", "Artist 2", "Desc 2", "https://thumb2.jpg", "2023-01-01"
+        );
+        YouTubeVideoSummaryResponse emptyId = new YouTubeVideoSummaryResponse(
+                "", "Title 3", "Artist 3", "Desc 3", "https://thumb3.jpg", "2023-01-01"
+        );
+        YouTubeVideoSummaryResponse blankId = new YouTubeVideoSummaryResponse(
+                "   ", "Title 4", "Artist 4", "Desc 4", "https://thumb4.jpg", "2023-01-01"
+        );
+        YouTubeVideoSummaryResponse valid2WithWhitespace = new YouTubeVideoSummaryResponse(
+                "  vid2  ", "Title 5", "Artist 5", "Desc 5", "https://thumb5.jpg", "2023-01-01"
+        );
+
+        List<YouTubeVideoSummaryResponse> items = new java.util.ArrayList<>();
+        items.add(valid1);
+        items.add(null);
+        items.add(nullId);
+        items.add(emptyId);
+        items.add(blankId);
+        items.add(valid2WithWhitespace);
+
+        YouTubeVideoSearchResponse searchResponse = new YouTubeVideoSearchResponse(
+                items, null, null, 2, 25
+        );
+
+        when(searchService.searchVideos("query", null, 10)).thenReturn(searchResponse);
+
+        DestinationSearchResult result = adapter.searchTracks("query", null, 10);
+
+        assertThat(result.candidates()).hasSize(2);
+        assertThat(result.candidates().get(0).id()).isEqualTo("vid1");
+        assertThat(result.candidates().get(1).id()).isEqualTo("vid2");
+    }
+
+    @Test
+    void searchTracks_shouldPreserveNullOptionalMetadataSafely() {
+        YouTubeVideoSummaryResponse minimalItem = new YouTubeVideoSummaryResponse(
+                "vidMinimal", null, null, null, null, null
+        );
+        YouTubeVideoSearchResponse searchResponse = new YouTubeVideoSearchResponse(
+                List.of(minimalItem), null, null, 1, 25
+        );
+
+        when(searchService.searchVideos("query", null, 5)).thenReturn(searchResponse);
+
+        DestinationSearchResult result = adapter.searchTracks("query", null, 5);
+
+        assertThat(result.candidates()).hasSize(1);
+        DestinationTrackCandidate candidate = result.candidates().get(0);
+        assertThat(candidate.id()).isEqualTo("vidMinimal");
+        assertThat(candidate.title()).isNull();
+        assertThat(candidate.channelOrArtist()).isNull();
+        assertThat(candidate.description()).isNull();
+        assertThat(candidate.thumbnailUrl()).isNull();
+        assertThat(candidate.publishedAt()).isNull();
+        assertThat(candidate.duration()).isNull();
+    }
+
+    @Test
+    void searchTracks_shouldHandleNullResponseAndNullItemsGracefully() {
+        when(searchService.searchVideos("nullResponse", null, 10)).thenReturn(null);
+        DestinationSearchResult resultNull = adapter.searchTracks("nullResponse", null, 10);
+        assertThat(resultNull.candidates()).isEmpty();
+        assertThat(resultNull.totalResults()).isEqualTo(0);
+        assertThat(resultNull.nextPageToken()).isNull();
+
+        YouTubeVideoSearchResponse responseNullItems = new YouTubeVideoSearchResponse(
+                null, null, null, 0, 0
+        );
+        when(searchService.searchVideos("nullItems", null, 10)).thenReturn(responseNullItems);
+        DestinationSearchResult resultNullItems = adapter.searchTracks("nullItems", null, 10);
+        assertThat(resultNullItems.candidates()).isEmpty();
+        assertThat(resultNullItems.totalResults()).isEqualTo(0);
+    }
+
+    @Test
+    void searchTracks_shouldNeverCallGetVideoDetails_verifyingZeroAdditionalApiQuota() {
+        YouTubeVideoSummaryResponse item = new YouTubeVideoSummaryResponse(
+                "v1", "T1", "A1", "D1", "thumb", "2023"
+        );
+        YouTubeVideoSearchResponse searchResponse = new YouTubeVideoSearchResponse(
+                List.of(item), null, null, 1, 25
+        );
+        when(searchService.searchVideos("test", null, 10)).thenReturn(searchResponse);
+
+        DestinationSearchResult result = adapter.searchTracks("test", null, 10);
+
+        assertThat(result.candidates()).hasSize(1);
+        verify(searchService).searchVideos("test", null, 10);
+        org.mockito.Mockito.verifyNoMoreInteractions(searchService);
     }
 
     @Test

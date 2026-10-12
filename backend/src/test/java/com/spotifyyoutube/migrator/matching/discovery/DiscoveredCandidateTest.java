@@ -39,6 +39,25 @@ class DiscoveredCandidateTest {
         assertThat(discovered.description()).isEqualTo("Official video description");
         assertThat(discovered.thumbnailUrl()).isEqualTo("https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg");
         assertThat(discovered.publishedAt()).isEqualTo("2009-10-25T06:57:33Z");
+        assertThat(discovered.duration()).isNull();
+    }
+
+    @Test
+    @DisplayName("Delegates duration accessor when candidate has non-null duration")
+    void delegatesDurationAccessorWhenPresent() {
+        DestinationTrackCandidate candidateWithDuration = new DestinationTrackCandidate(
+                "dQw4w9WgXcQ",
+                "Rick Astley - Never Gonna Give You Up",
+                "Rick Astley",
+                "Description",
+                "thumb",
+                "2009",
+                java.time.Duration.ofSeconds(213)
+        );
+        SearchQuery query = sampleQuery();
+        DiscoveredCandidate discovered = new DiscoveredCandidate(candidateWithDuration, query);
+
+        assertThat(discovered.duration()).isEqualTo(java.time.Duration.ofSeconds(213));
     }
 
     @Test
