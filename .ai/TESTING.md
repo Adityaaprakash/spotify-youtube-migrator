@@ -111,20 +111,29 @@ Implemented and verified (127 total candidate discovery and mapping tests, 577+ 
   - `DiscoveredCandidateTest`: 4 tests (candidate-to-query provenance pairing, null rejections, duration accessor delegation).
   - `SearchQueryExecutionTest`: 5 tests (telemetry, duration tracking, error capturing, yield metrics).
   - `CandidateDiscoveryResultTest`: 7 tests (encounter-order ID deduplication, candidate bounding, status evaluation).
+- `CandidateDiscoveryIntegrationTest`: 12 comprehensive end-to-end integration tests:
+  - Full pipeline query formulation, provider execution, encounter-order deduplication, and provenance tracking across multiple queries.
+  - Quota bound enforcement and early termination when candidate limit is satisfied on initial queries.
+  - Continued execution across subsequent queries when duplicates leave unique candidate count below limit.
+  - Legitimate alternate version preservation (Live, Remix, Acoustic, Cover, Karaoke, Remaster, Radio Edit, Slowed, Sped Up).
+  - Partial failure resilience preserving primary candidates when secondary query encounters quota exhaustion (403).
+  - Failed-first query resilience preserving candidates discovered by subsequent queries with `PARTIAL_FAILURE`.
+  - Empty-first query continuation allowing subsequent queries to discover candidates and achieve `SUCCESS`.
+  - Total provider outage handling yielding structured `FAILED` status with aggregated error messages.
+  - Legitimate empty result handling yielding `EMPTY` status with null error message.
+  - Whitespace-padded and blank ID handling ensuring safe trimming and filtering.
+  - Missing duration and null optional candidate metadata fields handled safely without NPE.
+  - Credential and token sanitization in error messages (masking `key=***` and `Bearer ***`).
 
-## Future Testing Scope (Phase 6E+)
+## Future Testing Scope (Phase 7+)
 As the migrator logic scales, testing will expand to:
-- Discovery Pipeline Integration Suite (Phase 6E)
 - Matching Engine & Scorer Test Suite (Phase 7)
 - Matching Benchmark Test Suite (Phase 8)
 - Migration State Machine Test Suite (Phase 9)
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
-- **Phase 6D Complete**: Candidate Mapping & Metadata Enrichment implemented with `DestinationTrackCandidate` duration parsing, adapter hardening, and 0 additional API quota overhead.
-- **Phase 6C Complete**: `DefaultCandidateDiscoveryService` implemented and verified with 25 test methods across 11 test categories.
-- **Phase 6B Complete**: `DefaultSearchQueryGenerator` implemented and fully verified with 29 test executions across 13 test categories.
-- **Phase 6A Complete**: Discovery contracts, models, and ADR-011 established with 51 passing tests.
+- **Phase 6 Complete & Frozen**: Full Candidate Discovery pipeline (Phases 6A–6G) implemented, audited, and verified across 131 discovery and candidate tests (358 total matching subsystem tests). Phase 6 is FROZEN.
 - **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is FROZEN.
 - **Phase 4 Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.
 - **Docker Dependency**: Repository and full context integration testing (e.g., `PlaylistRepositoryTest`, `MigratorApplicationTests`) via `Testcontainers` is failing strictly due to the current execution environment lacking a functional Docker daemon binding. (Use focused tests e.g. `$ mvnw test -Dtest=...` to avoid Docker tests).

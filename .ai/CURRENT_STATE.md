@@ -3,9 +3,24 @@
 Last Updated: 2026-10-12
 
 Current Phase: Phase 6 — Candidate Discovery
-Current Subphase: Phase 6 COMPLETE (Candidate Validation, Deduplication & Pipeline Integration Verified)
+Current Subphase: Phase 6 COMPLETE & FROZEN (Audited, Hardened, Pipeline Verified, Ready for Phase 7 Matching Engine)
 
 ## Completed
+### Phase 6G (Final Candidate Discovery Audit, Hardening & Phase Freeze)
+- **Credential & Token Sanitization**:
+  - `DefaultCandidateDiscoveryService` implements sanitization of query execution error diagnostics to prevent leaking API keys (`key=***`), Bearer tokens (`Bearer ***`), or sensitive parameters.
+- **Edge-Case Hardening & Integration Verification**:
+  - Empty-first query handling: verified that an initial query yielding zero results does not disrupt subsequent queries; downstream queries proceed normally to fulfill candidate quotas and yield `SUCCESS`.
+  - Failed-first query handling: verified that an initial query failing due to transient network or provider errors preserves subsequent candidates and appropriately produces `PARTIAL_FAILURE`.
+  - Missing duration resilience: candidates lacking duration or optional metadata fields flow cleanly through the pipeline without NPE or synthetic coercion.
+- **Test Suite Metrics**:
+  - `CandidateDiscoveryIntegrationTest` expanded to 12 comprehensive end-to-end integration test scenarios.
+  - 131 total candidate discovery and mapping tests passing.
+  - 358 total matching subsystem tests (227 normalization + 131 discovery) passing.
+  - Full non-container test suite passes cleanly with 0 failures and 0 errors.
+  - Zero Checkstyle violations across all packages.
+- **Phase 6 Freeze**: Candidate Discovery subsystem is complete, audited, robust, and frozen for Phase 7 consumption.
+
 ### Phase 6E & 6F (Candidate Filtering, Discovery Pipeline Integration & Verification)
 - **Candidate Validation & Trimming**:
   - `DestinationTrackCandidate` enforces canonical ID trimming in compact constructor (`id = id != null ? id.trim() : null`).
@@ -18,8 +33,6 @@ Current Subphase: Phase 6 COMPLETE (Candidate Validation, Deduplication & Pipeli
   - Continued execution verified when duplicates leave unique candidate counts below `maxCandidates`.
   - Partial provider failure resilience verified: candidates discovered prior to 403 quota exhaustion are preserved with `PARTIAL_FAILURE` status.
   - Total provider outages verified to cleanly produce `FAILED` status with error diagnostics.
-- **Test Coverage**:
-  - 100% test pass rate across all matching normalization, discovery, and integration suites (unit and Mockito integration tests passing cleanly).
 
 ### Phase 6D (Candidate Mapping & Metadata Enrichment)
 - **Candidate Model Enrichment**:
