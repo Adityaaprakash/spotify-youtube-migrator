@@ -15,8 +15,8 @@ Implemented and verified:
 - `YouTubeSearchServiceTest`: Service layer unit tests with mocked client/mapper testing query validation (non-blank, max length 500), pagination bounding (1-50 limit), whitespace trimming, and exception propagation.
 - `YouTubeControllerTest`: WebMvcTest validating authenticated search endpoint access, unauthenticated rejection (403/401), missing parameter handling (400), and exception mapping via GlobalExceptionHandler.
 
-### Track Normalization Testing Scope (Phase 5A–5G)
-Implemented and verified (227 total normalization tests across 6 suites):
+### Track Normalization Testing Scope (Phase 5A–5H Complete & Frozen)
+Implemented and verified (227 total normalization tests across 6 suites, 454 total non-repository unit tests across all modules):
 - `TitleNormalizerTest`: 30 tests across 7 nested categories:
   - Basic casing & whitespace: lowercase normalization (`Locale.ROOT`), trimming, collapsing multi-space/tabs/newlines.
   - Null & blank handling: returns empty string for `null`, `""`, and whitespace-only strings.
@@ -62,9 +62,8 @@ Implemented and verified (227 total normalization tests across 6 suites):
   - Error semantics and validation: verifies rejection of negative durations, malformed ISO-8601 durations, conflicting duration representations (e.g. milliseconds vs ISO-8601 strings mismatch), preservation of underlying normalizer exception contracts, and acceptance of matching multi-format duration inputs.
   - Immutability and determinism: verifies unmodifiable lists and sets in `NormalizedTrackMetadata`, identical repeated outputs, and zero mutation of raw input objects.
 
-## Future Testing Scope (Phases 5H+)
+## Future Testing Scope (Phase 6+)
 As the migrator logic scales, testing will expand to:
-- Normalization Pipeline Verification & Freeze (Phase 5H)
 - Candidate Discovery Test Suite (Phase 6)
 - Matching Engine & Scorer Test Suite (Phase 7)
 - Matching Benchmark Test Suite (Phase 8)
@@ -72,6 +71,7 @@ As the migrator logic scales, testing will expand to:
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
-- **Phase 4A-4C Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.
+- **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests, 454 total passing unit tests, and 0 Checkstyle violations. Phase 5 is FROZEN.
+- **Phase 4 Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.
 - **Docker Dependency**: Repository and full context integration testing (e.g., `PlaylistRepositoryTest`, `MigratorApplicationTests`) via `Testcontainers` is failing strictly due to the current execution environment lacking a functional Docker daemon binding. (Use focused tests e.g. `$ mvnw test -Dtest=...` to avoid Docker tests).
 - **Format Verification**: `mvnw checkstyle:check` is completely passing with 0 violations.

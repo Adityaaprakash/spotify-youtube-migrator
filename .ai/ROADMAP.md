@@ -37,7 +37,7 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 4F**: [COMPLETE] Adding Videos to Playlists (`YouTubeClient.addVideoToPlaylist`, `YouTubePlaylistService.addVideoToPlaylist`, `/api/youtube/playlists/{playlistId}/videos`).
 - **Phase 4G**: [COMPLETE] MusicDestination Abstraction & YouTube Adapter (`MusicDestination`, domain models, `YouTubeMusicDestinationAdapter`).
 - **Phase 4H**: [COMPLETE / FROZEN] Destination Verification, Verification Endpoints (`/api/youtube/playlists/{playlistId}`, `/api/youtube/playlists/{playlistId}/verify`), and Phase 4 Freeze.
-### **Phase 5 — Track Normalization Engine** [IN PROGRESS: 5A–5G COMPLETE]
+### **Phase 5 — Track Normalization Engine** [COMPLETE / FROZEN]
 - **Phase 5A**: [COMPLETE] Repository Audit & Normalization Architecture (ADR-010, pure stateless components, provider isolation).
 - **Phase 5B**: [COMPLETE] Title Normalization (`TitleNormalizer`: Unicode NFC, Locale.ROOT, whitespace/quotes/dashes standardization, conservative promotional suffix removal, version preservation).
 - **Phase 5C**: [COMPLETE] Artist Normalization (`ArtistNormalizer`, `NormalizedArtistCredit`: token-bounded featured extraction, band identity preservation, list normalization).
@@ -45,8 +45,8 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 5E**: [COMPLETE] Duration Normalization (`DurationNormalizer`: canonical `java.time.Duration`, exact millisecond/nanosecond precision, Spotify ms & YouTube ISO-8601 parsing, strict error contract).
 - **Phase 5F**: [COMPLETE] MetadataTokenizer & Variant Detection (`MetadataTokenizer`: token extraction, `TokenizedTitle`, `VariantType`, `MediaFormat`, `TokenCategory`, `RemasterDetails`, `LivePerformanceDetails`, unknown annotation preservation).
 - **Phase 5G**: [COMPLETE] Normalization Pipeline Orchestration (`NormalizationOrchestrator`, `RawTrackMetadata`, `NormalizedTrackMetadata`, pipeline composition, immutability, determinism).
-- **Phase 5H**: [PENDING] Phase 5 Verification & Freeze.
-- Phase 6 — Candidate Discovery
+- **Phase 5H**: [COMPLETE / FROZEN] Phase 5 Verification & Freeze (cross-phase audit, 227 normalization tests, 454 regression tests, zero Checkstyle violations, documentation reconciled).
+- Phase 6 — Candidate Discovery [NEXT ACTIVE PHASE]
 - Phase 7 — Matching Engine
 - Phase 8 — Matching Evaluation & Benchmark
 - Phase 9 — Migration Engine
