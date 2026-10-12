@@ -46,11 +46,14 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 5F**: [COMPLETE] MetadataTokenizer & Variant Detection (`MetadataTokenizer`: token extraction, `TokenizedTitle`, `VariantType`, `MediaFormat`, `TokenCategory`, `RemasterDetails`, `LivePerformanceDetails`, unknown annotation preservation).
 - **Phase 5G**: [COMPLETE] Normalization Pipeline Orchestration (`NormalizationOrchestrator`, `RawTrackMetadata`, `NormalizedTrackMetadata`, pipeline composition, immutability, determinism).
 - **Phase 5H**: [COMPLETE / FROZEN] Phase 5 Verification & Freeze (cross-phase audit, 227 normalization tests, 454 regression tests, zero Checkstyle violations, documentation reconciled).
-### **Phase 6 — YouTube Candidate Discovery** [ACTIVE]
+### **Phase 6 — YouTube Candidate Discovery** [COMPLETE]
+- **Phase 6A**: [COMPLETE] Candidate Discovery Architecture & Contracts (ADR-011, immutable contracts, bounded discovery options, provenance models).
 - **Phase 6B**: [COMPLETE] Search Query Generation (`DefaultSearchQueryGenerator`, deterministic query formulation from `NormalizedTrackMetadata`, tiered strategies, priority ranking, quota bounding, deduplication).
 - **Phase 6C**: [COMPLETE] Provider Search Orchestration (`DefaultCandidateDiscoveryService`, quota-aware multi-query dispatching via `MusicDestination`, bounded candidate collection, early termination, partial failure resilience).
 - **Phase 6D**: [COMPLETE] Candidate Mapping & Metadata Enrichment (`DestinationTrackCandidate` duration support, ISO-8601 parsing, safe malformed record handling, zero-quota-overhead mapping, provider DTO isolation).
-- **Phase 6E**: Discovery Pipeline Integration & Verification (End-to-end orchestration, partial failure handling, contract tests). [NEXT ACTIVE SUBPHASE]
+- **Phase 6E**: [COMPLETE] Candidate Validation, Deduplication & Filtering (Whitespace ID trimming, canonical deduplication keys, encounter-order uniqueness, variant preservation).
+- **Phase 6F**: [COMPLETE] Discovery Pipeline Integration & End-to-End Verification (`CandidateDiscoveryIntegrationTest`, real multi-query generation and destination execution, provenance retention, quota preservation, partial/total failure resilience).
+### **Phase 7 — Matching Engine** [NEXT ACTIVE PHASE]
 - Phase 7 — Matching Engine
 - Phase 8 — Matching Evaluation & Benchmark
 - Phase 9 — Migration Engine

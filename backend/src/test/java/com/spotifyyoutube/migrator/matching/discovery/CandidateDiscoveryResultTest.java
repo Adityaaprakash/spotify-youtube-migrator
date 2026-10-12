@@ -181,4 +181,30 @@ class CandidateDiscoveryResultTest {
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("CandidateDiscoveryStatus must not be null");
     }
+
+    @Test
+    @DisplayName("Deduplication handles whitespace-padded video IDs and empty IDs safely")
+    void deduplicationHandlesWhitespaceAndEmptyIds() {
+        NormalizedTrackMetadata track = sampleSourceTrack();
+        SearchQuery q1 = query("Query", SearchQueryStrategy.PRIMARY_TITLE_ARTIST);
+
+        DestinationTrackCandidate c1 = candidate("vid1", "Title 1");
+        // Simulated candidate with whitespace or empty
+        DestinationTrackCandidate c1Padded = new DestinationTrackCandidate(
+                " vid1 ", "Title 1 Variant", "Artist", "Desc", "url", "2023", Duration.ofMinutes(3)
+        );
+        DestinationTrackCandidate cBlank = new DestinationTrackCandidate(
+                "", "Blank ID", "Artist", "Desc", "url", "2023", Duration.ofMinutes(3)
+        );
+
+        List<DiscoveredCandidate> discovered = List.of(
+                new DiscoveredCandidate(c1, q1),
+                new DiscoveredCandidate(c1Padded, q1),
+                new DiscoveredCandidate(cBlank, q1)
+        );
+
+        CandidateDiscoveryResult result = CandidateDiscoveryResult.success(track, discovered, List.of());
+
+        assertThat(result.candidates()).containsExactly(c1);
+    }
 }

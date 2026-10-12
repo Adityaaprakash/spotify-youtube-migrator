@@ -105,7 +105,7 @@ public record CandidateDiscoveryResult(
         Map<String, DestinationTrackCandidate> unique = new LinkedHashMap<>();
         for (DiscoveredCandidate dc : discovered) {
             if (dc != null && dc.candidate() != null && dc.candidate().id() != null && !dc.candidate().id().isBlank()) {
-                unique.putIfAbsent(dc.candidate().id(), dc.candidate());
+                unique.putIfAbsent(dc.candidate().id().trim(), dc.candidate());
             }
         }
         return List.copyOf(unique.values());

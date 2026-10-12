@@ -60,6 +60,7 @@ public record DestinationTrackCandidate(
      * - Missing duration remains null (does not become Duration.ZERO)
      */
     public DestinationTrackCandidate {
+        id = id != null ? id.trim() : null;
         if (duration != null && duration.isNegative()) {
             throw new IllegalArgumentException("Duration cannot be negative: " + duration);
         }

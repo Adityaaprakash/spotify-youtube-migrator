@@ -3,9 +3,24 @@
 Last Updated: 2026-10-12
 
 Current Phase: Phase 6 — Candidate Discovery
-Current Subphase: Phase 6D COMPLETE (Candidate Mapping & Metadata Enrichment Implemented & Verified)
+Current Subphase: Phase 6 COMPLETE (Candidate Validation, Deduplication & Pipeline Integration Verified)
 
 ## Completed
+### Phase 6E & 6F (Candidate Filtering, Discovery Pipeline Integration & Verification)
+- **Candidate Validation & Trimming**:
+  - `DestinationTrackCandidate` enforces canonical ID trimming in compact constructor (`id = id != null ? id.trim() : null`).
+  - Candidate deduplication keys in `CandidateDiscoveryResult` and `DefaultCandidateDiscoveryService` canonicalize IDs before map indexing to ensure whitespace padding cannot bypass deduplication.
+  - Zero-filtering policy for legitimate track variants: alternate audio versions, live recordings, remasters, and remixes are safely preserved as discovery candidates for subsequent Phase 7 matching.
+- **End-to-End Pipeline Integration (`CandidateDiscoveryIntegrationTest`)**:
+  - Full flow validated: `NormalizedTrackMetadata` -> `SearchQueryGenerator` -> `MusicDestination` -> `DefaultCandidateDiscoveryService` -> `CandidateDiscoveryResult`.
+  - Multi-query orchestration verified with real query formulation (`PRIMARY_TITLE_ARTIST`, `TITLE_ARTIST_FEATURED`, `TITLE_ARTIST_ALBUM`).
+  - Strict quota preservation verified: secondary queries are suppressed when primary queries satisfy `maxCandidates`.
+  - Continued execution verified when duplicates leave unique candidate counts below `maxCandidates`.
+  - Partial provider failure resilience verified: candidates discovered prior to 403 quota exhaustion are preserved with `PARTIAL_FAILURE` status.
+  - Total provider outages verified to cleanly produce `FAILED` status with error diagnostics.
+- **Test Coverage**:
+  - 100% test pass rate across all matching normalization, discovery, and integration suites (unit and Mockito integration tests passing cleanly).
+
 ### Phase 6D (Candidate Mapping & Metadata Enrichment)
 - **Candidate Model Enrichment**:
   - `DestinationTrackCandidate` in `com.spotifyyoutube.migrator.migration.application.destination.model` updated with `java.time.Duration duration`.
