@@ -188,13 +188,18 @@ Implemented and verified (11 test suites covering Phase 7A contracts and Phase 7
   - Primary vs. featured priority: primary artist match outranks featured-only match; different primary artists sharing a featured artist strictly bounded to low score (`<= 0.35`).
   - Substring collision safeguards: distinct artists sharing tokens ("Iron & Wine" vs "Iron Maiden") or prefix collisions ("Future" vs "Afterlife", "The Who" vs "Wham!") strictly scored `0.0` or `< 0.50`.
   - Unicode, diacritics & determinism: accented Latin names (`Beyoncé` vs `Beyonce`, `Sigur Rós` vs `Sigur Ros`, `Björk` vs `Bjork`) scored `1.0` via NFD diacritic stripping; Cyrillic preserved; missing artist metadata returns `null` honestly; idempotent execution.
-- `CandidateSimilarityScorerIntegrationTest`: 7 integration tests:
-  - End-to-end scoring of matching track: exact title, artist, and duration yield `1.0` in `MatchScoreBreakdown`.
+- `CandidateSimilarityScorerIntegrationTest`: 12 integration tests:
+  - End-to-end scoring of matching track: exact title, artist, and duration yield `1.0` in `MatchScoreBreakdown`, version penalty is `0.0`.
   - Album evidence extraction: candidate description with album details populates `albumScore` (`1.0`).
   - Duration penalty isolation: duration discrepancies (>60s) penalized to `0.0` while title and artist scores remain high.
+  - Cover penalty integration: candidate marked as cover incurs `0.25` version penalty while preserving title, artist, and duration scores.
+  - Reaction penalty integration: candidate marked as reaction incurs `0.30` version penalty.
+  - Live mismatch penalty integration: candidate marked as live for studio source incurs `0.15` live mismatch penalty.
+  - Live alignment: matching live candidate for live source incurs `0.0` penalty.
+  - Additive penalty combination: multiple variant penalties combine additively in seam (`COVER` + `REACTION` $\to 0.55$).
   - Permuted candidate title with embedded artist: `daft punk - get lucky` on official channel yields high title and artist scores.
   - Partial match preservation: mismatched artist preserves high title score while artist score is low.
-  - Honest missing data: absent candidate metadata yields `null` scores across missing dimensions (`titleScore`, `artistScore`, `durationScore`, `albumScore`).
+  - Honest missing data: absent candidate metadata yields `null` scores across missing dimensions (`titleScore`, `artistScore`, `durationScore`, `albumScore`) and `0.0` version penalty.
   - Validation: rejects null inputs with `NullPointerException`.
 - `DurationSimilarityScorerTest` (Phase 7E.1): 15 tests across 4 nested categories:
   - Exact and tolerance matches: exact match (`1.0`), offset within 2.0s tolerance window (`1.0`), candidate shorter within tolerance (`1.0`).
@@ -207,17 +212,24 @@ Implemented and verified (11 test suites covering Phase 7A contracts and Phase 7
   - Typos & unrelated mismatches: minor typo on long album title ($\ge 0.88$), unrelated albums (`0.0`), substring collisions (`War` vs `Star Wars` $\to 0.0$), generic title collisions (`Queen: Greatest Hits` vs `Blink-182: Greatest Hits` $\to 0.0$).
   - Candidate description extraction: explicit `Album: <name>` line, standard YouTube topic delivery layout line 3, missing album in description returns `null`.
   - Missing metadata & validation: returns `null` when source or candidate album missing, rejects null feature objects with `NullPointerException`, strictly deterministic.
+- `VersionPenaltyScorerTest` (Phase 7F): 27 tests across 7 nested categories:
+  - Individual variant penalties: COVER (`0.25`), REACTION (`0.30`), KARAOKE (`0.30`), NIGHTCORE (`0.20`), SPED_UP (`0.15`), SLOWED (`0.15`), LIVE_MISMATCH (`0.15`), REMIX_MISMATCH (`0.15`), ACOUSTIC_MISMATCH (`0.10`), INSTRUMENTAL_MISMATCH (`0.15`), REMASTER (`0.00`).
+  - Source variant alignment: live + live $\to 0.0$; remix + remix $\to 0.0$; acoustic + acoustic $\to 0.0$; source live + candidate studio $\to 0.15$; source remix + candidate studio $\to 0.15$; source acoustic + candidate standard $\to 0.10$.
+  - Multiple simultaneous variants & bounds: cover + reaction $\to 0.55$; cover + live mismatch $\to 0.40$; multiple penalties clamped to upper bound `1.0`; itemized `detailedPenalties` tracking; lower bound `0.0`.
+  - False positive protection for genuine song titles: *Live to Tell*, *Live and Let Die*, *Live Forever*, *Stayin' Alive*, *Under Cover of Darkness*, *Chain Reaction*, and official media annotations (*Official Video*, *Audio*, *Visualizer*, *Lyric Video*) verified to produce `0.0` penalty.
+  - End-to-end extraction and scoring integration: verifies tokenization through `DefaultTrackFeatureExtractor` and penalty evaluation through `DefaultVersionPenaltyScorer`.
+  - Null, blank, and missing data safety: `NullPointerException` on null source or candidate; null indicator overloads handled as empty sets; `score()` delegation.
+  - Immutability & determinism: unmodifiable `detailedPenalties` map; identical output across 100 repeated executions.
 
-## Future Testing Scope (Phase 7F+)
+## Future Testing Scope (Phase 7G+)
 As the migrator logic scales, testing will expand to:
-- Official Signal Scorer & Version Penalty Engine Test Suite (Phase 7F)
 - Composite Scoring & Decision Engine (Phase 7G/7H)
 - Matching Benchmark Test Suite (Phase 8)
 - Migration State Machine Test Suite (Phase 9)
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
-- **Phase 7A, 7B, 7C, 7D & 7E Complete**: Core Matching Engine contracts (`TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`), Candidate Feature Extraction (`DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`), Title Similarity Scorer (`DefaultTitleSimilarityScorer`), Artist Similarity Scorer (`DefaultArtistSimilarityScorer`), Duration Similarity Scorer (`DefaultDurationSimilarityScorer`), Album Similarity Scorer (`DefaultAlbumSimilarityScorer`), and composition seam (`DefaultCandidateSimilarityScorer`) implemented and verified across 16 test suites.
+- **Phase 7A, 7B, 7C, 7D, 7E & 7F Complete**: Core Matching Engine contracts (`TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`), Candidate Feature Extraction (`DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`), Title Similarity Scorer (`DefaultTitleSimilarityScorer`), Artist Similarity Scorer (`DefaultArtistSimilarityScorer`), Duration Similarity Scorer (`DefaultDurationSimilarityScorer`), Album Similarity Scorer (`DefaultAlbumSimilarityScorer`), Version Penalty Scorer (`DefaultVersionPenaltyScorer`), and composition seam (`DefaultCandidateSimilarityScorer`) implemented and verified across 17 test suites.
 - **Phase 6 Complete & Frozen**: Full Candidate Discovery pipeline (Phases 6A–6G) verified across 133 discovery tests. Phase 6 is FROZEN.
 - **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is FROZEN.
 - **Phase 4 Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.

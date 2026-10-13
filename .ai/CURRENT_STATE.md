@@ -3,9 +3,46 @@
 Last Updated: 2026-10-13
 
 Current Phase: Phase 7 — Matching Engine
-Current Subphase: Phase 7E COMPLETE (Duration & Album Similarity Scorers Implemented, Tested, Ready for Phase 7F Official Signal & Version Penalty Engine)
+Current Subphase: Phase 7F COMPLETE (Recording Version & Variant Penalty Engine Implemented, Tested, Ready for Phase 7G Composite Scoring & Decision Engine)
 
 ## Completed
+### Phase 7F (Recording Version & Variant Penalty Engine)
+- **Phase 7F.1 (Version Penalty Scorer)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - `VersionPenaltyScorer`: Strategy interface for evaluating version and variant discrepancies between source tracks and destination candidates, calculating aggregate deductions bounded in `[0.0, 1.0]` and providing itemized `calculateDetailedPenalties` breakdowns.
+  - `DefaultVersionPenaltyScorer`: Stateless Spring `@Component` implementing deterministic, bounded deductions on a normalized `[0.0, 1.0]` scale:
+    - `REACTION`: 0.30 deduction (creator commentary / reaction video).
+    - `KARAOKE`: 0.30 deduction (backing track / sing-along version).
+    - `COVER`: 0.25 deduction (unwanted alternate artist / amateur cover performance).
+    - `NIGHTCORE`: 0.20 deduction (accelerated tempo + high pitch shift).
+    - `SPED_UP`: 0.15 deduction (accelerated tempo / fast version).
+    - `SLOWED`: 0.15 deduction (slowed down / chopped & screwed / slowed + reverb).
+    - `LIVE_MISMATCH`: 0.15 deduction (live concert vs studio recording mismatch).
+    - `REMIX_MISMATCH`: 0.15 deduction (remix vs original recording mismatch).
+    - `ACOUSTIC_MISMATCH`: 0.10 deduction (acoustic arrangement vs standard recording mismatch).
+    - `INSTRUMENTAL_MISMATCH`: 0.15 deduction (instrumental accompaniment vs vocal recording mismatch).
+    - `REMASTER`: 0.00 deduction (remastered releases represent the same core recording; no penalty).
+  - **Variant Alignment Policy**:
+    - Source Live + Candidate Live $\to 0.0$ penalty (matching live performance).
+    - Source Studio + Candidate Live $\to 0.15$ penalty (`LIVE_MISMATCH`).
+    - Source Live + Candidate Studio $\to 0.15$ penalty (`LIVE_MISMATCH`).
+    - Source Remix + Candidate Remix $\to 0.0$ penalty (matching remix).
+    - Source Original + Candidate Remix $\to 0.15$ penalty (`REMIX_MISMATCH`).
+    - Source Acoustic + Candidate Acoustic $\to 0.0$ penalty (matching acoustic).
+    - Source Standard + Candidate Acoustic $\to 0.10$ penalty (`ACOUSTIC_MISMATCH`).
+  - **False Positive Protection**:
+    - Genuine song titles containing marker-like words (*Live to Tell*, *Live and Let Die*, *Live Forever*, *Stayin' Alive*, *Under Cover of Darkness*, *Chain Reaction*) are protected from spurious penalties (`0.0`).
+    - Official video/audio markers (`(Official Video)`, `(Audio)`, `(Visualizer)`, `(Lyric Video)`) do not incur penalties (`0.0`).
+  - **Multi-variant Combination & Bounding**:
+    - Itemized deductions accumulate additively into `detailedPenalties` (e.g., Cover + Reaction = $0.25 + 0.30 = 0.55$).
+    - Aggregate `versionPenalty` is strictly clamped to `[0.0, 1.0]`. Returns `0.0` when no discrepancies exist.
+  - **Missing & Ambiguous Data**:
+    - Candidates lacking version indicators return `0.0` penalty and empty `detailedPenalties`.
+    - Unmatched parenthetical annotations do not trigger deductions.
+- **Integration Seam (`DefaultCandidateSimilarityScorer`)**:
+  - Injects `TitleSimilarityScorer`, `ArtistSimilarityScorer`, `DurationSimilarityScorer`, `AlbumSimilarityScorer`, and `VersionPenaltyScorer`.
+  - Populates `versionPenalty` (`0.0` for matching recording) and `detailedPenalties` in `MatchScoreBreakdown`.
+  - Preserves `officialSignalScore` honestly as `null` for Phase 7G composite confidence evaluation.
 ### Phase 7E (Duration & Album Similarity Scoring)
 - **Phase 7E.1 (Duration Similarity Scoring)**:
   - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
@@ -322,20 +359,22 @@ Current Subphase: Phase 7E COMPLETE (Duration & Album Similarity Scorers Impleme
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 7F: Official Signal Scorer & Version Penalty Engine.
 - Phase 7G: Composite Scoring, Candidate Ranking, and Decision Engine.
+- Phase 7H: Calibrated Match Probability and Decision Policy.
+- Phase 7I: Subsystem Verification & Matching Freeze.
 - Matching Evaluation & Benchmarking (Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Matching Engine & Feature Extraction Suite: **PASS** (11 test classes covering contracts, feature extraction, edge cases, immutability, determinism)
+- Focused Matching Engine & Feature Extraction Suite: **PASS** (12 test classes covering contracts, feature extraction, edge cases, immutability, determinism)
 - Phase 7C Title Similarity Scorer Suite (`TitleSimilarityScorerTest`): 21 tests across 8 nested classes
 - Phase 7D Artist Similarity Scorer Suite (`ArtistSimilarityScorerTest`): 20 tests across 6 nested classes
 - Phase 7E Duration Similarity Scorer Suite (`DurationSimilarityScorerTest`): 15 tests across 4 nested classes
 - Phase 7E Album Similarity Scorer Suite (`AlbumSimilarityScorerTest`): 19 tests across 5 nested classes
-- Phase 7C/7D/7E Integration Suite (`CandidateSimilarityScorerIntegrationTest`): 7 integration tests
+- Phase 7F Version Penalty Scorer Suite (`VersionPenaltyScorerTest`): 27 tests across 7 nested classes
+- Phase 7C/7D/7E/7F Integration Suite (`CandidateSimilarityScorerIntegrationTest`): 12 integration tests
 - Focused Candidate Discovery & Mapping Suite: **PASS** (133 tests passing across discovery and mapping)
 - Focused Normalization Test Suite: **PASS** (227 tests passing)
 - Full Non-Repository Unit Test Suite: **PASS** (100% passing across domain, identity, spotify, youtube, migration, playlist, matching)
@@ -352,6 +391,7 @@ Current Subphase: Phase 7E COMPLETE (Duration & Album Similarity Scorers Impleme
 - **Phase 7C (Title Similarity Scoring)**: COMPLETE
 - **Phase 7D (Artist Similarity Scoring)**: COMPLETE
 - **Phase 7E (Duration & Album Similarity Scoring)**: COMPLETE
+- **Phase 7F (Recording Version & Variant Penalty Engine)**: COMPLETE
 
 ## Next Recommended Work
-1. Phase 7F: Official Signal Scorer & Version Penalty Engine (evaluating official provenance signals and applying version/content discrepancy deductions).
+1. Phase 7G: Composite Scoring, Candidate Ranking, and Decision Engine.

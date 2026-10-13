@@ -5,6 +5,7 @@ import com.spotifyyoutube.migrator.matching.engine.feature.CandidateTrackFeature
 import com.spotifyyoutube.migrator.matching.engine.feature.CandidateVersionEvidence;
 import com.spotifyyoutube.migrator.matching.engine.feature.OfficialSignalEvidence;
 import com.spotifyyoutube.migrator.matching.engine.feature.SourceTrackFeatures;
+import com.spotifyyoutube.migrator.matching.engine.feature.VersionIndicator;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedArtistCredit;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedTrackMetadata;
 import com.spotifyyoutube.migrator.matching.normalization.RawTrackMetadata;
@@ -22,7 +23,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@DisplayName("CandidateSimilarityScorer Integration Tests (Phase 7C + 7D + 7E Seam)")
+@DisplayName("CandidateSimilarityScorer Integration Tests (Phase 7C + 7D + 7E + 7F Seam)")
 class CandidateSimilarityScorerIntegrationTest {
 
     private CandidateSimilarityScorer candidateScorer;
@@ -95,9 +96,12 @@ class CandidateSimilarityScorerIntegrationTest {
         // Album is null because candidate description lacks album evidence
         assertThat(breakdown.albumScore()).isNull();
 
-        // Future phases remain honestly null
+        // Official signal remains honestly null (Phase 7G scope)
         assertThat(breakdown.officialSignalScore()).isNull();
-        assertThat(breakdown.versionPenalty()).isNull();
+
+        // Phase 7F version penalty is 0.0 for matching recording
+        assertThat(breakdown.versionPenalty()).isEqualTo(0.0);
+        assertThat(breakdown.detailedPenalties()).isEmpty();
     }
 
     @Test
@@ -155,6 +159,75 @@ class CandidateSimilarityScorerIntegrationTest {
     }
 
     @Test
+    @DisplayName("should apply cover penalty to candidate while preserving title, artist, and duration scores")
+    void shouldApplyCoverPenaltyWhilePreservingOtherScores() {
+        SourceTrackFeatures s = source("Get Lucky", "Daft Punk", List.of());
+        CandidateTrackFeatures c = candidateWithVersion("vid-cover", "Daft Punk - Get Lucky (Cover)", "Daft Punk",
+                Set.of(VersionIndicator.COVER));
+
+        MatchScoreBreakdown breakdown = candidateScorer.scoreCandidate(s, c);
+
+        assertThat(breakdown.titleScore()).isGreaterThanOrEqualTo(0.95);
+        assertThat(breakdown.artistScore()).isEqualTo(1.0);
+        assertThat(breakdown.durationScore()).isEqualTo(1.0);
+        assertThat(breakdown.versionPenalty()).isEqualTo(0.25);
+        assertThat(breakdown.detailedPenalties()).containsEntry("COVER", 0.25);
+    }
+
+    @Test
+    @DisplayName("should apply reaction penalty to candidate")
+    void shouldApplyReactionPenaltyToCandidate() {
+        SourceTrackFeatures s = source("Get Lucky", "Daft Punk", List.of());
+        CandidateTrackFeatures c = candidateWithVersion("vid-reaction", "Daft Punk - Get Lucky (Reaction)", "Daft Punk",
+                Set.of(VersionIndicator.REACTION));
+
+        MatchScoreBreakdown breakdown = candidateScorer.scoreCandidate(s, c);
+
+        assertThat(breakdown.versionPenalty()).isEqualTo(0.30);
+        assertThat(breakdown.detailedPenalties()).containsEntry("REACTION", 0.30);
+    }
+
+    @Test
+    @DisplayName("should apply live mismatch penalty when candidate is live but source is studio")
+    void shouldApplyLiveMismatchPenaltyWhenSourceIsStudio() {
+        SourceTrackFeatures s = source("Get Lucky", "Daft Punk", List.of());
+        CandidateTrackFeatures c = candidateWithVersion("vid-live", "Daft Punk - Get Lucky (Live)", "Daft Punk",
+                Set.of(VersionIndicator.LIVE));
+
+        MatchScoreBreakdown breakdown = candidateScorer.scoreCandidate(s, c);
+
+        assertThat(breakdown.versionPenalty()).isEqualTo(0.15);
+        assertThat(breakdown.detailedPenalties()).containsEntry("LIVE_MISMATCH", 0.15);
+    }
+
+    @Test
+    @DisplayName("should not penalize candidate when both source and candidate are live recordings")
+    void shouldNotPenalizeWhenBothAreLive() {
+        SourceTrackFeatures s = liveSource("Get Lucky (Live)", "Daft Punk");
+        CandidateTrackFeatures c = candidateWithVersion("vid-live-match", "Daft Punk - Get Lucky (Live)", "Daft Punk",
+                Set.of(VersionIndicator.LIVE));
+
+        MatchScoreBreakdown breakdown = candidateScorer.scoreCandidate(s, c);
+
+        assertThat(breakdown.versionPenalty()).isEqualTo(0.0);
+        assertThat(breakdown.detailedPenalties()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("should combine multiple penalties additively in integration seam")
+    void shouldCombineMultiplePenaltiesAdditively() {
+        SourceTrackFeatures s = source("Get Lucky", "Daft Punk", List.of());
+        CandidateTrackFeatures c = candidateWithVersion("vid-multi", "Get Lucky (Cover Reaction)", "Daft Punk",
+                Set.of(VersionIndicator.COVER, VersionIndicator.REACTION));
+
+        MatchScoreBreakdown breakdown = candidateScorer.scoreCandidate(s, c);
+
+        assertThat(breakdown.versionPenalty()).isEqualTo(0.55);
+        assertThat(breakdown.detailedPenalties()).containsEntry("COVER", 0.25);
+        assertThat(breakdown.detailedPenalties()).containsEntry("REACTION", 0.30);
+    }
+
+    @Test
     @DisplayName("should preserve missing evidence honestly as null without synthetic coercion")
     void shouldPreserveMissingEvidenceHonestly() {
         SourceTrackFeatures s = source("", "Daft Punk", List.of(), "", null);
@@ -177,6 +250,10 @@ class CandidateSimilarityScorerIntegrationTest {
         // Album is null -> albumScore is null
         assertThat(breakdown.albumScore()).isNull();
         assertThat(breakdown.hasAlbumScore()).isFalse();
+
+        // Version penalty is 0.0 (no version discrepancies)
+        assertThat(breakdown.versionPenalty()).isEqualTo(0.0);
+        assertThat(breakdown.detailedPenalties()).isEmpty();
     }
 
     @Test
@@ -189,5 +266,41 @@ class CandidateSimilarityScorerIntegrationTest {
                 .isInstanceOf(NullPointerException.class);
         assertThatThrownBy(() -> candidateScorer.scoreCandidate(s, null))
                 .isInstanceOf(NullPointerException.class);
+    }
+
+    private SourceTrackFeatures liveSource(String title, String artist) {
+        String cleanPrimary = artist != null ? artist.trim().toLowerCase(Locale.ROOT) : "";
+        NormalizedTrackMetadata metadata = new NormalizedTrackMetadata(
+                RawTrackMetadata.of(title, artist, "Album", 248000L),
+                title != null ? title.toLowerCase(Locale.ROOT) : "",
+                new NormalizedArtistCredit(cleanPrimary, List.of()),
+                List.of(cleanPrimary),
+                List.of(),
+                "album",
+                Duration.ofMillis(248000),
+                new TokenizedTitle(title != null ? title : "", title != null ? title : "", false, Set.of(), null, null, Set.of(), List.of(), List.of(), List.of())
+        );
+        return new SourceTrackFeatures(
+                "spotify:track:live", title != null ? title.toLowerCase(Locale.ROOT) : "", title != null ? title : "", cleanPrimary,
+                List.of(cleanPrimary), List.of(),
+                "album", Duration.ofMillis(248000), 248000L,
+                true, true, !cleanPrimary.isEmpty(), Set.of(VersionIndicator.LIVE), false, true, false, false, metadata
+        );
+    }
+
+    private CandidateTrackFeatures candidateWithVersion(String id, String rawTitle, String channel, Set<VersionIndicator> indicators) {
+        Long durationMs = 248000L;
+        DestinationTrackCandidate candidate = new DestinationTrackCandidate(
+                id, rawTitle, channel, "Description", "https://thumb.jpg", "2021-01-01", Duration.ofMillis(durationMs)
+        );
+        CandidateVersionEvidence versionEvidence = new CandidateVersionEvidence(
+                indicators, List.of(), List.of(), false, false
+        );
+        return new CandidateTrackFeatures(
+                id, rawTitle, rawTitle != null ? rawTitle.toLowerCase(Locale.ROOT) : "", rawTitle != null ? rawTitle : "",
+                channel, channel != null ? channel.toLowerCase(Locale.ROOT) : "",
+                Duration.ofMillis(durationMs), durationMs, true, true, "Description", "2021-01-01",
+                versionEvidence, OfficialSignalEvidence.none(), candidate
+        );
     }
 }

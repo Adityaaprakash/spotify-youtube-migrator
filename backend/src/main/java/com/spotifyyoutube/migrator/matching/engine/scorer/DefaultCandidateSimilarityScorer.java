@@ -5,14 +5,15 @@ import com.spotifyyoutube.migrator.matching.engine.feature.CandidateTrackFeature
 import com.spotifyyoutube.migrator.matching.engine.feature.SourceTrackFeatures;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.Objects;
 
 /**
  * Default implementation of {@link CandidateSimilarityScorer}.
  * <p>
  * Coordinates {@link TitleSimilarityScorer}, {@link ArtistSimilarityScorer},
- * {@link DurationSimilarityScorer}, and {@link AlbumSimilarityScorer} to populate
- * the corresponding component scores in a {@link MatchScoreBreakdown}.
+ * {@link DurationSimilarityScorer}, {@link AlbumSimilarityScorer}, and {@link VersionPenaltyScorer}
+ * to populate the corresponding component scores and penalties in a {@link MatchScoreBreakdown}.
  * Preserves missing-data semantics by keeping absent scores as {@code null} without synthetic coercion.
  */
 @Component
@@ -22,6 +23,21 @@ public class DefaultCandidateSimilarityScorer implements CandidateSimilarityScor
     private final ArtistSimilarityScorer artistSimilarityScorer;
     private final DurationSimilarityScorer durationSimilarityScorer;
     private final AlbumSimilarityScorer albumSimilarityScorer;
+    private final VersionPenaltyScorer versionPenaltyScorer;
+
+    public DefaultCandidateSimilarityScorer(
+            TitleSimilarityScorer titleSimilarityScorer,
+            ArtistSimilarityScorer artistSimilarityScorer,
+            DurationSimilarityScorer durationSimilarityScorer,
+            AlbumSimilarityScorer albumSimilarityScorer,
+            VersionPenaltyScorer versionPenaltyScorer
+    ) {
+        this.titleSimilarityScorer = Objects.requireNonNull(titleSimilarityScorer, "titleSimilarityScorer must not be null");
+        this.artistSimilarityScorer = Objects.requireNonNull(artistSimilarityScorer, "artistSimilarityScorer must not be null");
+        this.durationSimilarityScorer = Objects.requireNonNull(durationSimilarityScorer, "durationSimilarityScorer must not be null");
+        this.albumSimilarityScorer = Objects.requireNonNull(albumSimilarityScorer, "albumSimilarityScorer must not be null");
+        this.versionPenaltyScorer = Objects.requireNonNull(versionPenaltyScorer, "versionPenaltyScorer must not be null");
+    }
 
     public DefaultCandidateSimilarityScorer(
             TitleSimilarityScorer titleSimilarityScorer,
@@ -29,10 +45,8 @@ public class DefaultCandidateSimilarityScorer implements CandidateSimilarityScor
             DurationSimilarityScorer durationSimilarityScorer,
             AlbumSimilarityScorer albumSimilarityScorer
     ) {
-        this.titleSimilarityScorer = Objects.requireNonNull(titleSimilarityScorer, "titleSimilarityScorer must not be null");
-        this.artistSimilarityScorer = Objects.requireNonNull(artistSimilarityScorer, "artistSimilarityScorer must not be null");
-        this.durationSimilarityScorer = Objects.requireNonNull(durationSimilarityScorer, "durationSimilarityScorer must not be null");
-        this.albumSimilarityScorer = Objects.requireNonNull(albumSimilarityScorer, "albumSimilarityScorer must not be null");
+        this(titleSimilarityScorer, artistSimilarityScorer, durationSimilarityScorer, albumSimilarityScorer,
+                new DefaultVersionPenaltyScorer());
     }
 
     public DefaultCandidateSimilarityScorer(
@@ -40,12 +54,14 @@ public class DefaultCandidateSimilarityScorer implements CandidateSimilarityScor
             ArtistSimilarityScorer artistSimilarityScorer
     ) {
         this(titleSimilarityScorer, artistSimilarityScorer,
-                new DefaultDurationSimilarityScorer(), new DefaultAlbumSimilarityScorer());
+                new DefaultDurationSimilarityScorer(), new DefaultAlbumSimilarityScorer(),
+                new DefaultVersionPenaltyScorer());
     }
 
     public DefaultCandidateSimilarityScorer() {
         this(new DefaultTitleSimilarityScorer(), new DefaultArtistSimilarityScorer(),
-                new DefaultDurationSimilarityScorer(), new DefaultAlbumSimilarityScorer());
+                new DefaultDurationSimilarityScorer(), new DefaultAlbumSimilarityScorer(),
+                new DefaultVersionPenaltyScorer());
     }
 
     @Override
@@ -57,6 +73,8 @@ public class DefaultCandidateSimilarityScorer implements CandidateSimilarityScor
         Double artistScore = artistSimilarityScorer.score(source, candidate);
         Double durationScore = durationSimilarityScorer.score(source, candidate);
         Double albumScore = albumSimilarityScorer.score(source, candidate);
+        Double versionPenalty = versionPenaltyScorer.calculatePenalty(source, candidate);
+        Map<String, Double> detailedPenalties = versionPenaltyScorer.calculateDetailedPenalties(source, candidate);
 
         MatchScoreBreakdown.Builder builder = MatchScoreBreakdown.builder();
         if (titleScore != null) {
@@ -70,6 +88,12 @@ public class DefaultCandidateSimilarityScorer implements CandidateSimilarityScor
         }
         if (albumScore != null) {
             builder.albumScore(albumScore);
+        }
+        if (versionPenalty != null) {
+            builder.versionPenalty(versionPenalty);
+        }
+        if (detailedPenalties != null && !detailedPenalties.isEmpty()) {
+            builder.detailedPenalties(detailedPenalties);
         }
 
         return builder.build();
