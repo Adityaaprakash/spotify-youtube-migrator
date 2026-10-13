@@ -3,9 +3,56 @@
 Last Updated: 2026-10-13
 
 Current Phase: Phase 7 — Matching Engine
-Current Subphase: Phase 7F COMPLETE (Recording Version & Variant Penalty Engine Implemented, Tested, Ready for Phase 7G Composite Scoring & Decision Engine)
+Current Subphase: Phase 7G COMPLETE (Composite Scoring, Candidate Ranking, and Decision Engine Implemented, Tested, Ready for Phase 7H Calibrated Match Probability)
 
 ## Completed
+### Phase 7G (Composite Scoring, Candidate Ranking, and Decision Engine)
+- **Phase 7G.1 (Composite Scoring with Dynamic Re-normalization)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - `CompositeScoreCalculator`: Core strategy interface for calculating overall composite score in `[0.0, 1.0]`.
+  - `DefaultCompositeScoreCalculator`: Stateless Spring `@Component` implementing linear combination with proportional re-normalization:
+    - Nominal weights: Title Similarity (40%), Artist Similarity (30%), Duration Alignment (10%), Album Correspondence (10%), Official Provenance (10%).
+    - Dynamic re-normalization: Missing dimensions (`null`) are excluded from active weight sum; active weights re-normalize proportionally so missing evidence never dilutes scores or fabricates matches.
+    - Version penalty deduction: Deducts `versionPenalty` once from weighted base score; strictly clamped to `[0.0, 1.0]`.
+    - Rounded to 4 decimal places for cross-platform determinism.
+    - Input validation: Rejects `NaN`, infinities, out-of-bounds scores, and invalid constructor weights.
+- **Phase 7G.2 (Official Provenance Signal Scoring)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - `OfficialSignalScorer`: Core interface for evaluating candidate provenance.
+  - `DefaultOfficialSignalScorer`: Stateless Spring `@Component` evaluating `OfficialSignalEvidence`:
+    - Verified markers (Topic channel, VEVO, verified artist match, DDEX release description, official audio/video markers): `1.0`.
+    - Unverified claims alone (e.g. channel name containing "official" without verified markers): `0.0`.
+    - Missing/unextracted evidence: `null` (honest missing data).
+  - Integrated into `DefaultCandidateSimilarityScorer` to populate `officialSignalScore` in `MatchScoreBreakdown`.
+- **Phase 7G.3 (Deterministic Candidate Ranking Engine)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.ranking`
+  - `CandidateRankingEngine`: Core interface for prioritizing evaluated candidates.
+  - `DefaultCandidateRankingEngine`: Stateless Spring `@Component` implementing a 7-level tie-breaking hierarchy:
+    1. Overall Composite Score (descending)
+    2. Title Similarity Score (descending)
+    3. Artist Similarity Score (descending)
+    4. Official Provenance Signal Score (descending)
+    5. Version Penalty (ascending: lower penalty preferred)
+    6. Duration Alignment Score (descending)
+    7. Candidate Identifier (lexicographical ascending for 100% reproducible ordering)
+  - Pure, non-mutating: does not modify caller input collection, returns unmodifiable list.
+- **Phase 7G.4 (Transparent Match Decision Engine)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.decision`
+  - `MatchDecisionEngine`: Core interface for making final migration match decisions.
+  - `DefaultMatchDecisionEngine`: Stateless Spring `@Component` applying transparent rules:
+    - Empty Candidates $\to$ `NO_MATCH` with reason "No destination candidates discovered".
+    - Score $< 0.50$ (Below Minimum Viable Threshold) $\to$ `NO_MATCH` (`selectedCandidate = null`, `POOR` confidence).
+    - Borderline Score ($0.50 \le \text{score} < 0.75$) $\to$ `REVIEW_REQUIRED` (`selectedCandidate = top`, `POOR` confidence).
+    - Version Penalty Discrepancy on Viable Candidate ($p > 0.10$, $\text{baseScore} \ge 0.50$) $\to$ `REVIEW_REQUIRED` (`selectedCandidate = top`, `POOR` confidence). A detected cover, live mismatch, or variant of a viable candidate requires human review rather than silent non-match or automated approval.
+    - Ambiguity Margin ($s_{\text{top}} - s_{\text{runnerUp}} < 0.05$) $\to$ `REVIEW_REQUIRED` (`GOOD` confidence) due to close competition.
+    - Unambiguous Match ($\text{score} \ge 0.75$) $\to$ `MATCH` (`EXCELLENT` confidence for $\ge 0.90$, `GOOD` confidence for $0.75$ to $< 0.90$).
+- **Phase 7G.5 (Top-Level Matching Pipeline Orchestration)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine`
+  - `TrackMatchingEngine`: Top-level interface orchestrating complete matching pipeline.
+  - `DefaultTrackMatchingEngine`: Stateless Spring `@Component` coordinating:
+    $\text{TrackMatchRequest} \to \text{Feature Extraction} \to \text{Similarity Scoring} \to \text{Composite Scoring} \to \text{Ranking} \to \text{Decision} \to \text{TrackMatchResult}$.
+    Generates explainable diagnostic notes for candidate matches.
+
 ### Phase 7F (Recording Version & Variant Penalty Engine)
 - **Phase 7F.1 (Version Penalty Scorer)**:
   - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`

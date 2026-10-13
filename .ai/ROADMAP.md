@@ -60,9 +60,8 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 7C**: [COMPLETE] Title Similarity Scorer (`TitleSimilarityScorer`, `DefaultTitleSimilarityScorer`, Levenshtein character edit distance, token-sort permutation tolerance, delimiter segment matching, short-title false-positive safeguards, honest missing-data handling).
 - **Phase 7D**: [COMPLETE] Artist Similarity Scorer (`ArtistSimilarityScorer`, `DefaultArtistSimilarityScorer`, Phase 5 `ArtistNormalizer` reuse, official channel equivalence, greedy 1-to-1 multi-artist matching, primary vs featured priority, bounded featured-only scores, substring collision safeguards).
 - **Phase 7E**: [COMPLETE] Duration & Album Similarity Scoring (`DurationSimilarityScorer`, `DefaultDurationSimilarityScorer`, continuous monotonic piecewise decay function, `AlbumSimilarityScorer`, `DefaultAlbumSimilarityScorer`, Phase 5 `AlbumNormalizer` reuse, YouTube description extraction, substring collision safeguards, honest missing-data handling).
-- **Phase 7F**: [COMPLETE] Recording Version & Variant Penalty Engine (ADR-015, `VersionPenaltyScorer`, `DefaultVersionPenaltyScorer`, bounded [0.0, 1.0] deductions, cover/reaction/karaoke/nightcore/sped-up/slowed penalties, live and remix mismatch logic, false-positive protection for genuine titles, `CandidateSimilarityScorer` seam integration).
-- **Phase 7G**: [NEXT PLANNED SUBPHASE - NOT STARTED] Composite Scoring, Candidate Ranking, and Decision Engine.
-- **Phase 7H**: Calibrated Match Probability and Decision Policy.
+- **Phase 7G**: [COMPLETE] Composite Scoring, Candidate Ranking, and Decision Engine (ADR-016, `CompositeScoreCalculator`, `DefaultCompositeScoreCalculator` with dynamic re-normalization, `OfficialSignalScorer`, `DefaultOfficialSignalScorer`, `CandidateRankingEngine`, `DefaultCandidateRankingEngine` with 7-level tie-breaking, `MatchDecisionEngine`, `DefaultMatchDecisionEngine` with threshold/ambiguity/penalty rules, `TrackMatchingEngine`, `DefaultTrackMatchingEngine`).
+- **Phase 7H**: [NEXT PLANNED SUBPHASE - NOT STARTED] Calibrated Match Probability and Decision Policy.
 - **Phase 7I**: Subsystem Verification & Matching Freeze.
 ### **Phase 8 — Matching Evaluation & Benchmark**
 ### **Phase 9 — Migration Engine**

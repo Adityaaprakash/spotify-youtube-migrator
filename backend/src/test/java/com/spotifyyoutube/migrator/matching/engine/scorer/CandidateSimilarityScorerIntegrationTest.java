@@ -96,8 +96,8 @@ class CandidateSimilarityScorerIntegrationTest {
         // Album is null because candidate description lacks album evidence
         assertThat(breakdown.albumScore()).isNull();
 
-        // Official signal remains honestly null (Phase 7G scope)
-        assertThat(breakdown.officialSignalScore()).isNull();
+        // Official signal evaluated in Phase 7G (0.0 for CandidateTrackFeatures without official signals)
+        assertThat(breakdown.officialSignalScore()).isEqualTo(0.0);
 
         // Phase 7F version penalty is 0.0 for matching recording
         assertThat(breakdown.versionPenalty()).isEqualTo(0.0);
@@ -116,6 +116,18 @@ class CandidateSimilarityScorerIntegrationTest {
         assertThat(breakdown.albumScore()).isNotNull();
         assertThat(breakdown.albumScore()).isEqualTo(1.0);
         assertThat(breakdown.durationScore()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("should populate officialSignalScore when candidate exhibits official evidence")
+    void shouldPopulateOfficialSignalScoreWhenEvidencePresent() {
+        SourceTrackFeatures s = source("Get Lucky", "Daft Punk", List.of());
+        CandidateTrackFeatures c = candidateWithOfficial("vid-official", "Daft Punk - Get Lucky", "Daft Punk - Topic",
+                new OfficialSignalEvidence(true, false, false, false, false, false, false));
+
+        MatchScoreBreakdown breakdown = candidateScorer.scoreCandidate(s, c);
+
+        assertThat(breakdown.officialSignalScore()).isEqualTo(1.0);
     }
 
     @Test
@@ -172,6 +184,12 @@ class CandidateSimilarityScorerIntegrationTest {
         assertThat(breakdown.durationScore()).isEqualTo(1.0);
         assertThat(breakdown.versionPenalty()).isEqualTo(0.25);
         assertThat(breakdown.detailedPenalties()).containsEntry("COVER", 0.25);
+
+        // Verify composite score incorporates the penalty separately
+        CompositeScoreCalculator compositeCalculator = new DefaultCompositeScoreCalculator();
+        Double compositeScore = compositeCalculator.calculateCompositeScore(breakdown);
+        assertThat(compositeScore).isNotNull();
+        assertThat(compositeScore).isLessThan(0.80);
     }
 
     @Test
@@ -296,11 +314,25 @@ class CandidateSimilarityScorerIntegrationTest {
         CandidateVersionEvidence versionEvidence = new CandidateVersionEvidence(
                 indicators, List.of(), List.of(), false, false
         );
+        String cleanTitle = rawTitle != null ? rawTitle.replaceAll("(?i)\\s*\\([^)]+\\)", "").trim() : "";
+        return new CandidateTrackFeatures(
+                id, rawTitle, rawTitle != null ? rawTitle.toLowerCase(Locale.ROOT) : "", cleanTitle,
+                channel, channel != null ? channel.toLowerCase(Locale.ROOT) : "",
+                Duration.ofMillis(durationMs), durationMs, true, true, "Description", "2021-01-01",
+                versionEvidence, OfficialSignalEvidence.none(), candidate
+        );
+    }
+
+    private CandidateTrackFeatures candidateWithOfficial(String id, String rawTitle, String channel, OfficialSignalEvidence official) {
+        Long durationMs = 248000L;
+        DestinationTrackCandidate candidate = new DestinationTrackCandidate(
+                id, rawTitle, channel, "Description", "https://thumb.jpg", "2021-01-01", Duration.ofMillis(durationMs)
+        );
         return new CandidateTrackFeatures(
                 id, rawTitle, rawTitle != null ? rawTitle.toLowerCase(Locale.ROOT) : "", rawTitle != null ? rawTitle : "",
                 channel, channel != null ? channel.toLowerCase(Locale.ROOT) : "",
                 Duration.ofMillis(durationMs), durationMs, true, true, "Description", "2021-01-01",
-                versionEvidence, OfficialSignalEvidence.none(), candidate
+                CandidateVersionEvidence.empty(), official, candidate
         );
     }
 }

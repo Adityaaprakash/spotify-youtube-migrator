@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -27,6 +28,9 @@ public class DefaultTitleSimilarityScorer implements TitleSimilarityScorer {
     private static final Pattern DELIMITER_SEGMENT_PATTERN = Pattern.compile("\\s*[-|:]\\s*");
     private static final Pattern WHITESPACE_PATTERN = Pattern.compile("\\s+");
     private static final Pattern PUNCTUATION_STRIP_PATTERN = Pattern.compile("[^\\p{L}\\p{N}\\s]");
+    private static final Pattern BRACKET_STRIP_PATTERN = Pattern.compile(
+            "\\s*[\\[\\(\\{][^\\[\\(\\{\\]\\)\\}]*[\\]\\)\\}]\\s*"
+    );
 
     @Override
     public Double score(SourceTrackFeatures source, CandidateTrackFeatures candidate) {
@@ -54,6 +58,13 @@ public class DefaultTitleSimilarityScorer implements TitleSimilarityScorer {
         String cClean = candidate.cleanTitle() != null ? candidate.cleanTitle().trim().toLowerCase(Locale.ROOT) : "";
         if (!sClean.isEmpty() && sClean.equals(cClean)) {
             return 1.0;
+        }
+
+        // Bracketed annotation strip match on full candidate title (e.g. "Billie Jean (Acoustic Cover)")
+        String cUnbracketed = stripBrackets(cNorm);
+        if (!cUnbracketed.isEmpty() && (cUnbracketed.equals(sNorm)
+                || (!sClean.isEmpty() && cUnbracketed.equals(sClean)))) {
+            return sNorm.length() <= 2 ? 0.95 : 0.98;
         }
 
         // 2. Token extraction & Multi-set analysis
@@ -120,33 +131,81 @@ public class DefaultTitleSimilarityScorer implements TitleSimilarityScorer {
     }
 
     private Double evaluateDelimiterSegments(String sNorm, String sClean, String cNorm, String cClean) {
-        String[] cSegments = DELIMITER_SEGMENT_PATTERN.split(cNorm);
-        if (cSegments.length <= 1) {
+        Set<String> candidateInputs = new LinkedHashSet<>();
+        if (cNorm != null && !cNorm.isBlank()) {
+            candidateInputs.add(cNorm);
+            String unbracketed = stripBrackets(cNorm);
+            if (!unbracketed.isBlank()) {
+                candidateInputs.add(unbracketed);
+            }
+        }
+        if (cClean != null && !cClean.isBlank()) {
+            candidateInputs.add(cClean);
+            String unbracketed = stripBrackets(cClean);
+            if (!unbracketed.isBlank()) {
+                candidateInputs.add(unbracketed);
+            }
+        }
+
+        List<String> allSegments = new ArrayList<>();
+        for (String input : candidateInputs) {
+            String[] segments = DELIMITER_SEGMENT_PATTERN.split(input);
+            if (segments.length > 1) {
+                for (String rawSegment : segments) {
+                    String seg = rawSegment.trim();
+                    if (!seg.isEmpty()) {
+                        allSegments.add(seg);
+                    }
+                }
+            }
+        }
+
+        if (allSegments.isEmpty()) {
             return null;
         }
 
         double maxScore = 0.0;
-        for (String rawSegment : cSegments) {
-            String seg = rawSegment.trim();
-            if (seg.isEmpty()) {
-                continue;
-            }
-
+        for (String seg : allSegments) {
             // Exact segment match
             if (seg.equals(sNorm) || (!sClean.isEmpty() && seg.equals(sClean))) {
                 // Short title guard: single/two character titles e.g. "7", "XO" receive 0.95 rather than 0.98
                 return sNorm.length() <= 2 ? 0.95 : 0.98;
             }
 
+            // Segment with bracketed annotations stripped e.g. "billie jean (acoustic cover)" -> "billie jean"
+            String unbracketedSeg = stripBrackets(seg);
+            if (!unbracketedSeg.isEmpty() && (unbracketedSeg.equals(sNorm)
+                    || (!sClean.isEmpty() && unbracketedSeg.equals(sClean)))) {
+                return sNorm.length() <= 2 ? 0.95 : 0.98;
+            }
+
             // Clean segment comparison
             String cleanSeg = PUNCTUATION_STRIP_PATTERN.matcher(seg).replaceAll("").trim();
             String cleanSource = PUNCTUATION_STRIP_PATTERN.matcher(sNorm).replaceAll("").trim();
-            if (!cleanSeg.isEmpty() && cleanSeg.equals(cleanSource)) {
+            String cleanSourceClean = !sClean.isEmpty()
+                    ? PUNCTUATION_STRIP_PATTERN.matcher(sClean).replaceAll("").trim()
+                    : "";
+            if (!cleanSeg.isEmpty() && (cleanSeg.equals(cleanSource)
+                    || (!cleanSourceClean.isEmpty() && cleanSeg.equals(cleanSourceClean)))) {
                 return sNorm.length() <= 2 ? 0.92 : 0.96;
             }
 
-            double lev = calculateLevenshteinSimilarity(sNorm, seg);
-            double sort = calculateTokenSortSimilarity(extractTokens(sNorm), extractTokens(seg));
+            String cleanUnbracketed = PUNCTUATION_STRIP_PATTERN.matcher(unbracketedSeg).replaceAll("").trim();
+            if (!cleanUnbracketed.isEmpty() && (cleanUnbracketed.equals(cleanSource)
+                    || (!cleanSourceClean.isEmpty() && cleanUnbracketed.equals(cleanSourceClean)))) {
+                return sNorm.length() <= 2 ? 0.92 : 0.96;
+            }
+
+            double lev = Math.max(
+                    calculateLevenshteinSimilarity(sNorm, seg),
+                    !unbracketedSeg.isEmpty() ? calculateLevenshteinSimilarity(sNorm, unbracketedSeg) : 0.0
+            );
+            double sort = Math.max(
+                    calculateTokenSortSimilarity(extractTokens(sNorm), extractTokens(seg)),
+                    !unbracketedSeg.isEmpty()
+                            ? calculateTokenSortSimilarity(extractTokens(sNorm), extractTokens(unbracketedSeg))
+                            : 0.0
+            );
             double best = Math.max(lev, sort);
             if (best > maxScore) {
                 maxScore = best;
@@ -154,6 +213,14 @@ public class DefaultTitleSimilarityScorer implements TitleSimilarityScorer {
         }
 
         return maxScore > 0.0 ? maxScore : null;
+    }
+
+    private String stripBrackets(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        String stripped = BRACKET_STRIP_PATTERN.matcher(text).replaceAll(" ");
+        return WHITESPACE_PATTERN.matcher(stripped).replaceAll(" ").trim();
     }
 
     private List<String> extractTokens(String text) {

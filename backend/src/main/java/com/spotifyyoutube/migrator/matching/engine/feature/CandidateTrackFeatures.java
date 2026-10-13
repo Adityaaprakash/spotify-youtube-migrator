@@ -53,7 +53,6 @@ public record CandidateTrackFeatures(
         channelOrArtist = channelOrArtist != null ? channelOrArtist : "";
         normalizedChannelOrArtist = normalizedChannelOrArtist != null ? normalizedChannelOrArtist : "";
         versionEvidence = versionEvidence != null ? versionEvidence : CandidateVersionEvidence.empty();
-        officialSignal = officialSignal != null ? officialSignal : OfficialSignalEvidence.none();
     }
 
     public Optional<Duration> getDuration() {

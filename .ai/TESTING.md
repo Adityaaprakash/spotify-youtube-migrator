@@ -221,15 +221,42 @@ Implemented and verified (11 test suites covering Phase 7A contracts and Phase 7
   - Null, blank, and missing data safety: `NullPointerException` on null source or candidate; null indicator overloads handled as empty sets; `score()` delegation.
   - Immutability & determinism: unmodifiable `detailedPenalties` map; identical output across 100 repeated executions.
 
-## Future Testing Scope (Phase 7G+)
+- `OfficialSignalScorerTest` (Phase 7G.2): 10 tests across 3 nested categories:
+  - Verified signals: auto-generated Topic channel (`1.0`), VEVO channel (`1.0`), verified artist channel match (`1.0`), DDEX release description (`1.0`), official audio marker (`1.0`), official video marker (`1.0`).
+  - Unverified claims & non-official: channel name merely containing "official" without verified proof awards `0.0`; non-official candidate awards `0.0`.
+  - Missing data & validation: null candidate official signal evidence honestly returns `null`; null inputs throw `NullPointerException`.
+- `CompositeScoreCalculatorTest` (Phase 7G.1): 12 tests across 4 nested categories:
+  - Complete evidence & weights: perfect 1.0 across all 5 dimensions yields `1.0`; linear combination follows documented weights (Title 40%, Artist 30%, Duration 10%, Album 10%, Official 10%).
+  - Dynamic re-normalization: secondary dimensions absent re-normalizes proportionally over active dimensions; all scores absent returns `0.0`.
+  - Version penalties: single deduction of version penalty from base composite score; clamped to `0.0` when penalty exceeds base; null penalty treated as 0.0 deduction.
+  - Validation & determinism: rejects null breakdown with `NullPointerException`; rejects NaN, infinite, and out-of-bounds scores with `IllegalArgumentException`; rejects invalid constructor weights; strictly deterministic.
+- `CandidateRankingEngineTest` (Phase 7G.3): 12 tests across 3 nested categories:
+  - Basic ranking: empty candidate list returns empty list; single candidate preserved; candidates sorted descending by overall composite score.
+  - 7-level tie-breaking ladder: breaks composite tie using title score (descending); breaks title tie using artist score (descending); breaks artist tie using official signal (descending); breaks official signal tie using version penalty (ascending); breaks version penalty tie using duration score (descending); breaks complete tie using candidate ID (lexicographical ascending).
+  - Immutability & determinism: caller input collection never mutated; returns unmodifiable list; null overall score treated as 0.0 and placed after scored candidates; null list throws `NullPointerException`; deterministic repeated ordering.
+- `MatchDecisionEngineTest` (Phase 7G.4): 12 tests across 5 nested categories:
+  - Empty candidates & unresolved: empty candidate list produces `NO_MATCH` with "No destination candidates discovered"; top score below minimum viable threshold (< 0.50) produces `NO_MATCH` with `selectedCandidate = null` and `POOR` confidence.
+  - Borderline scores: score exactly at 0.50 or below 0.75 produces `REVIEW_REQUIRED` with top candidate selected and explainable diagnostic reasons.
+  - Version penalty gate: penalty exceeding max (> 0.10) on viable candidate produces `REVIEW_REQUIRED`; penalty <= 0.10 allows automated `MATCH`.
+  - Ambiguity margin: score difference between top two candidates < 0.05 margin produces `REVIEW_REQUIRED` with `GOOD` confidence; difference >= 0.05 allows automated `MATCH`.
+  - Unambiguous matches: score between 0.75 and 0.90 produces `MATCH` with `GOOD` confidence; score >= 0.90 produces `MATCH` with `EXCELLENT` confidence; validation rejects null arguments.
+- `TrackMatchingEngineIntegrationTest` (Phase 7G.5): 5 end-to-end integration tests:
+  - Full pipeline match: executes Feature Extraction $\to$ Similarity Scoring $\to$ Composite Scoring $\to$ Ranking $\to$ Decision and selects unambiguous official candidate with `EXCELLENT` confidence, correct candidate rank ordering, and complete score breakdown.
+  - Empty discovery handling: empty candidates list produces clean `NO_MATCH`.
+  - Version discrepancy review: cover candidate incurs version penalty and requires manual review.
+  - Ambiguity margin review: two closely competing candidates require manual review.
+  - Request validation: null request throws `NullPointerException`.
+
+## Future Testing Scope (Phase 7H+)
 As the migrator logic scales, testing will expand to:
-- Composite Scoring & Decision Engine (Phase 7G/7H)
+- Calibrated Match Probability and Decision Policy (Phase 7H)
+- Subsystem Verification & Matching Freeze (Phase 7I)
 - Matching Benchmark Test Suite (Phase 8)
 - Migration State Machine Test Suite (Phase 9)
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
-- **Phase 7A, 7B, 7C, 7D, 7E & 7F Complete**: Core Matching Engine contracts (`TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`), Candidate Feature Extraction (`DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`), Title Similarity Scorer (`DefaultTitleSimilarityScorer`), Artist Similarity Scorer (`DefaultArtistSimilarityScorer`), Duration Similarity Scorer (`DefaultDurationSimilarityScorer`), Album Similarity Scorer (`DefaultAlbumSimilarityScorer`), Version Penalty Scorer (`DefaultVersionPenaltyScorer`), and composition seam (`DefaultCandidateSimilarityScorer`) implemented and verified across 17 test suites.
+- **Phase 7A–7G Complete**: Core Matching Engine contracts, Feature Extraction, Title/Artist/Duration/Album similarity scorers, Version Penalty Engine, Composite Scoring Calculator, Candidate Ranking Engine, Match Decision Engine, and Top-Level Track Matching Engine implemented and tested across 22 matching test suites.
 - **Phase 6 Complete & Frozen**: Full Candidate Discovery pipeline (Phases 6A–6G) verified across 133 discovery tests. Phase 6 is FROZEN.
 - **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is FROZEN.
 - **Phase 4 Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.

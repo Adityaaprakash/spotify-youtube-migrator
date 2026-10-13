@@ -166,6 +166,40 @@ class TitleSimilarityScorerTest {
             assertThat(score).isNotNull();
             assertThat(score).isGreaterThanOrEqualTo(0.95);
         }
+
+        @Test
+        @DisplayName("should match title segment containing bracketed variant annotation (>=0.95)")
+        void shouldMatchTitleSegmentWithBracketedVariantAnnotation() {
+            SourceTrackFeatures source = createSource("billie jean", "Billie Jean", "Michael Jackson");
+            CandidateTrackFeatures candidate = createCandidate(
+                    "Michael Jackson - Billie Jean (Acoustic Cover)",
+                    "michael jackson - billie jean (acoustic cover)",
+                    "Michael Jackson - Billie Jean (Acoustic Cover)",
+                    "Acoustic Covers Channel"
+            );
+
+            Double score = scorer.score(source, candidate);
+
+            assertThat(score).isNotNull();
+            assertThat(score).isGreaterThanOrEqualTo(0.95);
+        }
+
+        @Test
+        @DisplayName("should match title with bracketed variant annotation without delimiters (>=0.95)")
+        void shouldMatchTitleWithBracketedVariantWithoutDelimiters() {
+            SourceTrackFeatures source = createSource("billie jean", "Billie Jean", "Michael Jackson");
+            CandidateTrackFeatures candidate = createCandidate(
+                    "Billie Jean (Acoustic Cover)",
+                    "billie jean (acoustic cover)",
+                    "Billie Jean (Acoustic Cover)",
+                    "Acoustic Covers Channel"
+            );
+
+            Double score = scorer.score(source, candidate);
+
+            assertThat(score).isNotNull();
+            assertThat(score).isGreaterThanOrEqualTo(0.95);
+        }
     }
 
     @Nested
