@@ -160,6 +160,27 @@ class TrackMatchResultTest {
             assertThat(result.sourceTrack()).isEqualTo(request.sourceTrack());
             assertThat(result.matchReasons()).containsExactly("Candidate pool empty");
         }
+
+        @Test
+        @DisplayName("of factory should construct valid result with null and non-null calibrated probability")
+        void ofFactoryShouldConstructResult() {
+            DestinationTrackCandidate cand = sampleCandidate("c-1");
+            CandidateMatchEvaluation eval = CandidateMatchEvaluation.unevaluated(cand, null);
+
+            TrackMatchResult resUncalibrated = TrackMatchResult.of(
+                    "sp-1", sampleSourceTrack(), MatchDecision.MATCH, cand,
+                    0.92, MatchConfidence.EXCELLENT, null, List.of(eval), List.of("reason")
+            );
+            assertThat(resUncalibrated.calibratedProbability()).isNull();
+            assertThat(resUncalibrated.hasCalibratedProbability()).isFalse();
+
+            TrackMatchResult resCalibrated = TrackMatchResult.of(
+                    "sp-1", sampleSourceTrack(), MatchDecision.MATCH, cand,
+                    0.92, 0.88, MatchConfidence.EXCELLENT, null, List.of(eval), List.of("reason")
+            );
+            assertThat(resCalibrated.calibratedProbability()).isEqualTo(0.88);
+            assertThat(resCalibrated.hasCalibratedProbability()).isTrue();
+        }
     }
 
     @Nested

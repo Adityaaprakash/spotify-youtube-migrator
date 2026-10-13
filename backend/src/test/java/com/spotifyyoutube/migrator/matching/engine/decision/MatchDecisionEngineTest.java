@@ -1,6 +1,7 @@
 package com.spotifyyoutube.migrator.matching.engine.decision;
 
 import com.spotifyyoutube.migrator.matching.engine.CandidateMatchEvaluation;
+import com.spotifyyoutube.migrator.matching.engine.calibration.DefaultMatchProbabilityCalibrator;
 import com.spotifyyoutube.migrator.matching.engine.MatchConfidence;
 import com.spotifyyoutube.migrator.matching.engine.MatchDecision;
 import com.spotifyyoutube.migrator.matching.engine.MatchScoreBreakdown;
@@ -224,6 +225,140 @@ class MatchDecisionEngineTest {
     }
 
     @Nested
+    @DisplayName("Calibrated Probability Decision Policy")
+    class CalibratedProbabilityPolicy {
+
+        private MatchDecisionEngine validatedDecisionEngine;
+        private MatchDecisionEngine unvalidatedConfiguredEngine;
+
+        @BeforeEach
+        void setUpCalibratedEngines() {
+            validatedDecisionEngine = new DefaultMatchDecisionEngine(
+                    DefaultMatchProbabilityCalibrator.withValidatedPlattScaling(-10.0, 7.5, "v1.0-validated")
+            );
+            unvalidatedConfiguredEngine = new DefaultMatchDecisionEngine(
+                    DefaultMatchProbabilityCalibrator.withPlattScaling(-10.0, 7.5, "v1.0-unvalidated")
+            );
+        }
+
+        @Test
+        @DisplayName("should decide REVIEW_REQUIRED when validated probability is below threshold (< 0.70)")
+        void shouldDecideReviewRequiredWhenProbabilityBelowThreshold() {
+            // Score 0.82 >= 0.75 match threshold, but calibrated probability 0.65 < 0.70
+            CandidateMatchEvaluation eval = createEvaluationWithProbability(
+                    "cand-1", "Get Lucky", 0.82, 0.0, 0.65
+            );
+
+            TrackMatchResult result = validatedDecisionEngine.decide("track-1", sourceTrack, List.of(eval));
+
+            assertThat(result.decision()).isEqualTo(MatchDecision.REVIEW_REQUIRED);
+            assertThat(result.selectedCandidate()).isNotNull();
+            assertThat(result.selectedCandidate().id()).isEqualTo("cand-1");
+            assertThat(result.calibratedProbability()).isEqualTo(0.65);
+            assertThat(result.matchReasons()).anyMatch(r -> r.contains("calibrated match probability"));
+            assertThat(result.matchReasons()).anyMatch(r -> r.contains("below minimum match probability threshold"));
+        }
+
+        @Test
+        @DisplayName("should decide MATCH when validated probability meets threshold (>= 0.70)")
+        void shouldDecideMatchWhenProbabilityMeetsThreshold() {
+            // Score 0.85 >= 0.75, calibrated probability 0.80 >= 0.70
+            CandidateMatchEvaluation eval = createEvaluationWithProbability(
+                    "cand-1", "Get Lucky", 0.85, 0.0, 0.80
+            );
+
+            TrackMatchResult result = validatedDecisionEngine.decide("track-1", sourceTrack, List.of(eval));
+
+            assertThat(result.decision()).isEqualTo(MatchDecision.MATCH);
+            assertThat(result.selectedCandidate().id()).isEqualTo("cand-1");
+            assertThat(result.calibratedProbability()).isEqualTo(0.80);
+            assertThat(result.matchReasons()).anyMatch(r -> r.contains("Calibrated match probability confirmed"));
+        }
+
+        @Test
+        @DisplayName("should not let high calibrated probability override version penalty gate")
+        void shouldNotLetHighProbabilityOverrideVersionPenalty() {
+            // Score 0.88, probability 0.95, but version penalty 0.15 > 0.10
+            CandidateMatchEvaluation eval = createEvaluationWithProbability(
+                    "cand-live", "Get Lucky (Live)", 0.88, 0.15, 0.95
+            );
+
+            TrackMatchResult result = validatedDecisionEngine.decide("track-1", sourceTrack, List.of(eval));
+
+            assertThat(result.decision()).isEqualTo(MatchDecision.REVIEW_REQUIRED);
+            assertThat(result.selectedCandidate().id()).isEqualTo("cand-live");
+            assertThat(result.matchReasons()).anyMatch(r -> r.contains("recording version discrepancy penalty"));
+        }
+
+        @Test
+        @DisplayName("should not let high calibrated probability override ambiguity margin gate")
+        void shouldNotLetHighProbabilityOverrideAmbiguityMargin() {
+            CandidateMatchEvaluation top = createEvaluationWithProbability(
+                    "cand-1", "Get Lucky (Audio)", 0.88, 0.0, 0.92
+            );
+            CandidateMatchEvaluation runnerUp = createEvaluationWithProbability(
+                    "cand-2", "Get Lucky (Video)", 0.86, 0.0, 0.89
+            );
+
+            // Margin = 0.88 - 0.86 = 0.02 < 0.05
+            TrackMatchResult result = validatedDecisionEngine.decide("track-1", sourceTrack, List.of(top, runnerUp));
+
+            assertThat(result.decision()).isEqualTo(MatchDecision.REVIEW_REQUIRED);
+            assertThat(result.selectedCandidate().id()).isEqualTo("cand-1");
+            assertThat(result.matchReasons()).anyMatch(r -> r.contains("Ambiguous match"));
+        }
+
+        @Test
+        @DisplayName("should indicate uncalibrated heuristic fallback when probability is null")
+        void shouldIndicateUncalibratedFallbackWhenProbabilityIsNull() {
+            CandidateMatchEvaluation eval = createEvaluationWithProbability(
+                    "cand-1", "Get Lucky", 0.85, 0.0, null
+            );
+
+            TrackMatchResult result = decisionEngine.decide("track-1", sourceTrack, List.of(eval));
+
+            assertThat(result.decision()).isEqualTo(MatchDecision.MATCH);
+            assertThat(result.calibratedProbability()).isNull();
+            assertThat(result.matchReasons()).anyMatch(r -> r.contains("Probability calibration model unavailable"));
+        }
+
+        @Test
+        @DisplayName("should not trigger calibrated probability gate when model is unvalidated")
+        void shouldNotTriggerProbabilityGateWhenModelIsUnvalidated() {
+            // Score 0.82 >= 0.75, unvalidated probability 0.65 < 0.70
+            CandidateMatchEvaluation eval = createEvaluationWithProbability(
+                    "cand-1", "Get Lucky", 0.82, 0.0, 0.65
+            );
+
+            // When evaluated with unvalidated configured engine, probability does not trigger Gate 6
+            TrackMatchResult result = unvalidatedConfiguredEngine.decide("track-1", sourceTrack, List.of(eval));
+
+            assertThat(result.decision()).isEqualTo(MatchDecision.MATCH);
+            assertThat(result.calibratedProbability()).isNull();
+            assertThat(result.matchReasons()).anyMatch(r ->
+                    r.contains("Calibration transformation is unvalidated; evaluated using heuristic"));
+        }
+
+        @Test
+        @DisplayName("should assign EXCELLENT confidence only when both score and probability are high")
+        void shouldAssignConfidenceBasedOnBothScoreAndProbability() {
+            // High score (0.92 >= 0.90) and high probability (0.88 >= 0.85) -> EXCELLENT
+            CandidateMatchEvaluation excellent = createEvaluationWithProbability(
+                    "cand-1", "Get Lucky", 0.92, 0.0, 0.88
+            );
+            TrackMatchResult res1 = validatedDecisionEngine.decide("track-1", sourceTrack, List.of(excellent));
+            assertThat(res1.confidence()).isEqualTo(MatchConfidence.EXCELLENT);
+
+            // High score (0.92 >= 0.90) but moderate probability (0.75 < 0.85) -> GOOD
+            CandidateMatchEvaluation good = createEvaluationWithProbability(
+                    "cand-2", "Get Lucky", 0.92, 0.0, 0.75
+            );
+            TrackMatchResult res2 = validatedDecisionEngine.decide("track-1", sourceTrack, List.of(good));
+            assertThat(res2.confidence()).isEqualTo(MatchConfidence.GOOD);
+        }
+    }
+
+    @Nested
     @DisplayName("Validation and Contracts")
     class Validation {
 
@@ -246,7 +381,9 @@ class MatchDecisionEngineTest {
                 List.of(),
                 "discovery",
                 Duration.ofMillis(248000),
-                new TokenizedTitle(title, title, false, Set.of(), null, null, Set.of(), List.of(), List.of(), List.of())
+                new TokenizedTitle(
+                        title, title, false, Set.of(), null, null, Set.of(), List.of(), List.of(), List.of()
+                )
         );
     }
 
@@ -255,6 +392,16 @@ class MatchDecisionEngineTest {
             String title,
             Double overallScore,
             Double versionPenalty
+    ) {
+        return createEvaluationWithProbability(id, title, overallScore, versionPenalty, null);
+    }
+
+    private CandidateMatchEvaluation createEvaluationWithProbability(
+            String id,
+            String title,
+            Double overallScore,
+            Double versionPenalty,
+            Double calibratedProbability
     ) {
         DestinationTrackCandidate candidate = new DestinationTrackCandidate(
                 id, title, "Daft Punk", "Description", "https://thumb.jpg", "2021-01-01", Duration.ofMinutes(4)
@@ -276,6 +423,7 @@ class MatchDecisionEngineTest {
         return CandidateMatchEvaluation.of(
                 candidate,
                 overallScore,
+                calibratedProbability,
                 MatchConfidence.GOOD,
                 breakdown,
                 List.of(),

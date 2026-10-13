@@ -5,6 +5,8 @@ import com.spotifyyoutube.migrator.matching.engine.MatchConfidence;
 import com.spotifyyoutube.migrator.matching.engine.MatchDecision;
 import com.spotifyyoutube.migrator.matching.engine.MatchScoreBreakdown;
 import com.spotifyyoutube.migrator.matching.engine.TrackMatchResult;
+import com.spotifyyoutube.migrator.matching.engine.calibration.DefaultMatchProbabilityCalibrator;
+import com.spotifyyoutube.migrator.matching.engine.calibration.MatchProbabilityCalibrator;
 import com.spotifyyoutube.migrator.matching.engine.scorer.CompositeScoreCalculator;
 import com.spotifyyoutube.migrator.matching.engine.scorer.DefaultCompositeScoreCalculator;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedTrackMetadata;
@@ -20,12 +22,17 @@ import java.util.Objects;
  * Applies transparent, threshold-based matching rules to ranked candidates:
  * <ul>
  *   <li><b>Empty Candidates:</b> Resolves to {@link MatchDecision#NO_MATCH}.</li>
- *   <li><b>Low Score (&lt; 0.50):</b> Resolves to {@link MatchDecision#NO_MATCH} (below minimum viable threshold).</li>
+ *   <li><b>Low Score (&lt; 0.50):</b> Resolves to {@link MatchDecision#NO_MATCH}
+ *       (below minimum viable threshold).</li>
  *   <li><b>Borderline Score (0.50 to &lt; 0.75):</b> Resolves to {@link MatchDecision#REVIEW_REQUIRED}.</li>
- *   <li><b>Version Penalty Mismatch (&gt; 0.10):</b> Resolves to {@link MatchDecision#REVIEW_REQUIRED} despite high score.</li>
+ *   <li><b>Version Penalty Mismatch (&gt; 0.10):</b> Resolves to {@link MatchDecision#REVIEW_REQUIRED}
+ *       despite high score.</li>
  *   <li><b>Ambiguity Margin (&lt; 0.05 between top two):</b> Resolves to {@link MatchDecision#REVIEW_REQUIRED}.</li>
+ *   <li><b>Probability Divergence (&lt; 0.70 when calibrated):</b> Resolves to
+ *       {@link MatchDecision#REVIEW_REQUIRED} when a validated empirical model indicates low match likelihood.</li>
  *   <li><b>Unambiguous Top Candidate (&ge; 0.75):</b> Resolves to {@link MatchDecision#MATCH}
- *       with {@link MatchConfidence#EXCELLENT} (&ge; 0.90) or {@link MatchConfidence#GOOD} (0.75 to &lt; 0.90).</li>
+ *       with {@link MatchConfidence#EXCELLENT} (&ge; 0.90)
+ *       or {@link MatchConfidence#GOOD} (0.75 to &lt; 0.90).</li>
  * </ul>
  */
 @Component
@@ -36,14 +43,20 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
     public static final double DEFAULT_AMBIGUITY_MARGIN = 0.05;
     public static final double DEFAULT_MAX_PENALTY_FOR_MATCH = 0.10;
     public static final double DEFAULT_EXCELLENT_THRESHOLD = 0.90;
+    public static final double DEFAULT_MINIMUM_MATCH_PROBABILITY = 0.70;
 
     private final double matchThreshold;
     private final double minimumViableThreshold;
     private final double ambiguityMargin;
     private final double maxPenaltyForMatch;
     private final double excellentThreshold;
+    private final double minimumMatchProbability;
     private final CompositeScoreCalculator compositeScoreCalculator;
+    private final MatchProbabilityCalibrator probabilityCalibrator;
 
+    /**
+     * Constructs a decision engine with default thresholds and an uncalibrated baseline calibrator.
+     */
     public DefaultMatchDecisionEngine() {
         this(
                 DEFAULT_MATCH_THRESHOLD,
@@ -51,10 +64,21 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
                 DEFAULT_AMBIGUITY_MARGIN,
                 DEFAULT_MAX_PENALTY_FOR_MATCH,
                 DEFAULT_EXCELLENT_THRESHOLD,
-                new DefaultCompositeScoreCalculator()
+                new DefaultCompositeScoreCalculator(),
+                new DefaultMatchProbabilityCalibrator(),
+                DEFAULT_MINIMUM_MATCH_PROBABILITY
         );
     }
 
+    /**
+     * Constructs a decision engine with custom similarity thresholds using default uncalibrated calibrator.
+     *
+     * @param matchThreshold automated match composite score threshold (>= 0.75)
+     * @param minimumViableThreshold minimum viable candidate score threshold (>= 0.50)
+     * @param ambiguityMargin minimum required score separation between top candidate and runner-up (0.05)
+     * @param maxPenaltyForMatch maximum allowable version penalty for automated match (0.10)
+     * @param excellentThreshold score threshold for EXCELLENT confidence (>= 0.90)
+     */
     public DefaultMatchDecisionEngine(
             double matchThreshold,
             double minimumViableThreshold,
@@ -68,10 +92,22 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
                 ambiguityMargin,
                 maxPenaltyForMatch,
                 excellentThreshold,
-                new DefaultCompositeScoreCalculator()
+                new DefaultCompositeScoreCalculator(),
+                new DefaultMatchProbabilityCalibrator(),
+                DEFAULT_MINIMUM_MATCH_PROBABILITY
         );
     }
 
+    /**
+     * Constructs a decision engine with custom thresholds and composite score calculator.
+     *
+     * @param matchThreshold automated match composite score threshold (>= 0.75)
+     * @param minimumViableThreshold minimum viable candidate score threshold (>= 0.50)
+     * @param ambiguityMargin minimum required score separation between top candidate and runner-up (0.05)
+     * @param maxPenaltyForMatch maximum allowable version penalty for automated match (0.10)
+     * @param excellentThreshold score threshold for EXCELLENT confidence (>= 0.90)
+     * @param compositeScoreCalculator calculator for base composite score
+     */
     public DefaultMatchDecisionEngine(
             double matchThreshold,
             double minimumViableThreshold,
@@ -80,14 +116,92 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
             double excellentThreshold,
             CompositeScoreCalculator compositeScoreCalculator
     ) {
+        this(
+                matchThreshold,
+                minimumViableThreshold,
+                ambiguityMargin,
+                maxPenaltyForMatch,
+                excellentThreshold,
+                compositeScoreCalculator,
+                new DefaultMatchProbabilityCalibrator(),
+                DEFAULT_MINIMUM_MATCH_PROBABILITY
+        );
+    }
+
+    /**
+     * Constructs a decision engine with default thresholds and a custom probability calibrator.
+     *
+     * @param probabilityCalibrator custom probability calibrator
+     */
+    public DefaultMatchDecisionEngine(MatchProbabilityCalibrator probabilityCalibrator) {
+        this(
+                DEFAULT_MATCH_THRESHOLD,
+                DEFAULT_MINIMUM_VIABLE_THRESHOLD,
+                DEFAULT_AMBIGUITY_MARGIN,
+                DEFAULT_MAX_PENALTY_FOR_MATCH,
+                DEFAULT_EXCELLENT_THRESHOLD,
+                new DefaultCompositeScoreCalculator(),
+                probabilityCalibrator,
+                DEFAULT_MINIMUM_MATCH_PROBABILITY
+        );
+    }
+
+    /**
+     * Constructs a decision engine with default thresholds, custom calibrator, and minimum probability.
+     *
+     * @param probabilityCalibrator custom probability calibrator
+     * @param minimumMatchProbability minimum required calibrated match probability
+     */
+    public DefaultMatchDecisionEngine(
+            MatchProbabilityCalibrator probabilityCalibrator,
+            double minimumMatchProbability
+    ) {
+        this(
+                DEFAULT_MATCH_THRESHOLD,
+                DEFAULT_MINIMUM_VIABLE_THRESHOLD,
+                DEFAULT_AMBIGUITY_MARGIN,
+                DEFAULT_MAX_PENALTY_FOR_MATCH,
+                DEFAULT_EXCELLENT_THRESHOLD,
+                new DefaultCompositeScoreCalculator(),
+                probabilityCalibrator,
+                minimumMatchProbability
+        );
+    }
+
+    /**
+     * Constructs a fully parameterized decision engine.
+     *
+     * @param matchThreshold automated match composite score threshold (>= 0.75)
+     * @param minimumViableThreshold minimum viable candidate score threshold (>= 0.50)
+     * @param ambiguityMargin minimum required score separation between top candidate and runner-up (0.05)
+     * @param maxPenaltyForMatch maximum allowable version penalty for automated match (0.10)
+     * @param excellentThreshold score threshold for EXCELLENT confidence (>= 0.90)
+     * @param compositeScoreCalculator calculator for base composite score
+     * @param probabilityCalibrator probability calibrator
+     * @param minimumMatchProbability minimum required calibrated match probability
+     */
+    public DefaultMatchDecisionEngine(
+            double matchThreshold,
+            double minimumViableThreshold,
+            double ambiguityMargin,
+            double maxPenaltyForMatch,
+            double excellentThreshold,
+            CompositeScoreCalculator compositeScoreCalculator,
+            MatchProbabilityCalibrator probabilityCalibrator,
+            double minimumMatchProbability
+    ) {
         this.matchThreshold = matchThreshold;
         this.minimumViableThreshold = minimumViableThreshold;
         this.ambiguityMargin = ambiguityMargin;
         this.maxPenaltyForMatch = maxPenaltyForMatch;
         this.excellentThreshold = excellentThreshold;
+        this.minimumMatchProbability = minimumMatchProbability;
         this.compositeScoreCalculator = compositeScoreCalculator != null
                 ? compositeScoreCalculator
                 : new DefaultCompositeScoreCalculator();
+        this.probabilityCalibrator = probabilityCalibrator != null
+                ? probabilityCalibrator
+                : new DefaultMatchProbabilityCalibrator();
     }
 
     @Override
@@ -101,11 +215,22 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
 
         // 1. Case: No candidates available
         if (rankedEvaluations.isEmpty()) {
-            return TrackMatchResult.noMatch(sourceTrackId, sourceTrack, List.of("No destination candidates discovered"));
+            return TrackMatchResult.noMatch(
+                    sourceTrackId,
+                    sourceTrack,
+                    List.of("No destination candidates discovered")
+            );
         }
 
         CandidateMatchEvaluation top = rankedEvaluations.get(0);
         double topScore = top.overallScore() != null ? top.overallScore() : 0.0;
+        Double topProbability = top.calibratedProbability();
+        if (topProbability == null && probabilityCalibrator.isModelValidated()) {
+            topProbability = probabilityCalibrator.calibrateProbability(topScore, top.scoreBreakdown()).orElse(null);
+        }
+        boolean isProbabilityValidated = (topProbability != null) && probabilityCalibrator.isModelValidated();
+        Double validatedProbability = isProbabilityValidated ? topProbability : null;
+
         MatchScoreBreakdown topBreakdown = top.scoreBreakdown();
         double topPenalty = topBreakdown != null && topBreakdown.versionPenalty() != null
                 ? topBreakdown.versionPenalty()
@@ -127,7 +252,7 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
                     MatchDecision.REVIEW_REQUIRED,
                     top.candidate(),
                     topScore,
-                    null,
+                    validatedProbability,
                     MatchConfidence.POOR,
                     topBreakdown,
                     rankedEvaluations,
@@ -147,7 +272,7 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
                     MatchDecision.NO_MATCH,
                     null,
                     topScore,
-                    null,
+                    validatedProbability,
                     MatchConfidence.POOR,
                     topBreakdown,
                     rankedEvaluations,
@@ -167,7 +292,7 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
                     MatchDecision.REVIEW_REQUIRED,
                     top.candidate(),
                     topScore,
-                    null,
+                    validatedProbability,
                     MatchConfidence.POOR,
                     topBreakdown,
                     rankedEvaluations,
@@ -193,7 +318,7 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
                         MatchDecision.REVIEW_REQUIRED,
                         top.candidate(),
                         topScore,
-                        null,
+                        validatedProbability,
                         MatchConfidence.GOOD,
                         topBreakdown,
                         rankedEvaluations,
@@ -202,13 +327,51 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
             }
         }
 
-        // 6. Case: Unambiguous match
-        MatchConfidence confidence = topScore >= excellentThreshold
-                ? MatchConfidence.EXCELLENT
-                : MatchConfidence.GOOD;
+        // 6. Case: Calibrated probability divergence (when validated model indicates low probability)
+        if (isProbabilityValidated && validatedProbability < minimumMatchProbability) {
+            reasons.add("Top candidate '" + top.candidateTitle() + "' calibrated match probability ("
+                    + format(validatedProbability) + ") is below minimum match probability threshold ("
+                    + format(minimumMatchProbability) + ")");
+            reasons.add("Calibrated probability divergence requires manual user review");
+
+            return new TrackMatchResult(
+                    sourceTrackId,
+                    sourceTrack,
+                    MatchDecision.REVIEW_REQUIRED,
+                    top.candidate(),
+                    topScore,
+                    validatedProbability,
+                    MatchConfidence.POOR,
+                    topBreakdown,
+                    rankedEvaluations,
+                    reasons
+            );
+        }
+
+        // 7. Case: Unambiguous match
+        MatchConfidence confidence;
+        if (isProbabilityValidated && validatedProbability != null) {
+            confidence = (topScore >= excellentThreshold && validatedProbability >= 0.85)
+                    ? MatchConfidence.EXCELLENT
+                    : MatchConfidence.GOOD;
+        } else {
+            confidence = topScore >= excellentThreshold
+                    ? MatchConfidence.EXCELLENT
+                    : MatchConfidence.GOOD;
+        }
 
         reasons.add("High-confidence match: '" + top.candidateTitle()
-                + "' meets all automated migration criteria (score: " + format(topScore) + ", confidence: " + confidence + ")");
+                + "' meets all automated migration criteria (score: " + format(topScore)
+                + ", confidence: " + confidence + ")");
+        if (isProbabilityValidated && validatedProbability != null) {
+            reasons.add("Calibrated match probability confirmed: " + format(validatedProbability));
+        } else if (probabilityCalibrator.isConfigured()) {
+            reasons.add("Calibration transformation is unvalidated; "
+                    + "evaluated using heuristic composite similarity rules");
+        } else {
+            reasons.add("Probability calibration model unavailable; "
+                    + "evaluated using heuristic composite similarity rules");
+        }
         reasons.add("No significant version penalties or competing runner-up candidates");
 
         return new TrackMatchResult(
@@ -217,7 +380,7 @@ public class DefaultMatchDecisionEngine implements MatchDecisionEngine {
                 MatchDecision.MATCH,
                 top.candidate(),
                 topScore,
-                null,
+                validatedProbability,
                 confidence,
                 topBreakdown,
                 rankedEvaluations,

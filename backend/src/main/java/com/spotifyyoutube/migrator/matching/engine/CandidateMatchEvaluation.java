@@ -60,10 +60,22 @@ public record CandidateMatchEvaluation(
             List<String> reasons,
             CandidateTrackFeatures features
     ) {
+        return of(candidate, overallScore, null, confidence, breakdown, reasons, features);
+    }
+
+    public static CandidateMatchEvaluation of(
+            DestinationTrackCandidate candidate,
+            Double overallScore,
+            Double calibratedProbability,
+            MatchConfidence confidence,
+            MatchScoreBreakdown breakdown,
+            List<String> reasons,
+            CandidateTrackFeatures features
+    ) {
         return new CandidateMatchEvaluation(
                 candidate,
                 overallScore,
-                null,
+                calibratedProbability,
                 confidence,
                 breakdown,
                 reasons,

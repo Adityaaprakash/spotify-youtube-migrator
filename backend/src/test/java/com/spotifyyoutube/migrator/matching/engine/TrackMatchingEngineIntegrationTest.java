@@ -1,5 +1,12 @@
 package com.spotifyyoutube.migrator.matching.engine;
 
+import com.spotifyyoutube.migrator.matching.engine.calibration.DefaultMatchProbabilityCalibrator;
+import com.spotifyyoutube.migrator.matching.engine.calibration.MatchProbabilityCalibrator;
+import com.spotifyyoutube.migrator.matching.engine.decision.DefaultMatchDecisionEngine;
+import com.spotifyyoutube.migrator.matching.engine.feature.DefaultTrackFeatureExtractor;
+import com.spotifyyoutube.migrator.matching.engine.ranking.DefaultCandidateRankingEngine;
+import com.spotifyyoutube.migrator.matching.engine.scorer.DefaultCandidateSimilarityScorer;
+import com.spotifyyoutube.migrator.matching.engine.scorer.DefaultCompositeScoreCalculator;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedArtistCredit;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedTrackMetadata;
 import com.spotifyyoutube.migrator.matching.normalization.RawTrackMetadata;
@@ -180,13 +187,119 @@ class TrackMatchingEngineIntegrationTest {
     }
 
     @Test
+    @DisplayName("should execute end-to-end pipeline with calibrated probability model")
+    void shouldExecuteEndToEndPipelineWithCalibratedProbability() {
+        MatchProbabilityCalibrator calibrator =
+                DefaultMatchProbabilityCalibrator.withValidatedPlattScaling(10.0, -5.0, "platt-v1.0-validated");
+        TrackMatchingEngine calibratedEngine = new DefaultTrackMatchingEngine(
+                new DefaultTrackFeatureExtractor(),
+                new DefaultCandidateSimilarityScorer(),
+                new DefaultCompositeScoreCalculator(),
+                new DefaultCandidateRankingEngine(),
+                new DefaultMatchDecisionEngine(
+                        DefaultMatchDecisionEngine.DEFAULT_MATCH_THRESHOLD,
+                        DefaultMatchDecisionEngine.DEFAULT_MINIMUM_VIABLE_THRESHOLD,
+                        DefaultMatchDecisionEngine.DEFAULT_AMBIGUITY_MARGIN,
+                        DefaultMatchDecisionEngine.DEFAULT_MAX_PENALTY_FOR_MATCH,
+                        DefaultMatchDecisionEngine.DEFAULT_EXCELLENT_THRESHOLD,
+                        new DefaultCompositeScoreCalculator(),
+                        calibrator,
+                        DefaultMatchDecisionEngine.DEFAULT_MINIMUM_MATCH_PROBABILITY
+                ),
+                calibrator
+        );
+
+        NormalizedTrackMetadata sourceTrack = createSourceTrack(
+                "Get Lucky", "Daft Punk", "Random Access Memories", 248000L
+        );
+
+        DestinationTrackCandidate officialCandidate = new DestinationTrackCandidate(
+                "cand-official",
+                "Daft Punk - Get Lucky (Official Audio)",
+                "Daft Punk - Topic",
+                "Provided to YouTube by Columbia\n\nAlbum: Random Access Memories\n\n℗ 2013 Daft Life Limited",
+                "https://thumb.jpg",
+                "2013-04-19",
+                Duration.ofMillis(248000)
+        );
+
+        TrackMatchRequest request = new TrackMatchRequest(
+                "spotify:track:daftlucky",
+                sourceTrack,
+                List.of(officialCandidate)
+        );
+
+        TrackMatchResult result = calibratedEngine.matchTrack(request);
+
+        assertThat(result).isNotNull();
+        assertThat(result.decision()).isEqualTo(MatchDecision.MATCH);
+        assertThat(result.confidence()).isEqualTo(MatchConfidence.EXCELLENT);
+        assertThat(result.calibratedProbability()).isNotNull();
+        assertThat(result.calibratedProbability()).isGreaterThanOrEqualTo(0.95);
+        assertThat(result.candidateEvaluations().get(0).calibratedProbability()).isNotNull();
+        assertThat(result.matchReasons()).anyMatch(r -> r.contains("Calibrated match probability confirmed"));
+    }
+
+    @Test
+    @DisplayName("should execute end-to-end pipeline with unvalidated Platt scaling falling back to heuristics")
+    void shouldExecuteEndToEndPipelineWithUnvalidatedPlattScalingFallback() {
+        MatchProbabilityCalibrator calibrator =
+                DefaultMatchProbabilityCalibrator.withPlattScaling(10.0, -5.0, "platt-v1.0-unvalidated");
+        TrackMatchingEngine unvalidatedEngine = new DefaultTrackMatchingEngine(
+                new DefaultTrackFeatureExtractor(),
+                new DefaultCandidateSimilarityScorer(),
+                new DefaultCompositeScoreCalculator(),
+                new DefaultCandidateRankingEngine(),
+                new DefaultMatchDecisionEngine(calibrator),
+                calibrator
+        );
+
+        NormalizedTrackMetadata sourceTrack = createSourceTrack(
+                "Get Lucky", "Daft Punk", "Random Access Memories", 248000L
+        );
+
+        DestinationTrackCandidate officialCandidate = new DestinationTrackCandidate(
+                "cand-official",
+                "Daft Punk - Get Lucky (Official Audio)",
+                "Daft Punk - Topic",
+                "Provided to YouTube by Columbia\n\nAlbum: Random Access Memories\n\n℗ 2013 Daft Life Limited",
+                "https://thumb.jpg",
+                "2013-04-19",
+                Duration.ofMillis(248000)
+        );
+
+        TrackMatchRequest request = new TrackMatchRequest(
+                "spotify:track:daftlucky",
+                sourceTrack,
+                List.of(officialCandidate)
+        );
+
+        TrackMatchResult result = unvalidatedEngine.matchTrack(request);
+
+        assertThat(result).isNotNull();
+        assertThat(result.decision()).isEqualTo(MatchDecision.MATCH);
+        assertThat(result.confidence()).isEqualTo(MatchConfidence.EXCELLENT);
+        assertThat(result.calibratedProbability()).isNull();
+        assertThat(result.candidateEvaluations().get(0).calibratedProbability()).isNull();
+        assertThat(result.matchReasons()).anyMatch(r ->
+                r.contains("Calibration transformation is unvalidated; evaluated using heuristic composite"));
+        assertThat(result.candidateEvaluations().get(0).matchReasons()).anyMatch(r ->
+                r.contains("Unvalidated probability transformation"));
+    }
+
+    @Test
     @DisplayName("should reject null TrackMatchRequest with NullPointerException")
     void shouldRejectNullRequest() {
         assertThatThrownBy(() -> matchingEngine.matchTrack(null))
                 .isInstanceOf(NullPointerException.class);
     }
 
-    private NormalizedTrackMetadata createSourceTrack(String title, String primaryArtist, String album, Long durationMs) {
+    private NormalizedTrackMetadata createSourceTrack(
+            String title,
+            String primaryArtist,
+            String album,
+            Long durationMs
+    ) {
         Duration duration = durationMs != null ? Duration.ofMillis(durationMs) : null;
         return new NormalizedTrackMetadata(
                 RawTrackMetadata.of(title, primaryArtist, album, durationMs),
@@ -196,7 +309,9 @@ class TrackMatchingEngineIntegrationTest {
                 List.of(),
                 album.toLowerCase(),
                 duration,
-                new TokenizedTitle(title, title, false, Set.of(), null, null, Set.of(), List.of(), List.of(), List.of())
+                new TokenizedTitle(
+                        title, title, false, Set.of(), null, null, Set.of(), List.of(), List.of(), List.of()
+                )
         );
     }
 }

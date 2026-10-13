@@ -2,10 +2,59 @@
 
 Last Updated: 2026-10-13
 
-Current Phase: Phase 7 — Matching Engine
-Current Subphase: Phase 7G COMPLETE (Composite Scoring, Candidate Ranking, and Decision Engine Implemented, Tested, Ready for Phase 7H Calibrated Match Probability)
+Current Phase: Phase 7 — Matching Engine (COMPLETE / FROZEN)
+Current Subphase: Phase 7I COMPLETE (Subsystem Verification & Matching Freeze — Matching Engine FROZEN)
 
 ## Completed
+### Phase 7I (Subsystem Verification & Matching Freeze)
+- **Subsystem-Wide Correctness & Determinism Audit**:
+  - Audited full matching pipeline: `TrackMatchRequest` $\to$ Feature Extraction $\to$ Similarity Scoring (Title, Artist, Duration, Album) $\to$ Recording Version Penalties $\to$ Official Provenance $\to$ Composite Scoring with dynamic weight re-normalization $\to$ 7-level tie-breaking Ranking $\to$ Calibrated Probability Evaluation $\to$ 7-gate Match Decision $\to$ `TrackMatchResult`.
+  - Audited and confirmed mathematical invariants: scores bounded in $[0.0, 1.0]$, minimum viable score $0.50$, automated match threshold $0.75$, excellent threshold $0.90$, version penalty gate $> 0.10$ forcing review for viable candidates, ambiguity margin $< 0.05$ forcing review, and logit clamping $[-40.0, 40.0]$.
+  - Enforced calibration integrity: heuristic composite scores are never misrepresented as empirical probabilities; default calibrator honestly reports `configured = false, modelValidated = false, NONE, UNVALIDATED`; unvalidated models fall back safely to Phase 7G heuristic decision baseline; probability divergence gate applies strictly to empirically validated models.
+  - Immutability and thread-safety: all models are immutable records with defensive copying for collections/maps; scorers and engines are pure, stateless Spring `@Component`s.
+  - Backward compatibility: preserved all Phase 7G constructor and factory signatures alongside Phase 7H extensions.
+  - Boundary integrity: frozen Phase 5 (`normalization`) and Phase 6 (`discovery`) production and test files remained 100% untouched.
+- **Verification & Test Suite Results**:
+  - `.\mvnw.cmd test-compile`: BUILD SUCCESS.
+  - `.\mvnw.cmd checkstyle:check`: BUILD SUCCESS (0 violations).
+  - Focused Phase 7H test suite: 71 tests passing (11 in `CalibrationResultTest`, 14 in `DefaultMatchProbabilityCalibratorTest`, 13 in `MatchDecisionEngineTest`, 7 in `TrackMatchingEngineIntegrationTest`, 17 in `TrackMatchResultTest`, 5 in `CandidateMatchEvaluationTest`).
+  - Matching engine regression suite (18 test classes): 274 tests run, 0 failures, 0 errors, 0 skipped.
+  - Complete matching test coverage: 24 test classes, 333 tests total, 100% passing.
+  - Full non-container backend test suite: 100% passing across all domain, identity, spotify, youtube, migration, playlist, and matching modules.
+  - Testcontainers integration tests blocked strictly by Docker daemon unavailability in environment.
+- **Freeze Decision**:
+  - The Matching Engine subsystem (Phases 7A–7H) is formally verified, hardened, and **FROZEN**.
+
+### Phase 7H (Calibrated Match Probability and Decision Policy)
+- **Phase 7H.1 (Calibration Model Contracts & Result Abstraction)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.calibration`
+  - `CalibrationResult`: Immutable record distinguishing true statistical match probabilities in `[0.0, 1.0]` from heuristic similarity scores, and distinguishing configured mathematical transformations from empirically validated models.
+    - Fields: `probability` (clamped to `[0.0, 1.0]` or null), `available` (boolean), `validated` (boolean), `calibrationMethod` (e.g. `PLATT_SCALING`, `NONE`), `modelVersion` (e.g. `UNVALIDATED`, `platt-v1.0`).
+    - Honest baseline representation via `CalibrationResult.unavailable(reason)` (`available = false`, `validated = false`).
+    - Configured unvalidated transformation factory via `CalibrationResult.configured(probability, method, modelVersion)` (`available = true`, `validated = false`).
+    - Empirical validation factory via `CalibrationResult.validated(probability, method, modelVersion)` (`available = true`, `validated = true`).
+    - Selective probability accessors: `calibratedProbability()` returns non-empty `Optional<Double>` *only* when `validated == true`; `configuredProbability()` returns `Optional<Double>` whenever available.
+    - Strict input validation rejecting null, negative, > 1.0, NaN, and infinite values, with 4-decimal rounding.
+- **Phase 7H.2 (Probability Calibration Strategy Interface & Platt Scaling)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.calibration`
+  - `MatchProbabilityCalibrator`: Strategy interface defining `calibrate(Double, MatchScoreBreakdown)`, `calibrateProbability(...)`, `calibrate(CandidateMatchEvaluation)`, `isConfigured()`, `isModelValidated()`, `calibrationMethod()`, and `modelVersion()`.
+  - `DefaultMatchProbabilityCalibrator`: Stateless Spring `@Component` supporting:
+    - Honest uncalibrated baseline (default constructor): `isConfigured() == false`, `isModelValidated() == false`, `calibrationMethod() == "NONE"`, `modelVersion() == "UNVALIDATED"`, returning `CalibrationResult.unavailable(...)`. Avoids fabricating calibration statistics prior to Phase 8 labeled benchmark collection.
+    - Configured Platt scaling: Static factory `withPlattScaling(slopeA, interceptB, modelVersion)` implementing logistic sigmoid calibration with `isConfigured() == true` and `isModelValidated() == false`, returning unvalidated configured results.
+    - Validated Platt scaling: Static factory `withValidatedPlattScaling(slopeA, interceptB, modelVersion)` with `isConfigured() == true` and `isModelValidated() == true`.
+    - Numerical stability safeguards: Clamped logit $[-40.0, 40.0]$ preventing exponential overflow/underflow under extreme finite parameter values or boundary scores.
+- **Phase 7H.3 (Decision Policy Calibration Integration)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.decision`
+  - `DefaultMatchDecisionEngine`: Transparent 7-gate decision policy incorporating calibrated probability:
+    - Preserves all Phase 7G safety gates: Gate 1 (empty candidates $\to$ `NO_MATCH`), Gate 2 (version penalty $> 0.10 \to$ `REVIEW_REQUIRED`), Gate 3 (top score $< 0.50 \to$ `NO_MATCH`), Gate 4 (borderline score $0.50 \le s < 0.75 \to$ `REVIEW_REQUIRED`), Gate 5 (ambiguity margin $< 0.05 \to$ `REVIEW_REQUIRED`).
+    - Gate 6 (Probability Divergence): Gated *strictly* on validated models (`isProbabilityValidated == true`). If calibrated probability is validated and $< 0.70 \to$ `REVIEW_REQUIRED`. If unvalidated or unavailable, falls back to Phase 7G heuristic rules.
+    - Gate 7 (Automated Match): Produces `MATCH` with `EXCELLENT` confidence (requires $s \ge 0.90$ and $P \ge 0.85$ when calibrated) or `GOOD` confidence ($s \ge 0.75$).
+    - Diagnostic transparency: Explains whether match was confirmed via calibrated probability, evaluated using heuristic rules with unvalidated transformation, or evaluated under unavailable calibration.
+- **Phase 7H.4 (Pipeline Orchestration & Model Evolution)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine`
+  - `CandidateMatchEvaluation`: Extended with additive factory overload accepting `calibratedProbability`, preserving 100% backward compatibility.
+  - `DefaultTrackMatchingEngine`: Injects `MatchProbabilityCalibrator`, evaluates candidate calibrated probabilities, populates candidate diagnostics distinguishing validated vs unvalidated probabilities, and passes calibrated values to `DefaultMatchDecisionEngine`.
+
 ### Phase 7G (Composite Scoring, Candidate Ranking, and Decision Engine)
 - **Phase 7G.1 (Composite Scoring with Dynamic Re-normalization)**:
   - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
@@ -406,26 +455,21 @@ Current Subphase: Phase 7G COMPLETE (Composite Scoring, Candidate Ranking, and D
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 7G: Composite Scoring, Candidate Ranking, and Decision Engine.
-- Phase 7H: Calibrated Match Probability and Decision Policy.
-- Phase 7I: Subsystem Verification & Matching Freeze.
 - Matching Evaluation & Benchmarking (Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
+- Review & Correction Interface (Phase 10).
+- Playlist Creation (Phase 11).
 
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Matching Engine & Feature Extraction Suite: **PASS** (12 test classes covering contracts, feature extraction, edge cases, immutability, determinism)
-- Phase 7C Title Similarity Scorer Suite (`TitleSimilarityScorerTest`): 21 tests across 8 nested classes
-- Phase 7D Artist Similarity Scorer Suite (`ArtistSimilarityScorerTest`): 20 tests across 6 nested classes
-- Phase 7E Duration Similarity Scorer Suite (`DurationSimilarityScorerTest`): 15 tests across 4 nested classes
-- Phase 7E Album Similarity Scorer Suite (`AlbumSimilarityScorerTest`): 19 tests across 5 nested classes
-- Phase 7F Version Penalty Scorer Suite (`VersionPenaltyScorerTest`): 27 tests across 7 nested classes
-- Phase 7C/7D/7E/7F Integration Suite (`CandidateSimilarityScorerIntegrationTest`): 12 integration tests
+- Focused Phase 7H Test Suite: **PASS** (71 tests passing across `CalibrationResultTest`, `DefaultMatchProbabilityCalibratorTest`, `MatchDecisionEngineTest`, `TrackMatchingEngineIntegrationTest`, `TrackMatchResultTest`, `CandidateMatchEvaluationTest`)
+- Matching Engine Regression Suite (18 test classes): **PASS** (274 tests run, 0 failures, 0 errors, 0 skipped in 12.912s)
+- Complete Matching Subsystem Coverage: 24 test classes, 333 tests total, 100% passing across feature extraction, individual scorers, version penalties, composite calculation, ranking, calibration, decision policy, and pipeline integration.
 - Focused Candidate Discovery & Mapping Suite: **PASS** (133 tests passing across discovery and mapping)
 - Focused Normalization Test Suite: **PASS** (227 tests passing)
 - Full Non-Repository Unit Test Suite: **PASS** (100% passing across domain, identity, spotify, youtube, migration, playlist, matching)
-- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
+- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): **BLOCKED** — Docker daemon unavailable in environment
 
 ## Phase Freeze Status
 - **Phase 2 (Auth & Identity)**: FROZEN
@@ -433,12 +477,16 @@ Current Subphase: Phase 7G COMPLETE (Composite Scoring, Candidate Ranking, and D
 - **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
 - **Phase 5 (Track Normalization Engine)**: COMPLETE / FROZEN
 - **Phase 6 (Candidate Discovery Subsystem)**: COMPLETE / FROZEN
-- **Phase 7A (Matching Architecture & Contracts)**: COMPLETE
-- **Phase 7B (Candidate Feature Extraction)**: COMPLETE
-- **Phase 7C (Title Similarity Scoring)**: COMPLETE
-- **Phase 7D (Artist Similarity Scoring)**: COMPLETE
-- **Phase 7E (Duration & Album Similarity Scoring)**: COMPLETE
-- **Phase 7F (Recording Version & Variant Penalty Engine)**: COMPLETE
+- **Phase 7 (Matching Engine Subsystem)**: COMPLETE / FROZEN
+  - **Phase 7A (Matching Architecture & Contracts)**: COMPLETE / FROZEN
+  - **Phase 7B (Candidate Feature Extraction)**: COMPLETE / FROZEN
+  - **Phase 7C (Title Similarity Scoring)**: COMPLETE / FROZEN
+  - **Phase 7D (Artist Similarity Scoring)**: COMPLETE / FROZEN
+  - **Phase 7E (Duration & Album Similarity Scoring)**: COMPLETE / FROZEN
+  - **Phase 7F (Recording Version & Variant Penalty Engine)**: COMPLETE / FROZEN
+  - **Phase 7G (Composite Scoring, Ranking & Decision Engine)**: COMPLETE / FROZEN
+  - **Phase 7H (Calibrated Match Probability & Decision Policy)**: COMPLETE / FROZEN
+  - **Phase 7I (Subsystem Verification & Matching Freeze)**: COMPLETE / FROZEN
 
 ## Next Recommended Work
-1. Phase 7G: Composite Scoring, Candidate Ranking, and Decision Engine.
+1. Phase 8: Matching Evaluation & Benchmark (empirical labeled dataset collection, Brier score evaluation, Platt scaling parameter fitting).

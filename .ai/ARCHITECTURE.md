@@ -73,17 +73,25 @@ Controllers MUST NOT:
   - Represents discovery outcomes using structured `CandidateDiscoveryResult` and explicit `CandidateDiscoveryStatus` (`SUCCESS`, `EMPTY`, `PARTIAL_FAILURE`, `FAILED`), capturing query-level execution history in `SearchQueryExecution`.
   - Strictly avoids scoring, ranking, confidence estimation, and mutation operations (deferred to Phase 7 and later).
 
-## Matching Engine Layer (Phase 7A & 7B)
+## Matching Engine Layer (Phase 7 — Complete & Frozen)
 
-- Packages: `com.spotifyyoutube.migrator.matching.engine`, `com.spotifyyoutube.migrator.matching.engine.feature`
-- Purpose: Provider-neutral contracts and deterministic candidate feature extraction for comparing normalized source tracks against discovered YouTube candidates.
+- Packages:
+  - Contracts & Top-Level Engine: `com.spotifyyoutube.migrator.matching.engine`
+  - Feature Extraction: `com.spotifyyoutube.migrator.matching.engine.feature`
+  - Similarity Scorers & Penalties: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - Candidate Ranking: `com.spotifyyoutube.migrator.matching.engine.ranking`
+  - Match Probability Calibration: `com.spotifyyoutube.migrator.matching.engine.calibration`
+  - Match Decision Engine: `com.spotifyyoutube.migrator.matching.engine.decision`
+- Purpose: Provider-neutral similarity evaluation, version penalty scoring, composite scoring with dynamic re-normalization, deterministic candidate ranking, probability calibration, and transparent migration decision policy.
 - Architecture Rules:
-  - Phase 7A contracts (`TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`) MUST be immutable records with defensive copying for all collections and maps.
-  - Phase 7A contracts MUST NOT invent source identifiers inside the pure normalization model; `TrackMatchRequest` carries optional `sourceTrackId` alongside `NormalizedTrackMetadata`.
-  - Empty candidate collections MUST be treated as explicitly valid input (e.g. following legitimate `EMPTY` discovery), cleanly producing `NO_MATCH` without throwing exceptions.
-  - `MatchScoreBreakdown` MUST represent missing or uncomputed evidence honestly as `null`, avoiding premature defaults to `0.0`.
-  - `CandidateMatchEvaluation` separates candidate-level metrics and feature representations from overall match resolution.
-  - `TrackFeatureExtractor` and `DefaultTrackFeatureExtractor` MUST be pure, deterministic, and stateless, reusing Phase 5 normalizers (`TitleNormalizer`, `ArtistNormalizer`, `MetadataTokenizer`) without modifying frozen Phase 5 or Phase 6 code.
-  - Feature extraction captures `VersionIndicator` indicators (`COVER`, `LIVE`, `REMIX`, `KARAOKE`, `REACTION`, `NIGHTCORE`, `SPED_UP`, `SLOWED`, `ACOUSTIC`, `INSTRUMENTAL`, `REMASTER`) with word-boundary safeguards preventing false positives on legitimate titles (*Live to Tell*, *Stayin' Alive*, *Chain Reaction*).
-  - Official provenance evidence (`OfficialSignalEvidence`) MUST be evaluated conservatively: channels claiming "official" without verified provider markers (Topic channel, VEVO, artist match, distributor description) MUST NOT confirm authenticity on their own.
-  - Feature extraction MUST NOT implement similarity scoring, weighted composite scoring, candidate ranking, confidence classification, or automatic match decisions (strictly deferred to Phase 7C+).
+  - **Immutable Contracts**: All pipeline models (`TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`, `CalibrationResult`) MUST be immutable records with defensive copying for all collections and maps.
+  - **Honest Missing-Data Semantics**: Missing metadata or uncomputed component dimensions MUST be represented honestly as `null`, never fabricated or coerced to 0.0.
+  - **Provider Neutrality**: Engine and scorer classes MUST NOT import provider-specific DTOs from Spotify or YouTube packages.
+  - **Feature Extraction & Normalizer Reuse**: `DefaultTrackFeatureExtractor` reuses frozen Phase 5 normalizers (`TitleNormalizer`, `ArtistNormalizer`, `MetadataTokenizer`) without modifying frozen Phase 5 or Phase 6 code. Conservative official provenance policy requires verified channel markers (Topic, VEVO, artist match, distributor description).
+  - **Independent Component Scorers**: Title (Levenshtein + token sort + delimiter segments), Artist (bipartite 1-to-1 matching + primary priority), Duration (piecewise continuous decay), Album (NFC + description extraction), and Official Provenance scorers return normalized values in $[0.0, 1.0]$ or `null`.
+  - **Version Penalty Engine**: Evaluates version discrepancies (`COVER`, `LIVE_MISMATCH`, `REACTION`, `KARAOKE`, etc.) with bounded normalized deductions in $[0.0, 1.0]$ and itemized breakdowns, protected by false-positive title safeguards.
+  - **Composite Scoring with Dynamic Re-normalization**: Linear combination (Title 40%, Artist 30%, Duration 10%, Album 10%, Official 10%) re-normalizes dynamically over active non-null dimensions, deducting version penalty once.
+  - **Deterministic Ranking**: 7-level tie-breaking ladder (Composite score $\to$ Title $\to$ Artist $\to$ Official $\to$ Version Penalty $\to$ Duration $\to$ Candidate ID) guarantees 100% reproducible candidate ordering.
+  - **Probability Calibration Separation**: `CalibrationResult` and `MatchProbabilityCalibrator` strictly separate heuristic composite similarity from empirical match probability. Default baseline is honestly uncalibrated (`configured = false, modelValidated = false`). Platt scaling transformations are clamped to logit $[-40.0, 40.0]$ for numerical stability.
+  - **Decision Policy Gates**: Transparent 7-gate decision policy enforces safety gates: empty candidates ($\to$ `NO_MATCH`), version penalty $> 0.10$ on viable candidate ($\to$ `REVIEW_REQUIRED`), score $< 0.50$ ($\to$ `NO_MATCH`), borderline score $0.50 \le s < 0.75$ ($\to$ `REVIEW_REQUIRED`), ambiguity margin $< 0.05$ ($\to$ `REVIEW_REQUIRED`). Probability divergence gate applies strictly to empirically validated models.
+  - **Subsystem Freeze**: The Matching Engine subsystem is complete, verified, and **FROZEN** at Phase 7I.

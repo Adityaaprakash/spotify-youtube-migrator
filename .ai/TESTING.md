@@ -240,25 +240,54 @@ Implemented and verified (11 test suites covering Phase 7A contracts and Phase 7
   - Version penalty gate: penalty exceeding max (> 0.10) on viable candidate produces `REVIEW_REQUIRED`; penalty <= 0.10 allows automated `MATCH`.
   - Ambiguity margin: score difference between top two candidates < 0.05 margin produces `REVIEW_REQUIRED` with `GOOD` confidence; difference >= 0.05 allows automated `MATCH`.
   - Unambiguous matches: score between 0.75 and 0.90 produces `MATCH` with `GOOD` confidence; score >= 0.90 produces `MATCH` with `EXCELLENT` confidence; validation rejects null arguments.
-- `TrackMatchingEngineIntegrationTest` (Phase 7G.5): 5 end-to-end integration tests:
-  - Full pipeline match: executes Feature Extraction $\to$ Similarity Scoring $\to$ Composite Scoring $\to$ Ranking $\to$ Decision and selects unambiguous official candidate with `EXCELLENT` confidence, correct candidate rank ordering, and complete score breakdown.
+  - Calibrated probability decision policy: validated probability < 0.70 produces `REVIEW_REQUIRED`; validated probability >= 0.70 produces `MATCH` with confirmed probability diagnostic reason; version penalty > 0.10 cannot be overridden by high probability; ambiguity margin cannot be overridden by high probability; uncalibrated baseline and unvalidated configured models fall back to Phase 7G heuristic rules with transparent explanation; `EXCELLENT` confidence requires both high score (>= 0.90) and high probability (>= 0.85).
+- `CalibrationResultTest` (Phase 7H.1): 11 tests:
+  - Unavailable factory: empty probability, isAvailable false, isValidated false, modelVersion UNVALIDATED, calibrationMethod NONE, reject null reason.
+  - Configured factory: valid probability in `[0.0, 1.0]`, isAvailable true, isValidated false, calibratedProbability empty, configuredProbability present, method and modelVersion metadata.
+  - Validated factory: valid probability in `[0.0, 1.0]`, isAvailable true, isValidated true, calibratedProbability present, configuredProbability present.
+  - Bounds & validation: boundary probabilities 0.0 and 1.0; out-of-range rejection (< 0.0 or > 1.0); non-finite rejection (NaN and Infinity); blank/null metadata rejection; record equality and hashcode semantics.
+- `DefaultMatchProbabilityCalibratorTest` (Phase 7H.2): 14 tests across 4 nested categories:
+  - Uncalibrated baseline: reports unconfigured and unvalidated model status (`isConfigured() == false`, `isModelValidated() == false`, `NONE`, `UNVALIDATED`), returns unavailable result, empty optional, rejects invalid scores.
+  - Configured unvalidated mode (`withPlattScaling`): reports `isConfigured() == true` and `isModelValidated() == false`, returns configured result with `isValidated() == false`, calibrated probability empty, rejects invalid scores/parameters.
+  - Validated mode (`withValidatedPlattScaling`): reports `isConfigured() == true` and `isModelValidated() == true`, returns validated result, evaluates logistic sigmoid at midpoint ($P = 0.50$), high score ($P \ge 0.99$), low score ($P \le 0.01$), candidate evaluation calibration.
+  - Numerical stability & boundary safeguards: clamped logit handling under extreme parameters (e.g. slope $\pm 1000.0$), edge scores 0.0 and 1.0, finite output guarantee.
+- `TrackMatchingEngineIntegrationTest` (Phase 7G.5 & 7H.4): 7 end-to-end integration tests:
+  - Full pipeline match: executes Feature Extraction $\to$ Similarity Scoring $\to$ Composite Scoring $\to$ Ranking $\to$ Decision and selects Case 7 unambiguous official candidate with `EXCELLENT` confidence, correct candidate rank ordering, and complete score breakdown.
   - Empty discovery handling: empty candidates list produces clean `NO_MATCH`.
   - Version discrepancy review: cover candidate incurs version penalty and requires manual review.
   - Ambiguity margin review: two closely competing candidates require manual review.
+  - Calibrated probability pipeline: end-to-end execution with validated Platt scaling calibrator confirms calibrated probability retention on evaluations and top-level result with confirmed probability diagnostic reasons.
+  - Unvalidated Platt scaling fallback: end-to-end execution with unvalidated Platt scaling falls back to Phase 7G heuristic decision and provides unvalidated transformation diagnostics.
   - Request validation: null request throws `NullPointerException`.
 
-## Future Testing Scope (Phase 7H+)
+### Matching Subsystem Verification & Freeze Scope (Phase 7I Complete & Frozen)
+Verified across the comprehensive matching regression suite and focused Phase 7H suites:
+- Focused Phase 7H test suite: 71 tests passing with 0 failures:
+  - `CalibrationResultTest`: 11 tests (unavailable, configured, validated factories, probability clamping, NaN/Infinity validation).
+  - `DefaultMatchProbabilityCalibratorTest`: 14 tests (uncalibrated baseline, configured Platt scaling, validated Platt scaling, clamped logit numerical stability, constructor validation).
+  - `MatchDecisionEngineTest`: 13 tests across 7 nested classes (empty candidates, below viable threshold, borderline scores, version penalty gate, ambiguity margin gate, calibrated probability divergence gate, unambiguous match gate).
+  - `TrackMatchingEngineIntegrationTest`: 7 end-to-end integration tests (full pipeline match, empty discovery, version discrepancy review, ambiguity review, validated probability pipeline, unvalidated fallback, request validation).
+  - `TrackMatchResultTest`: 17 tests (validation, factories, selected candidate consistency, unmodifiable collections, equality).
+  - `CandidateMatchEvaluationTest`: 5 tests (validation, unevaluated container, evaluated container, unmodifiable reasons).
+- Phase 7A–7H Matching Regression Suite (18 test classes):
+  - Classes: `SourceTrackFeaturesTest`, `CandidateTrackFeaturesTest`, `DefaultTrackFeatureExtractorTest`, `TitleSimilarityScorerTest`, `ArtistSimilarityScorerTest`, `DurationSimilarityScorerTest`, `AlbumSimilarityScorerTest`, `VersionPenaltyScorerTest`, `CandidateSimilarityScorerIntegrationTest`, `OfficialSignalScorerTest`, `CompositeScoreCalculatorTest`, `CandidateRankingEngineTest`, `MatchDecisionEngineTest`, `TrackMatchingEngineIntegrationTest`, `CalibrationResultTest`, `DefaultMatchProbabilityCalibratorTest`, `TrackMatchResultTest`, `CandidateMatchEvaluationTest`.
+  - Results: 274 tests run, 0 failures, 0 errors, 0 skipped.
+- Total Matching Subsystem Test Coverage: 24 test classes, 333 tests total, 100% passing.
+- Checkstyle: 0 violations across all backend source files.
+- Phase 5 & Phase 6 Boundary Audit: 100% untouched and preserved.
+
+## Future Testing Scope (Phase 8+)
 As the migrator logic scales, testing will expand to:
-- Calibrated Match Probability and Decision Policy (Phase 7H)
-- Subsystem Verification & Matching Freeze (Phase 7I)
-- Matching Benchmark Test Suite (Phase 8)
-- Migration State Machine Test Suite (Phase 9)
+- Matching Evaluation & Benchmark Test Suite (Phase 8: labeled ground truth evaluation, Brier score, calibration curve validation)
+- Migration State Machine & Orchestration Test Suite (Phase 9 & Phase 12)
+- Review & Correction Flow Testing (Phase 10)
+- Destination Playlist Creation Testing (Phase 11)
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
-- **Phase 7A–7G Complete**: Core Matching Engine contracts, Feature Extraction, Title/Artist/Duration/Album similarity scorers, Version Penalty Engine, Composite Scoring Calculator, Candidate Ranking Engine, Match Decision Engine, and Top-Level Track Matching Engine implemented and tested across 22 matching test suites.
-- **Phase 6 Complete & Frozen**: Full Candidate Discovery pipeline (Phases 6A–6G) verified across 133 discovery tests. Phase 6 is FROZEN.
-- **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is FROZEN.
-- **Phase 4 Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.
-- **Docker Dependency**: Repository and full context integration testing (e.g., `PlaylistRepositoryTest`, `MigratorApplicationTests`) via `Testcontainers` is failing strictly due to the current execution environment lacking a functional Docker daemon binding. (Use focused tests e.g. `$ mvnw test -Dtest=...` to avoid Docker tests).
+- **Phase 7 Complete & Frozen**: Full Matching Engine subsystem (Phases 7A–7I) verified with 274 regression tests passing across 18 test classes (333 tests across 24 test classes), 0 Checkstyle violations, and full contract invariant verification. Phase 7 is **FROZEN**.
+- **Phase 6 Complete & Frozen**: Full Candidate Discovery pipeline (Phases 6A–6G) verified across 133 discovery tests. Phase 6 is **FROZEN**.
+- **Phase 5 Complete & Frozen**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is **FROZEN**.
+- **Phase 4 Complete & Frozen**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets. Phase 4 is **FROZEN**.
+- **Docker Dependency**: Repository and full context integration testing (e.g., `PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`) via `Testcontainers` is failing strictly due to the current execution environment lacking a functional Docker daemon binding. Non-container unit tests pass 100%.
 - **Format Verification**: `mvnw checkstyle:check` is completely passing with 0 violations.

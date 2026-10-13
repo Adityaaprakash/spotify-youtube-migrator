@@ -100,6 +100,63 @@ public record TrackMatchResult(
         );
     }
 
+    /**
+     * Factory method creating a match result with uncalibrated probability (null).
+     */
+    public static TrackMatchResult of(
+            String sourceTrackId,
+            NormalizedTrackMetadata sourceTrack,
+            MatchDecision decision,
+            DestinationTrackCandidate selectedCandidate,
+            Double score,
+            MatchConfidence confidence,
+            MatchScoreBreakdown scoreBreakdown,
+            List<CandidateMatchEvaluation> candidateEvaluations,
+            List<String> matchReasons
+    ) {
+        return of(
+                sourceTrackId,
+                sourceTrack,
+                decision,
+                selectedCandidate,
+                score,
+                null,
+                confidence,
+                scoreBreakdown,
+                candidateEvaluations,
+                matchReasons
+        );
+    }
+
+    /**
+     * Factory method creating a match result with optional calibrated probability.
+     */
+    public static TrackMatchResult of(
+            String sourceTrackId,
+            NormalizedTrackMetadata sourceTrack,
+            MatchDecision decision,
+            DestinationTrackCandidate selectedCandidate,
+            Double score,
+            Double calibratedProbability,
+            MatchConfidence confidence,
+            MatchScoreBreakdown scoreBreakdown,
+            List<CandidateMatchEvaluation> candidateEvaluations,
+            List<String> matchReasons
+    ) {
+        return new TrackMatchResult(
+                sourceTrackId,
+                sourceTrack,
+                decision,
+                selectedCandidate,
+                score,
+                calibratedProbability,
+                confidence,
+                scoreBreakdown,
+                candidateEvaluations,
+                matchReasons
+        );
+    }
+
     public boolean isMatch() {
         return decision == MatchDecision.MATCH;
     }

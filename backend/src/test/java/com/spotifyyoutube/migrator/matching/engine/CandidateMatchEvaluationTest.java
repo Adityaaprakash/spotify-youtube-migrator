@@ -117,6 +117,34 @@ class CandidateMatchEvaluationTest {
             assertThat(eval.getConfidence()).contains(MatchConfidence.EXCELLENT);
             assertThat(eval.getScoreBreakdown()).contains(breakdown);
         }
+
+        @Test
+        @DisplayName("of factory with calibrated probability should populate calibratedProbability")
+        void ofFactoryWithCalibratedProbabilityShouldPopulateField() {
+            DestinationTrackCandidate candidate = sampleCandidate();
+            CandidateTrackFeatures features = sampleFeatures(candidate);
+            MatchScoreBreakdown breakdown = MatchScoreBreakdown.builder()
+                    .titleScore(0.95)
+                    .artistScore(0.92)
+                    .build();
+
+            CandidateMatchEvaluation eval = CandidateMatchEvaluation.of(
+                    candidate,
+                    0.94,
+                    0.88,
+                    MatchConfidence.EXCELLENT,
+                    breakdown,
+                    List.of("High match likelihood"),
+                    features
+            );
+
+            assertThat(eval.candidate()).isEqualTo(candidate);
+            assertThat(eval.overallScore()).isEqualTo(0.94);
+            assertThat(eval.calibratedProbability()).isEqualTo(0.88);
+            assertThat(eval.hasCalibratedProbability()).isTrue();
+            assertThat(eval.getCalibratedProbability()).contains(0.88);
+            assertThat(eval.confidence()).isEqualTo(MatchConfidence.EXCELLENT);
+        }
     }
 
     @Nested
