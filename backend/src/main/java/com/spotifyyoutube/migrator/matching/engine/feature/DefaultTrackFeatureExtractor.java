@@ -1,9 +1,11 @@
 package com.spotifyyoutube.migrator.matching.engine.feature;
 
 import com.spotifyyoutube.migrator.matching.normalization.ArtistNormalizer;
+import com.spotifyyoutube.migrator.matching.normalization.MediaFormat;
 import com.spotifyyoutube.migrator.matching.normalization.MetadataTokenizer;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedTrackMetadata;
 import com.spotifyyoutube.migrator.matching.normalization.TitleNormalizer;
+import com.spotifyyoutube.migrator.matching.normalization.TokenCategory;
 import com.spotifyyoutube.migrator.matching.normalization.TokenizedTitle;
 import com.spotifyyoutube.migrator.matching.normalization.VariantType;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackCandidate;
@@ -34,10 +36,10 @@ public class DefaultTrackFeatureExtractor implements TrackFeatureExtractor {
 
     // Reaction video patterns
     private static final Pattern REACTION_ANNOTATION_PATTERN = Pattern.compile(
-            "(?i)^.*?(?:\\b(?:reaction|reacting|reacts)\\b|first\\s+time\\s+hearing).*?$"
+            "(?i)^(?!.*\\b(?:chain|chemical|nuclear|allergic)\\b).*?(?:\\b(?:reaction|reacting|reacts)\\b|first\\s+time\\s+hearing).*?$"
     );
     private static final Pattern REACTION_TRAILING_PATTERN = Pattern.compile(
-            "(?i)^.*?(?:\\b(?:reaction|reacting|reacts)(?:\\s+video)?|first\\s+time\\s+hearing).*?$"
+            "(?i)^(?!.*\\b(?:chain|chemical|nuclear|allergic)\\b).*?(?:\\b(?:reaction|reacting|reacts)(?:\\s+video)?|first\\s+time\\s+hearing).*?$"
     );
     private static final Pattern REACTION_PREFIX_PATTERN = Pattern.compile(
             "(?i)^(?:reaction|reacting|reacts)\\s*[-|:]\\s*.+$"
@@ -54,7 +56,7 @@ public class DefaultTrackFeatureExtractor implements TrackFeatureExtractor {
 
     // Live patterns
     private static final Pattern LIVE_ANNOTATION_PATTERN = Pattern.compile(
-            "(?i)^(?:live(?:\\s+(?:version|recording|session|audio|performance))?|live\\s+(?:at|in|from)\\s+.+)$"
+            "(?i)^(?!.*\\blive\\s+(?:to\\s+tell|and\\s+let\\s+die|forever)\\b).*?\\blive\\b.*?$"
     );
     private static final Pattern LIVE_TRAILING_PATTERN = Pattern.compile(
             "(?i)^(?:live(?:\\s+(?:version|recording|session|audio|performance))?|live\\s+(?:at|in|from)\\s+.+)$"
@@ -91,6 +93,22 @@ public class DefaultTrackFeatureExtractor implements TrackFeatureExtractor {
     );
     private static final Pattern SLOWED_TRAILING_PATTERN = Pattern.compile(
             "(?i)^(?:slowed(?:\\s+down)?(?:\\s*(?:\\+|&|and)\\s*reverb)?(?:\\s+version)?|chopped\\s+(?:\\+|&|and)\\s+screwed|chopped\\s+and\\s+slowed)$"
+    );
+
+    // Acoustic patterns
+    private static final Pattern ACOUSTIC_ANNOTATION_PATTERN = Pattern.compile(
+            "(?i)^.*?\\b(?:acoustic(?:\\s+version)?|(?:mtv\\s+)?unplugged)\\b.*?$"
+    );
+    private static final Pattern ACOUSTIC_TRAILING_PATTERN = Pattern.compile(
+            "(?i)^(?:acoustic(?:\\s+version)?|(?:mtv\\s+)?unplugged)$"
+    );
+
+    // Instrumental patterns
+    private static final Pattern INSTRUMENTAL_ANNOTATION_PATTERN = Pattern.compile(
+            "(?i)^.*?\\binstrumental(?:\\s+(?:version|mix))?\\b.*?$"
+    );
+    private static final Pattern INSTRUMENTAL_TRAILING_PATTERN = Pattern.compile(
+            "(?i)^instrumental(?:\\s+(?:version|mix))?$"
     );
 
     private final TitleNormalizer titleNormalizer;
@@ -192,10 +210,22 @@ public class DefaultTrackFeatureExtractor implements TrackFeatureExtractor {
         boolean hasDescription = description != null && !description.isBlank();
         String publishedAt = candidate.publishedAt();
 
-        boolean hasOfficialAudio = tokenized.isOfficial() && tokenized.tokens().stream()
-                .anyMatch(t -> t.token().equalsIgnoreCase("official audio") || t.token().equalsIgnoreCase("official visualizer"));
-        boolean hasOfficialVideo = tokenized.isOfficial() && tokenized.tokens().stream()
-                .anyMatch(t -> t.token().equalsIgnoreCase("official video") || t.token().equalsIgnoreCase("official music video"));
+        boolean hasOfficialAudio = tokenized.isOfficial() && (
+                tokenized.mediaFormats().contains(MediaFormat.AUDIO)
+                || tokenized.mediaFormats().contains(MediaFormat.VISUALIZER)
+                || tokenized.tokens().stream().anyMatch(t ->
+                        t.category() == TokenCategory.MEDIA_FORMAT
+                        && ("audio".equalsIgnoreCase(t.value()) || "visualizer".equalsIgnoreCase(t.value()))
+                )
+        );
+        boolean hasOfficialVideo = tokenized.isOfficial() && (
+                tokenized.mediaFormats().contains(MediaFormat.VIDEO)
+                || tokenized.mediaFormats().contains(MediaFormat.MUSIC_VIDEO)
+                || tokenized.tokens().stream().anyMatch(t ->
+                        t.category() == TokenCategory.MEDIA_FORMAT
+                        && ("video".equalsIgnoreCase(t.value()) || "music_video".equalsIgnoreCase(t.value()))
+                )
+        );
 
         String sourcePrimaryArtist = sourceTrack != null ? sourceTrack.primaryArtist() : null;
         OfficialSignalEvidence officialSignal = OfficialSignalEvidence.from(
@@ -384,15 +414,16 @@ public class DefaultTrackFeatureExtractor implements TrackFeatureExtractor {
         }
 
         // Acoustic check
-        if (segment.equalsIgnoreCase("acoustic") || segment.equalsIgnoreCase("acoustic version")
-                || segment.equalsIgnoreCase("unplugged") || segment.equalsIgnoreCase("mtv unplugged")) {
+        Pattern acousticPattern = isBracketed ? ACOUSTIC_ANNOTATION_PATTERN : ACOUSTIC_TRAILING_PATTERN;
+        if (acousticPattern.matcher(segment).matches()) {
             indicators.add(VersionIndicator.ACOUSTIC);
             rawTokens.add(segment);
             matched = true;
         }
 
         // Instrumental check
-        if (segment.equalsIgnoreCase("instrumental") || segment.equalsIgnoreCase("instrumental version")) {
+        Pattern instrumentalPattern = isBracketed ? INSTRUMENTAL_ANNOTATION_PATTERN : INSTRUMENTAL_TRAILING_PATTERN;
+        if (instrumentalPattern.matcher(segment).matches()) {
             indicators.add(VersionIndicator.INSTRUMENTAL);
             rawTokens.add(segment);
             matched = true;

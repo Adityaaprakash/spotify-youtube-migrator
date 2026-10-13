@@ -1,6 +1,8 @@
 package com.spotifyyoutube.migrator.matching.engine.feature;
 
+import com.spotifyyoutube.migrator.matching.normalization.AlbumNormalizer;
 import com.spotifyyoutube.migrator.matching.normalization.ArtistNormalizer;
+import com.spotifyyoutube.migrator.matching.normalization.DurationNormalizer;
 import com.spotifyyoutube.migrator.matching.normalization.MetadataTokenizer;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizationOrchestrator;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedTrackMetadata;
@@ -30,7 +32,13 @@ class DefaultTrackFeatureExtractorTest {
         ArtistNormalizer artistNormalizer = new ArtistNormalizer();
         MetadataTokenizer tokenizer = new MetadataTokenizer();
         extractor = new DefaultTrackFeatureExtractor(titleNormalizer, artistNormalizer, tokenizer);
-        normalizationOrchestrator = new NormalizationOrchestrator();
+        normalizationOrchestrator = new NormalizationOrchestrator(
+                titleNormalizer,
+                artistNormalizer,
+                new AlbumNormalizer(),
+                new DurationNormalizer(),
+                tokenizer
+        );
     }
 
     private NormalizedTrackMetadata normalize(String title, String artist, String album, Long durationMs) {
@@ -59,7 +67,7 @@ class DefaultTrackFeatureExtractorTest {
 
             assertThat(features.sourceTrackId()).isEqualTo("spotify:track:123");
             assertThat(features.normalizedTitle()).isEqualTo("hotel california - live at wembley [remastered 2024]");
-            assertThat(features.cleanTitle()).isEqualTo("hotel california");
+            assertThat(features.cleanTitle()).isEqualTo("Hotel California");
             assertThat(features.primaryArtist()).isEqualTo("eagles");
             assertThat(features.featuredArtists()).contains("guest");
             assertThat(features.normalizedAlbum()).isEqualTo("hell freezes over");
@@ -125,8 +133,8 @@ class DefaultTrackFeatureExtractorTest {
 
             assertThat(features.candidateId()).isEqualTo("vid-abc");
             assertThat(features.rawTitle()).isEqualTo("Daft Punk - Get Lucky (Official Video)");
-            assertThat(features.normalizedTitle()).isEqualTo("daft punk - get lucky (official video)");
-            assertThat(features.cleanTitle()).isEqualTo("daft punk - get lucky");
+            assertThat(features.normalizedTitle()).isEqualTo("daft punk - get lucky");
+            assertThat(features.cleanTitle()).isEqualTo("Daft Punk - Get Lucky");
             assertThat(features.channelOrArtist()).isEqualTo("Daft Punk");
             assertThat(features.normalizedChannelOrArtist()).isEqualTo("daft punk");
             assertThat(features.duration()).isEqualTo(Duration.ofSeconds(248));
@@ -384,6 +392,16 @@ class DefaultTrackFeatureExtractorTest {
                     candidate("2", "Chemical Reaction", "Band", null, "PT3M")
             );
             assertThat(c2.versionEvidence().isReaction()).isFalse();
+
+            CandidateTrackFeatures c3 = extractor.extractCandidateFeatures(
+                    candidate("3", "Nuclear Reaction", "Artist", null, "PT3M")
+            );
+            assertThat(c3.versionEvidence().isReaction()).isFalse();
+
+            CandidateTrackFeatures c4 = extractor.extractCandidateFeatures(
+                    candidate("4", "Diana Ross - Chain Reaction (Reaction Video)", "ReactChannel", null, "PT5M")
+            );
+            assertThat(c4.versionEvidence().isReaction()).isTrue();
         }
     }
 
@@ -445,6 +463,26 @@ class DefaultTrackFeatureExtractorTest {
             );
             assertThat(c2.officialSignal().isVevoChannel()).isTrue();
             assertThat(c2.officialSignal().hasOfficialEvidence()).isTrue();
+        }
+
+        @Test
+        @DisplayName("should extract official audio and video title markers")
+        void shouldExtractOfficialAudioAndVideoTitleMarkers() {
+            NormalizedTrackMetadata source = normalize("Song", "Band", "Album", 200000L);
+
+            CandidateTrackFeatures audio = extractor.extractCandidateFeatures(
+                    candidate("1", "Song Title (Official Audio)", "Band", null, "PT3M20S"),
+                    source
+            );
+            assertThat(audio.officialSignal().hasOfficialAudioMarker()).isTrue();
+            assertThat(audio.officialSignal().hasOfficialEvidence()).isTrue();
+
+            CandidateTrackFeatures video = extractor.extractCandidateFeatures(
+                    candidate("2", "Song Title (Official Music Video)", "Band", null, "PT3M20S"),
+                    source
+            );
+            assertThat(video.officialSignal().hasOfficialVideoMarker()).isTrue();
+            assertThat(video.officialSignal().hasOfficialEvidence()).isTrue();
         }
 
         @Test

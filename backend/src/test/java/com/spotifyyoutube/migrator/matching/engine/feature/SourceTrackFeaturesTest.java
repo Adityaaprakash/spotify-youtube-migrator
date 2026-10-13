@@ -34,7 +34,7 @@ class SourceTrackFeaturesTest {
                 List.of(),
                 album != null ? album.toLowerCase() : "",
                 duration,
-                new TokenizedTitle(title, title.toLowerCase(), false, variants != null ? variants : Set.of(), null, null, Set.of(), List.of(), List.of(), List.of())
+                new TokenizedTitle(title, title.toLowerCase(), false, Set.of(), null, null, variants != null ? variants : Set.of(), List.of(), List.of(), List.of())
         );
     }
 
