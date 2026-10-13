@@ -54,17 +54,25 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 6E**: [COMPLETE] Candidate Validation, Deduplication & Filtering (Whitespace ID trimming, canonical deduplication keys, encounter-order uniqueness, variant preservation).
 - **Phase 6F**: [COMPLETE] Discovery Pipeline Integration & End-to-End Verification (`CandidateDiscoveryIntegrationTest`, real multi-query generation and destination execution, provenance retention, quota preservation, partial/total failure resilience).
 - **Phase 6G**: [COMPLETE / FROZEN] Final Discovery Audit, Edge-Case Hardening & Verification (credential and token sanitization, transient error recovery, empty-first query continuation, full non-container regression suite passing, Phase 6 frozen).
-### **Phase 7 — Matching Engine** [NEXT ACTIVE PHASE]
-- Phase 7 — Matching Engine
-- Phase 8 — Matching Evaluation & Benchmark
-- Phase 9 — Migration Engine
-- Phase 10 — Review & Correction
-- Phase 11 — Playlist Creation
-- Phase 12 — Async Migration & Progress
-- Phase 13 — Reliability Engineering
-- Phase 14 — Migration History
-- Phase 15 — Frontend Product Layer
-- Phase 16 — Security Hardening
-- Phase 17 — Testing
-- Phase 18 — Observability
-- Phase 19 — Deployment
+### **Phase 7 — Matching Engine** [ACTIVE PHASE]
+- **Phase 7A**: [COMPLETE] Matching Architecture & Contracts (ADR-012, `TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`, provider-neutral immutable models, honest missing-data semantics).
+- **Phase 7B**: [COMPLETE] Candidate Feature Extraction (`TrackFeatureExtractor`, `DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`, `VersionIndicator`, `CandidateVersionEvidence`, `OfficialSignalEvidence`, conservative official channel policy, word-boundary false-positive safeguards, no premature scoring/penalties).
+- **Phase 7C**: [NEXT ACTIVE SUBPHASE] Title Similarity Scorer (Token-aware similarity, Levenshtein/Jaro-Winkler, word-order tolerance).
+- **Phase 7D**: Artist Similarity Scorer.
+- **Phase 7E**: Duration Similarity Scorer.
+- **Phase 7F**: Album Similarity Scorer.
+- **Phase 7G**: Official Signal Scorer & Version Penalty Engine.
+- **Phase 7H**: Composite Scoring, Candidate Ranking, and Decision Engine.
+- **Phase 7I**: Subsystem Verification & Matching Freeze.
+### **Phase 8 — Matching Evaluation & Benchmark**
+### **Phase 9 — Migration Engine**
+### **Phase 10 — Review & Correction**
+### **Phase 11 — Playlist Creation**
+### **Phase 12 — Async Migration & Progress**
+### **Phase 13 — Reliability Engineering**
+### **Phase 14 — Migration History**
+### **Phase 15 — Frontend Product Layer**
+### **Phase 16 — Security Hardening**
+### **Phase 17 — Testing**
+### **Phase 18 — Observability**
+### **Phase 19 — Deployment**

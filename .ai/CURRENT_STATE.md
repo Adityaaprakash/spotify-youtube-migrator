@@ -1,11 +1,34 @@
 # Current State
 
-Last Updated: 2026-10-12
+Last Updated: 2026-10-13
 
-Current Phase: Phase 6 — Candidate Discovery
-Current Subphase: Phase 6 COMPLETE & FROZEN (Audited, Hardened, Pipeline Verified, Ready for Phase 7 Matching Engine)
+Current Phase: Phase 7 — Matching Engine
+Current Subphase: Phase 7A + 7B COMPLETE (Matching Contracts & Candidate Feature Extraction Implemented, Tested, Ready for Phase 7C Title Scorer)
 
 ## Completed
+### Phase 7A & 7B (Matching Architecture, Immutable Contracts & Candidate Feature Extraction)
+- **Phase 7A (Matching Engine Architecture & Contracts)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine`
+  - `MatchDecision`: Provider-neutral matching outcome enum (`MATCH`, `REVIEW_REQUIRED`, `NO_MATCH`) establishing the decision vocabulary for the matching pipeline without early assignment.
+  - `MatchConfidence`: Qualitative confidence classification enum (`EXCELLENT`, `GOOD`, `POOR`), kept strictly distinct from numeric scoring and calibrated probability.
+  - `MatchScoreBreakdown`: Immutable component evidence record holding nullable component scores (`titleScore`, `artistScore`, `durationScore`, `albumScore`, `officialSignalScore`, `versionPenalty`) and an unmodifiable `detailedPenalties` map. Preserves absent data honestly as `null` rather than defaulting to `0.0`.
+  - `CandidateMatchEvaluation`: Immutable evaluation record encapsulating individual destination candidates, extracted comparison features, component score breakdown, overall score, calibrated probability, qualitative confidence, and explainable diagnostic reasons.
+  - `TrackMatchRequest`: Immutable input contract taking `NormalizedTrackMetadata` (from Phase 5), unmodifiable `List<DestinationTrackCandidate>` (from Phase 6), and optional `sourceTrackId` (preserving Spotify track identity without modifying the pure normalization model). Formally defines empty candidate collections as valid input that cleanly resolves to `NO_MATCH` downstream.
+  - `TrackMatchResult`: Immutable engine outcome contract enforcing selected-candidate consistency against candidate evaluations, preserving honest `null` values for uncalculated scores, and providing explainable diagnostic reasons.
+- **Phase 7B (Candidate Feature Extraction)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.feature`
+  - `VersionIndicator`: Standardized recording/playback indicator enum (`COVER`, `LIVE`, `REMIX`, `KARAOKE`, `REACTION`, `NIGHTCORE`, `SPED_UP`, `SLOWED`, `ACOUSTIC`, `INSTRUMENTAL`, `REMASTER`).
+  - `CandidateVersionEvidence`: Immutable record holding detected indicators, raw matching tokens, unclassified annotations, conflict flags, and ambiguity flags.
+  - `OfficialSignalEvidence`: Provider-neutral authenticity evidence evaluating auto-generated Topic channels (` - Topic`), VEVO syndication (`VEVO`), primary artist channel matches, label delivery descriptions (`Provided to YouTube by...`), and verified title markers.
+  - **Conservative Authenticity Policy**: Channels claiming "official" without verified provider markers are captured in `channelClaimsOfficial` but strictly excluded from confirming authenticity in `hasOfficialEvidence()`.
+  - **False Positive Protection**: Word-boundary safeguards prevent misclassifying legitimate song titles like *Live to Tell*, *Stayin' Alive*, *Under Cover of Darkness*, or *Chain Reaction* as recording variants.
+  - `SourceTrackFeatures`: Immutable feature record extracting normalized title, clean title, primary artist, discrete artists, album, duration (with exact millisecond representation), and version indicators directly from Phase 5 `NormalizedTrackMetadata`.
+  - `CandidateTrackFeatures`: Immutable feature record extracting normalized title, clean title, normalized channel/artist, duration, description, publication date, version evidence, and official signals from Phase 6 `DestinationTrackCandidate`.
+  - `TrackFeatureExtractor` & `DefaultTrackFeatureExtractor`: Pure, deterministic, stateless Spring `@Component` reusing Phase 5 `TitleNormalizer`, `ArtistNormalizer`, and `MetadataTokenizer` without altering frozen Phase 5 or Phase 6 code.
+- **Phase Boundary Discipline**:
+  - Zero similarity scoring, weighted 40/30/10/10/10 composite scoring, candidate ranking, confidence assignment, or automatic selection logic implemented.
+  - Phase 5 and Phase 6 production source files remain 100% untouched and frozen.
+
 ### Phase 6G (Final Candidate Discovery Audit, Hardening & Phase Freeze)
 - **Credential & Token Sanitization**:
   - `DefaultCandidateDiscoveryService` implements sanitization of query execution error diagnostics to prevent leaking API keys (`key=***`, `api_key=***`), tokens (`token=***`, `access_token=***`), secrets (`client_secret=***`, `password=***`), Bearer tokens (`Bearer ***`), Basic auth (`Authorization: Basic ***`), or URL parameters with surrounding delimiters.
@@ -243,17 +266,18 @@ Current Subphase: Phase 6 COMPLETE & FROZEN (Audited, Hardened, Pipeline Verifie
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Candidate Discovery Execution Subphases (Phase 6E: Discovery Pipeline Integration & Verification).
-- Matching Engine & Benchmarking (Phase 7 & Phase 8).
+- Phase 7C: Title Similarity Scorer.
+- Phase 7D+: Artist, Duration, Album, Official Signal Scorer, Composite Scoring, Ranking & Decision Engine.
+- Matching Evaluation & Benchmarking (Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Candidate Discovery & Mapping Suite: **PASS** (127 tests passing: 22 `DestinationTrackCandidateTest`, 25 `DefaultCandidateDiscoveryServiceTest`, 25 `DefaultSearchQueryGeneratorTest` [29 executions], 10 `SearchQueryTest`, 19 `DiscoveryOptionsTest`, 4 `CandidateDiscoveryRequestTest`, 4 `DiscoveredCandidateTest`, 5 `SearchQueryExecutionTest`, 7 `CandidateDiscoveryResultTest`, 6 `DestinationSearchResultTest`)
-- Focused YouTube Test Suite (`YouTubeClientTest`, `YouTubeMapperTest`, `YouTubeSearchServiceTest`, `YouTubePlaylistServiceTest`, `YouTubeMusicDestinationAdapterTest`, `YouTubeControllerTest`): **PASS** (100% passing, 12 adapter tests, 15 mapper tests)
-- Focused Normalization Test Suite (`TitleNormalizerTest`, `ArtistNormalizerTest`, `AlbumNormalizerTest`, `DurationNormalizerTest`, `MetadataTokenizerTest`, `NormalizationOrchestratorTest`): **PASS** (227 tests passing)
-- Full Non-Repository Unit Test Suite: **PASS** (577+ tests across common, domain, identity, spotify, youtube, migration, playlist, matching - 100% passing)
+- Focused Matching Engine & Feature Extraction Suite: **PASS** (11 test classes covering contracts, feature extraction, edge cases, immutability, determinism)
+- Focused Candidate Discovery & Mapping Suite: **PASS** (133 tests passing across discovery and mapping)
+- Focused Normalization Test Suite: **PASS** (227 tests passing)
+- Full Non-Repository Unit Test Suite: **PASS** (100% passing across domain, identity, spotify, youtube, migration, playlist, matching)
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigrationJobRepositoryTest`): **BLOCKED** — Docker daemon unavailable in environment
 
 ## Phase Freeze Status
@@ -261,10 +285,9 @@ Current Subphase: Phase 6 COMPLETE & FROZEN (Audited, Hardened, Pipeline Verifie
 - **Phase 3 (Spotify Integration)**: FROZEN
 - **Phase 4 (YouTube Integration)**: COMPLETE / FROZEN
 - **Phase 5 (Track Normalization Engine)**: COMPLETE / FROZEN
-- **Phase 6A (Candidate Discovery Architecture & Contracts)**: COMPLETE
-- **Phase 6B (Deterministic Search Query Generation)**: COMPLETE
-- **Phase 6C (YouTube Search Orchestration)**: COMPLETE
-- **Phase 6D (Candidate Mapping & Metadata Enrichment)**: COMPLETE
+- **Phase 6 (Candidate Discovery Subsystem)**: COMPLETE / FROZEN
+- **Phase 7A (Matching Architecture & Contracts)**: COMPLETE
+- **Phase 7B (Candidate Feature Extraction)**: COMPLETE
 
 ## Next Recommended Work
-1. Phase 6E: Discovery Pipeline Integration & Verification (End-to-end orchestration, partial failure handling, contract tests).
+1. Phase 7C: Title Similarity Scorer (Token-aware string similarity algorithms, Levenshtein/Jaro-Winkler, word-order tolerance).
