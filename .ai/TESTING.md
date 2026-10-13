@@ -276,9 +276,28 @@ Verified across the comprehensive matching regression suite and focused Phase 7H
 - Checkstyle: 0 violations across all backend source files.
 - Phase 5 & Phase 6 Boundary Audit: 100% untouched and preserved.
 
-## Future Testing Scope (Phase 8+)
+### Benchmark Subsystem Testing Scope (Phase 8A + 8B Complete)
+Implemented and verified across 4 dedicated test classes:
+- `BenchmarkExampleTest`: 8 tests across 4 nested classes:
+  - Positive match invariants: verified construction, target candidate retention, rejection of positive matches with null targets.
+  - No-match invariants: verified construction, null target representation, rejection of no-match examples carrying target candidates.
+  - Verification status invariants: rejection of `VERIFIED` examples missing evidence, acceptance of `UNVERIFIED` examples without evidence.
+  - Validation and required fields: rejection of null/blank IDs, null source tracks, and null expected outcomes.
+- `BenchmarkDatasetTest`: 7 tests across 3 nested classes:
+  - Dataset construction: immutable examples list preservation, rejection of null version/description/createdAt/examples.
+  - Query and filter utilities: finding example by ID, filtering by split (`DEV`, `VALIDATION`, `TEST`), filtering by outcome (`MATCH`, `NO_MATCH`), filtering by verification status (`VERIFIED`, `UNVERIFIED`), filtering by track category.
+  - Summary telemetry aggregation: calculation of total examples, match vs. no-match counts, verification counts, split distributions, and category distributions.
+- `BenchmarkDatasetValidatorTest`: 10 tests across 3 nested classes:
+  - Metadata validation: semantic versioning verification, rejection of null dataset, rejection of invalid semver, rejection of empty examples list.
+  - Referential integrity and deduplication: duplicate example ID detection with explicit ID reporting in error messages, duplicate source ID warnings across examples, duplicate artist + title collisions within the same split warnings, non-standard 11-char video ID warnings, rejection of verified examples with trivial short verification evidence.
+  - Fail-fast enforcement: `validateAndThrow` behavior throwing `BenchmarkValidationException` with itemized diagnostics on invalid datasets.
+- `BenchmarkDatasetLoaderTest`: 9 tests across 2 nested classes:
+  - Default ground-truth dataset loading: loads `ground_truth_benchmark.json` from classpath, verifies target threshold ($\ge 100$, actual 118 tracks), verifies 105 matches and 13 legitimate non-matches, 117 verified and 1 unverified record, confirms presence in all 3 splits (`DEV` 52, `VALIDATION` 36, `TEST` 30), verifies typology coverage across all 17 categories, and asserts strict invariants on all 118 records.
+  - Serialization and round-trip: JSON round-trip via `toJson` and `loadFromJson`, non-existent resource error handling, malformed JSON error handling, semantically invalid dataset rejection via `BenchmarkValidationException`.
+
+## Future Testing Scope (Phase 8C+)
 As the migrator logic scales, testing will expand to:
-- Matching Evaluation & Benchmark Test Suite (Phase 8: labeled ground truth evaluation, Brier score, calibration curve validation)
+- Benchmark Runner & Metric Evaluation Test Suite (Phase 8C: Top-1, Top-3, Precision, Recall, False-Positive Rate, Platt scaling parameter fitting)
 - Migration State Machine & Orchestration Test Suite (Phase 9 & Phase 12)
 - Review & Correction Flow Testing (Phase 10)
 - Destination Playlist Creation Testing (Phase 11)

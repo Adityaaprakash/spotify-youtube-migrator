@@ -2,10 +2,43 @@
 
 Last Updated: 2026-10-13
 
-Current Phase: Phase 7 — Matching Engine (COMPLETE / FROZEN)
-Current Subphase: Phase 7I COMPLETE (Subsystem Verification & Matching Freeze — Matching Engine FROZEN)
+Current Phase: Phase 8 — Matching Evaluation & Benchmark (IN PROGRESS: 8A+8B COMPLETE)
+Current Subphase: Phase 8A + 8B COMPLETE (Benchmark Foundation & Ground-Truth Dataset); Phase 8C PENDING
 
 ## Completed
+### Phase 8A + 8B (Benchmark Architecture and Ground-Truth Dataset)
+- **Phase 8A (Benchmark Architecture and Dataset Contract)**:
+  - Package: `com.spotifyyoutube.migrator.matching.benchmark`
+  - Strongly typed immutable domain model:
+    - `BenchmarkExpectedOutcome`: Enum (`MATCH`, `NO_MATCH`) distinguishing positive matches from legitimate non-matches.
+    - `BenchmarkVerificationStatus`: Enum (`VERIFIED`, `UNVERIFIED`, `DISPUTED`) tracking audit status.
+    - `BenchmarkDatasetSplit`: Enum (`DEV`, `VALIDATION`, `TEST`) defining evaluation splits.
+    - `BenchmarkTrackCategory`: 17-category typology (`STANDARD_POPULAR`, `OFFICIAL_MUSIC_VIDEO`, `OFFICIAL_AUDIO`, `TOPIC_CHANNEL`, `FEATURED_ARTIST`, `BAND_OR_COLLABORATION`, `REMIX`, `LIVE_VERSION`, `ACOUSTIC`, `COVER_VERSION`, `REMASTER`, `EXPLICIT_OR_CLEAN`, `DIACRITICS_OR_PUNCTUATION`, `SHORT_OR_AMBIGUOUS_TITLE`, `SAME_TITLE_DIFFERENT_ARTIST`, `DURATION_DISCREPANCY`, `LEGITIMATE_NO_MATCH`).
+    - `BenchmarkSourceTrack`: Immutable source Spotify track representation (title, primaryArtist, unmodifiable artists list, album, durationMs, isExplicit, isrc).
+    - `BenchmarkTargetCandidate`: Target YouTube candidate representation (videoId, title, channelTitle, durationMs, channelId, isOfficial).
+    - `BenchmarkExample`: Root benchmark record enforcing strict constructor invariants (positive match requires non-null target, no-match strictly forbids target, VERIFIED requires non-blank verificationEvidence).
+    - `BenchmarkDataset`: Dataset container record with immutable examples list, query utilities (`getExampleById`, `getExamplesBySplit`, `getExamplesByOutcome`, `getExamplesByStatus`, `getExamplesByCategory`), and `summary()`.
+    - `BenchmarkDatasetSummary`: Aggregated telemetry capturing totals and distributions across splits and typologies.
+  - Deterministic validation engine:
+    - `BenchmarkDatasetValidator`: Enforces semantic versioning, uniqueness of example IDs, required fields, outcome vs target consistency, evidence presence on verified records, with warnings on duplicate source IDs, split collisions, and non-standard video IDs.
+    - `BenchmarkValidationResult` & `BenchmarkValidationException`: Structured error reporting and fail-fast exception handling.
+  - Offline Jackson loader & serialization:
+    - `BenchmarkDatasetLoader`: Loads from classpath (`/benchmark/ground_truth_benchmark.json`), input streams, files, and JSON strings with automatic validation; provides deterministic pretty-printed JSON serialization.
+  - Future Phase 8C integration contract:
+    - Documented in `package-info.java` and `ADR-018`.
+- **Phase 8B (Ground-Truth Benchmark Dataset)**:
+  - Resource: `backend/src/main/resources/benchmark/ground_truth_benchmark.json` (Version `1.0.0`).
+  - Total records: **118 distinct Spotify tracks** (exceeds target of 100).
+  - Matches (`MATCH`): 105.
+  - Legitimate Non-Matches (`NO_MATCH`): 13.
+  - Verification status: 117 `VERIFIED` (with traceable audit evidence), 1 `UNVERIFIED` (`BM-0029`: performer under review), 0 `DISPUTED`.
+  - Splits: `DEV` (52 records, 44.1%), `VALIDATION` (36 records, 30.5%), `TEST` (30 records, 25.4%).
+  - Case diversity: All 17 defined typology categories represented (Official Video 25, Standard Popular 19, No Match 13, Typo/Punctuation 8, Featured Artist 7, Band Collab 6, Official Audio 5, Topic Channel 5, Cover 5, Remaster 4, Same Title Different Artist 4, Duration Discrepancy 4, Remix 3, Live 3, Acoustic 3, Short Title 3, Explicit/Clean 1).
+- **Phase 8A + 8B Automated Tests**:
+  - `BenchmarkExampleTest`: Invariants, required fields, and state queries.
+  - `BenchmarkDatasetTest`: Immutability, query helpers, and summary aggregations.
+  - `BenchmarkDatasetValidatorTest`: Metadata checks, referential integrity, duplicate ID detection, and warning behaviors.
+  - `BenchmarkDatasetLoaderTest`: Default dataset loading, 118-count verification, typology coverage, serialization round-trip, and error handling.
 ### Phase 7I (Subsystem Verification & Matching Freeze)
 - **Subsystem-Wide Correctness & Determinism Audit**:
   - Audited full matching pipeline: `TrackMatchRequest` $\to$ Feature Extraction $\to$ Similarity Scoring (Title, Artist, Duration, Album) $\to$ Recording Version Penalties $\to$ Official Provenance $\to$ Composite Scoring with dynamic weight re-normalization $\to$ 7-level tie-breaking Ranking $\to$ Calibrated Probability Evaluation $\to$ 7-gate Match Decision $\to$ `TrackMatchResult`.
@@ -455,21 +488,21 @@ Current Subphase: Phase 7I COMPLETE (Subsystem Verification & Matching Freeze �
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Matching Evaluation & Benchmarking (Phase 8).
+- Phase 8C (Benchmark Runner & Evaluation Metrics Calculation).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 - Review & Correction Interface (Phase 10).
 - Playlist Creation (Phase 11).
 
 ## Current Verification
-- Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
-- Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
-- Focused Phase 7H Test Suite: **PASS** (71 tests passing across `CalibrationResultTest`, `DefaultMatchProbabilityCalibratorTest`, `MatchDecisionEngineTest`, `TrackMatchingEngineIntegrationTest`, `TrackMatchResultTest`, `CandidateMatchEvaluationTest`)
-- Matching Engine Regression Suite (18 test classes): **PASS** (274 tests run, 0 failures, 0 errors, 0 skipped in 12.912s)
-- Complete Matching Subsystem Coverage: 24 test classes, 333 tests total, 100% passing across feature extraction, individual scorers, version penalties, composite calculation, ranking, calibration, decision policy, and pipeline integration.
-- Focused Candidate Discovery & Mapping Suite: **PASS** (133 tests passing across discovery and mapping)
-- Focused Normalization Test Suite: **PASS** (227 tests passing)
-- Full Non-Repository Unit Test Suite: **PASS** (100% passing across domain, identity, spotify, youtube, migration, playlist, matching)
-- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): **BLOCKED** — Docker daemon unavailable in environment
+- Backend Compilation: `.\mvnw.cmd test-compile`
+- Checkstyle: `.\mvnw.cmd checkstyle:check`
+- Phase 8A/8B Test Suite: 4 test classes (`BenchmarkExampleTest`, `BenchmarkDatasetTest`, `BenchmarkDatasetValidatorTest`, `BenchmarkDatasetLoaderTest`)
+- Matching Engine Regression Suite (18 test classes): 274 tests
+- Complete Matching Subsystem Coverage: 24 test classes, 333 tests total
+- Focused Candidate Discovery & Mapping Suite: 133 tests
+- Focused Normalization Test Suite: 227 tests
+- Full Non-Repository Unit Test Suite: 100% passing across domain, identity, spotify, youtube, migration, playlist, matching
+- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): Docker daemon unavailable in environment
 
 ## Phase Freeze Status
 - **Phase 2 (Auth & Identity)**: FROZEN
@@ -487,6 +520,10 @@ Current Subphase: Phase 7I COMPLETE (Subsystem Verification & Matching Freeze �
   - **Phase 7G (Composite Scoring, Ranking & Decision Engine)**: COMPLETE / FROZEN
   - **Phase 7H (Calibrated Match Probability & Decision Policy)**: COMPLETE / FROZEN
   - **Phase 7I (Subsystem Verification & Matching Freeze)**: COMPLETE / FROZEN
+- **Phase 8 (Matching Evaluation & Benchmark)**: IN PROGRESS
+  - **Phase 8A (Benchmark Architecture and Dataset Contract)**: COMPLETE
+  - **Phase 8B (Ground-Truth Benchmark Dataset)**: COMPLETE
+  - **Phase 8C (Benchmark Runner & Evaluation Metrics)**: NOT STARTED / PENDING
 
 ## Next Recommended Work
-1. Phase 8: Matching Evaluation & Benchmark (empirical labeled dataset collection, Brier score evaluation, Platt scaling parameter fitting).
+1. Phase 8C: Benchmark Runner & Evaluation Metrics (evaluate frozen Phase 7 engine against the 118-track dataset, calculate Top-1, Top-3, Precision, Recall, False-Positive Rate, calibration metrics).

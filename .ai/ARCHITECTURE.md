@@ -95,3 +95,16 @@ Controllers MUST NOT:
   - **Probability Calibration Separation**: `CalibrationResult` and `MatchProbabilityCalibrator` strictly separate heuristic composite similarity from empirical match probability. Default baseline is honestly uncalibrated (`configured = false, modelValidated = false`). Platt scaling transformations are clamped to logit $[-40.0, 40.0]$ for numerical stability.
   - **Decision Policy Gates**: Transparent 7-gate decision policy enforces safety gates: empty candidates ($\to$ `NO_MATCH`), version penalty $> 0.10$ on viable candidate ($\to$ `REVIEW_REQUIRED`), score $< 0.50$ ($\to$ `NO_MATCH`), borderline score $0.50 \le s < 0.75$ ($\to$ `REVIEW_REQUIRED`), ambiguity margin $< 0.05$ ($\to$ `REVIEW_REQUIRED`). Probability divergence gate applies strictly to empirically validated models.
   - **Subsystem Freeze**: The Matching Engine subsystem is complete, verified, and **FROZEN** at Phase 7I.
+
+## Benchmark & Evaluation Layer (Phase 8A + 8B)
+
+- Package: `com.spotifyyoutube.migrator.matching.benchmark`
+- Resources: `benchmark/ground_truth_benchmark.json`
+- Purpose: Ground-truth benchmark data architecture, dataset validation, offline dataset loading, and auditable verification for evaluating matching performance.
+- Architecture Rules:
+  - **Zero Production Intrusion**: Benchmark domain models, validation, and dataset loaders MUST NOT modify, alter, or introduce branches into the frozen Phase 5 normalization engine, Phase 6 candidate discovery, or Phase 7 matching engine.
+  - **Explicit Outcome Representation**: Matches (`MATCH`) and legitimate non-matches (`NO_MATCH`) MUST be represented unambiguously as explicit enum variants. A non-match MUST NOT be represented as a match with a null video ID.
+  - **Strong Invariant Validation**: `BenchmarkExample` enforces constructor invariants: positive matches require non-null `BenchmarkTargetCandidate`; non-matches forbid target candidates; `VERIFIED` status requires non-blank `verificationEvidence`.
+  - **Deterministic Validator**: `BenchmarkDatasetValidator` enforces semantic versioning, uniqueness of example IDs, completeness of mandatory metadata, and produces itemized fatal errors and non-fatal warnings without silently modifying data.
+  - **Offline Storage & Jackson Loading**: Benchmark datasets are stored in version-controlled JSON on the classpath and parsed using `BenchmarkDatasetLoader` without live network calls, remote databases, or container dependencies.
+  - **Future Runner Integration Contract**: Future Phase 8C benchmark runner will consume `BenchmarkDatasetLoader.loadDefault()` and evaluate the frozen `TrackMatchingEngine` without conflating ground truth, predicted matches, candidate sets, decision outcomes, or human review statuses.

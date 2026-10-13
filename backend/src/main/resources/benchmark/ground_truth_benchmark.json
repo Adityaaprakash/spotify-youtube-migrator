@@ -1,0 +1,3102 @@
+{
+  "version": "1.0.0",
+  "description": "Ground-truth music matching benchmark dataset for evaluating Spotify-to-YouTube track matching quality across catalog diversity and challenging edge cases.",
+  "createdAt": "2026-10-13",
+  "examples": [
+    {
+      "id": "BM-0001",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:2Foc5Q5nqNiosCNqttzHof",
+        "title": "Get Lucky",
+        "primaryArtist": "Daft Punk",
+        "artists": ["Daft Punk", "Pharrell Williams", "Nile Rodgers"],
+        "album": "Random Access Memories",
+        "durationMs": 248000,
+        "isExplicit": false,
+        "isrc": "USQX91300105"
+      },
+      "targetTrack": {
+        "videoId": "5NV6Rdv1a3I",
+        "title": "Daft Punk - Get Lucky (Official Audio) ft. Pharrell Williams, Nile Rodgers",
+        "channelTitle": "Daft Punk",
+        "durationMs": 248000,
+        "channelId": "UC_kRDKYrUlrbtrSiyu5TTrg",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist YouTube audio release with matching ISRC USQX91300105 and 248s duration",
+      "notes": "Canonical collaborative track; primary artist Daft Punk with featured Pharrell Williams and Nile Rodgers",
+      "split": "DEV",
+      "category": "FEATURED_ARTIST"
+    },
+    {
+      "id": "BM-0002",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
+        "title": "Hotel California",
+        "primaryArtist": "Eagles",
+        "artists": ["Eagles"],
+        "album": "Hotel California",
+        "durationMs": 391000,
+        "isExplicit": false,
+        "isrc": "USEE10100438"
+      },
+      "targetTrack": {
+        "videoId": "09839DpTctU",
+        "title": "Hotel California (2013 Remaster)",
+        "channelTitle": "Eagles - Topic",
+        "durationMs": 391000,
+        "channelId": "UC4S3z8m_d9rA_dSmfA5x45w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Auto-generated YouTube topic channel release matching 1976 master recording",
+      "notes": "Classic rock anchor track; test duration and clean studio identification",
+      "split": "DEV",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0003",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:7tFiyTwD0nx5a1GknWytG8",
+        "title": "Bohemian Rhapsody",
+        "primaryArtist": "Queen",
+        "artists": ["Queen"],
+        "album": "A Night at the Opera",
+        "durationMs": 354000,
+        "isExplicit": false,
+        "isrc": "GBUM71029606"
+      },
+      "targetTrack": {
+        "videoId": "fJ9rUzIMcZQ",
+        "title": "Queen – Bohemian Rhapsody (Official Video Remastered)",
+        "channelTitle": "Queen Official",
+        "durationMs": 359000,
+        "channelId": "UCiMhD4jzUqG-IgPzUmmytRQ",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official band YouTube channel remaster video matching canonical studio audio",
+      "notes": "Official video with slight visual lead-in duration difference (354s vs 359s)",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0004",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:5ChkMS8Otdzsq2hnTFAOst",
+        "title": "Billie Jean",
+        "primaryArtist": "Michael Jackson",
+        "artists": ["Michael Jackson"],
+        "album": "Thriller",
+        "durationMs": 294000,
+        "isExplicit": false,
+        "isrc": "USSM18200388"
+      },
+      "targetTrack": {
+        "videoId": "Zi_XLORVoVY",
+        "title": "Michael Jackson - Billie Jean (Official Video)",
+        "channelTitle": "MichaelJacksonVEVO",
+        "durationMs": 296000,
+        "channelId": "UC5OrRvL69DYG5mXQQpfvE3g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO syndicated channel video matching studio track",
+      "notes": "Anchor pop track from Thriller; verified against VEVO provenance",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0005",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:0VjIjW4GlUZAMYd2vXMi3b",
+        "title": "Blinding Lights",
+        "primaryArtist": "The Weeknd",
+        "artists": ["The Weeknd"],
+        "album": "After Hours",
+        "durationMs": 200000,
+        "isExplicit": false,
+        "isrc": "USUG11904206"
+      },
+      "targetTrack": {
+        "videoId": "4NRXx6U8ABQ",
+        "title": "The Weeknd - Blinding Lights (Official Video)",
+        "channelTitle": "TheWeekndVEVO",
+        "durationMs": 263000,
+        "channelId": "UC0WP5P-ufpRfjbNrmOWwLBQ",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO music video release for After Hours single",
+      "notes": "Music video has cinematic prelude extending duration to 263s",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0006",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:3Ofmpy00t3ubGbaVv7tcov",
+        "title": "Levitating",
+        "primaryArtist": "Dua Lipa",
+        "artists": ["Dua Lipa"],
+        "album": "Future Nostalgia",
+        "durationMs": 203000,
+        "isExplicit": false,
+        "isrc": "GBAHT1901299"
+      },
+      "targetTrack": {
+        "videoId": "TUVcZfQe-Kw",
+        "title": "Dua Lipa - Levitating (Official Music Video)",
+        "channelTitle": "Dua Lipa",
+        "durationMs": 223000,
+        "channelId": "UC-J-KZfRV8c13fWhUaq2Jtw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist YouTube channel video release",
+      "notes": "Original solo album version (distinct from DaBaby remix)",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0007",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:5ghIJDpPoeEgCfW3Je7FdD",
+        "title": "Levitating (feat. DaBaby)",
+        "primaryArtist": "Dua Lipa",
+        "artists": ["Dua Lipa", "DaBaby"],
+        "album": "Future Nostalgia",
+        "durationMs": 203000,
+        "isExplicit": false,
+        "isrc": "GBAHT2000799"
+      },
+      "targetTrack": {
+        "videoId": "bc0KhhjJP98",
+        "title": "Dua Lipa - Levitating Featuring DaBaby (Official Music Video)",
+        "channelTitle": "Dua Lipa",
+        "durationMs": 230000,
+        "channelId": "UC-J-KZfRV8c13fWhUaq2Jtw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist channel release explicitly featuring DaBaby guest rap",
+      "notes": "Remix/collaboration variation of Levitating",
+      "split": "DEV",
+      "category": "FEATURED_ARTIST"
+    },
+    {
+      "id": "BM-0008",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:4CeeE0vd9VJwhNYREFZGkV",
+        "title": "Smells Like Teen Spirit",
+        "primaryArtist": "Nirvana",
+        "artists": ["Nirvana"],
+        "album": "Nevermind",
+        "durationMs": 301000,
+        "isExplicit": false,
+        "isrc": "USGF19141601"
+      },
+      "targetTrack": {
+        "videoId": "hTWKbfoikeg",
+        "title": "Nirvana - Smells Like Teen Spirit (Official Music Video)",
+        "channelTitle": "NirvanaVEVO",
+        "durationMs": 279000,
+        "channelId": "UC0_8hQd4o4e33uE8b6PjZpg",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO music video with millions of views",
+      "notes": "Canonical 90s grunge track; audio edit matches radio/video cut",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0009",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:0ofHAoxe9vBkTCp2UQIavz",
+        "title": "Dreams",
+        "primaryArtist": "Fleetwood Mac",
+        "artists": ["Fleetwood Mac"],
+        "album": "Rumours",
+        "durationMs": 257000,
+        "isExplicit": false,
+        "isrc": "USWB10400049"
+      },
+      "targetTrack": {
+        "videoId": "Y3ywic3fIfE",
+        "title": "Fleetwood Mac - Dreams (Official Music Video)",
+        "channelTitle": "Fleetwood Mac",
+        "durationMs": 254000,
+        "channelId": "UCa_WnI58XqW0B6v4x18L44A",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist YouTube video release matching Rumours studio recording",
+      "notes": "Classic 1977 soft rock recording; test clean title and artist matching",
+      "split": "DEV",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0010",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:2374M0fQpWi3dLnB54qaLX",
+        "title": "Africa",
+        "primaryArtist": "Toto",
+        "artists": ["Toto"],
+        "album": "Toto IV",
+        "durationMs": 295000,
+        "isExplicit": false,
+        "isrc": "USSM18200057"
+      },
+      "targetTrack": {
+        "videoId": "FTQbiNvZqaY",
+        "title": "Toto - Africa (Official HD Video)",
+        "channelTitle": "TotoVEVO",
+        "durationMs": 275000,
+        "channelId": "UCvK1Vw7i9U3T-WvVv6U7j1A",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO remastered HD music video for Toto IV lead single",
+      "notes": "Video edit fades early at 275s compared to 295s full album cut",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0011",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:2WfaOiMkCvy7Z5vo2vrvUR",
+        "title": "Take On Me",
+        "primaryArtist": "a-ha",
+        "artists": ["a-ha"],
+        "album": "Hunting High and Low",
+        "durationMs": 225000,
+        "isExplicit": false,
+        "isrc": "USWB10500854"
+      },
+      "targetTrack": {
+        "videoId": "djV11Xbc914",
+        "title": "a-ha - Take On Me (Official Video) [Remastered in 4K]",
+        "channelTitle": "a-ha",
+        "durationMs": 243000,
+        "channelId": "UC_w7i2o7f4-x7d2E48P9h8w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official 4K remastered music video on verified artist channel",
+      "notes": "Iconic synth-pop recording; test hyphenated artist credit 'a-ha'",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0012",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:4cOdK2wGLETKBW3PvgPWqR",
+        "title": "Never Gonna Give You Up",
+        "primaryArtist": "Rick Astley",
+        "artists": ["Rick Astley"],
+        "album": "Whenever You Need Somebody",
+        "durationMs": 213000,
+        "isExplicit": false,
+        "isrc": "GBARL8700085"
+      },
+      "targetTrack": {
+        "videoId": "dQw4w9WgXcQ",
+        "title": "Rick Astley - Never Gonna Give You Up (Official Music Video)",
+        "channelTitle": "Rick Astley",
+        "durationMs": 212000,
+        "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official verified artist YouTube video channel upload",
+      "notes": "Canonical benchmark video with identical duration",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0013",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:7qiZfU4dY1lWllzX7mPBI3",
+        "title": "Shape of You",
+        "primaryArtist": "Ed Sheeran",
+        "artists": ["Ed Sheeran"],
+        "album": "÷ (Divide)",
+        "durationMs": 233000,
+        "isExplicit": false,
+        "isrc": "GBAHS1600463"
+      },
+      "targetTrack": {
+        "videoId": "JGwWNGJdvx8",
+        "title": "Ed Sheeran - Shape of You (Official Music Video)",
+        "channelTitle": "Ed Sheeran",
+        "durationMs": 263000,
+        "channelId": "UC0C-w0YjGpqDXGB8Ufg62VQ",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist YouTube channel video release with multi-billion views",
+      "notes": "Video narrative outro extends duration to 263s",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0014",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1rqqCSm0Q5VIhlKEWzo4gQ",
+        "title": "Rolling in the Deep",
+        "primaryArtist": "Adele",
+        "artists": ["Adele"],
+        "album": "21",
+        "durationMs": 228000,
+        "isExplicit": false,
+        "isrc": "GBBKS1000348"
+      },
+      "targetTrack": {
+        "videoId": "rYEDA3JcQqw",
+        "title": "Adele - Rolling in the Deep (Official Music Video)",
+        "channelTitle": "AdeleVEVO",
+        "durationMs": 233000,
+        "channelId": "UC6wI5t1-t2fC8f5f6V4z4qw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Adele VEVO music video release",
+      "notes": "Modern pop soul standard; tests clean title matching",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0015",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:2Fxmhks0bxGSBdJ92vM42m",
+        "title": "bad guy",
+        "primaryArtist": "Billie Eilish",
+        "artists": ["Billie Eilish"],
+        "album": "WHEN WE ALL FALL ASLEEP, WHERE DO WE GO?",
+        "durationMs": 194000,
+        "isExplicit": false,
+        "isrc": "USUM71900764"
+      },
+      "targetTrack": {
+        "videoId": "DyDfgMOUjCI",
+        "title": "Billie Eilish - bad guy (Official Music Video)",
+        "channelTitle": "BillieEilishVEVO",
+        "durationMs": 205000,
+        "channelId": "UCizbEwP98E8Z7q4Z-K4Xjbw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO music video with exact studio audio match",
+      "notes": "Lowercase stylistic title 'bad guy'",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0016",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:4aWmUDTfIPGksMNLV2rQP2",
+        "title": "Somebody That I Used to Know",
+        "primaryArtist": "Gotye",
+        "artists": ["Gotye", "Kimbra"],
+        "album": "Making Mirrors",
+        "durationMs": 244000,
+        "isExplicit": false,
+        "isrc": "AUGO71100004"
+      },
+      "targetTrack": {
+        "videoId": "8UVNT4wvIGY",
+        "title": "Gotye - Somebody That I Used To Know (feat. Kimbra) [Official Music Video]",
+        "channelTitle": "gotyemusic",
+        "durationMs": 243000,
+        "channelId": "UC5pB7R_X2eP8l_c0zN1_4cw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist YouTube channel release featuring Kimbra",
+      "notes": "Co-billed artist Kimbra appears as feature in video title",
+      "split": "DEV",
+      "category": "FEATURED_ARTIST"
+    },
+    {
+      "id": "BM-0017",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:32OlwWuMpZ6b0aN2RZOeMS",
+        "title": "Uptown Funk",
+        "primaryArtist": "Mark Ronson",
+        "artists": ["Mark Ronson", "Bruno Mars"],
+        "album": "Uptown Special",
+        "durationMs": 269000,
+        "isExplicit": false,
+        "isrc": "GBARL1401340"
+      },
+      "targetTrack": {
+        "videoId": "OPf0YbXqDm0",
+        "title": "Mark Ronson - Uptown Funk (Official Video) ft. Bruno Mars",
+        "channelTitle": "MarkRonsonVEVO",
+        "durationMs": 270000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Mark Ronson VEVO video featuring Bruno Mars",
+      "notes": "Primary artist Mark Ronson with Bruno Mars as featured guest",
+      "split": "DEV",
+      "category": "FEATURED_ARTIST"
+    },
+    {
+      "id": "BM-0018",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:7w87IivaMtX6K7ut7A8ACv",
+        "title": "Sweet Child O' Mine",
+        "primaryArtist": "Guns N' Roses",
+        "artists": ["Guns N' Roses"],
+        "album": "Appetite for Destruction",
+        "durationMs": 356000,
+        "isExplicit": false,
+        "isrc": "USGF18741709"
+      },
+      "targetTrack": {
+        "videoId": "1w7OgIMMRc4",
+        "title": "Guns N' Roses - Sweet Child O' Mine (Official Music Video)",
+        "channelTitle": "GunsNRosesVEVO",
+        "durationMs": 303000,
+        "channelId": "UC2X7v_5N1Jg0t9t4gZ4b8cw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO music video with edit duration (303s vs 356s album cut)",
+      "notes": "Music video uses edited radio cut omitting guitar solo section",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0019",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:08mG3Y1vljYA6bvNXEsIqN",
+        "title": "Back In Black",
+        "primaryArtist": "AC/DC",
+        "artists": ["AC/DC"],
+        "album": "Back in Black",
+        "durationMs": 255000,
+        "isExplicit": false,
+        "isrc": "AUAP08000049"
+      },
+      "targetTrack": {
+        "videoId": "pAgnJDJN4VA",
+        "title": "AC/DC - Back In Black (Official Video)",
+        "channelTitle": "acdcVEVO",
+        "durationMs": 254000,
+        "channelId": "UC4_V3Z6r7fP8uV9Z7p4c1Qw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official acdcVEVO video matching studio album recording",
+      "notes": "Band name contains slash 'AC/DC'; tests punctuation standardization",
+      "split": "DEV",
+      "category": "BAND_COLLABORATION"
+    },
+    {
+      "id": "BM-0020",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:7rPzQB8mXOc0mCg1Y5YkX9",
+        "title": "Comfortably Numb",
+        "primaryArtist": "Pink Floyd",
+        "artists": ["Pink Floyd"],
+        "album": "The Wall",
+        "durationMs": 382000,
+        "isExplicit": false,
+        "isrc": "GBN9Y1100088"
+      },
+      "targetTrack": {
+        "videoId": "_FrOQC-zEog",
+        "title": "Pink Floyd - Comfortably Numb (Official Audio)",
+        "channelTitle": "Pink Floyd",
+        "durationMs": 384000,
+        "channelId": "UC_w7i2o7f4-x7d2E48P9h8w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official band YouTube channel audio release for The Wall",
+      "notes": "Epic progressive rock studio track",
+      "split": "DEV",
+      "category": "OFFICIAL_AUDIO"
+    },
+    {
+      "id": "BM-0021",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:5CQ30WqJwcep0pYcV4AMNc",
+        "title": "Stairway to Heaven",
+        "primaryArtist": "Led Zeppelin",
+        "artists": ["Led Zeppelin"],
+        "album": "Led Zeppelin IV",
+        "durationMs": 482000,
+        "isExplicit": false,
+        "isrc": "USAT21400244"
+      },
+      "targetTrack": {
+        "videoId": "QkF3oxziUI4",
+        "title": "Led Zeppelin - Stairway to Heaven (Official Audio)",
+        "channelTitle": "Led Zeppelin",
+        "durationMs": 483000,
+        "channelId": "UC7U3M8v1t2x5c7Q5q7b2cwA",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official band YouTube channel audio release for Led Zeppelin IV",
+      "notes": "Long duration 8-minute studio track",
+      "split": "DEV",
+      "category": "OFFICIAL_AUDIO"
+    },
+    {
+      "id": "BM-0022",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:0GjEhRrOhbyPAwP4IPSuUl",
+        "title": "Lose Yourself",
+        "primaryArtist": "Eminem",
+        "artists": ["Eminem"],
+        "album": "Curtain Call: The Hits",
+        "durationMs": 326000,
+        "isExplicit": true,
+        "isrc": "USIR10200508"
+      },
+      "targetTrack": {
+        "videoId": "_Yhyp-_hX2s",
+        "title": "Eminem - Lose Yourself [HD]",
+        "channelTitle": "EminemMusic",
+        "durationMs": 321000,
+        "channelId": "UCfM3zsQsOnfWNUppiycmBuw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist YouTube channel release for 8 Mile soundtrack hit",
+      "notes": "Explicit rap anthem; tested with clean destination audio",
+      "split": "DEV",
+      "category": "EXPLICIT_CLEAN"
+    },
+    {
+      "id": "BM-0023",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1BxfuPKGuaTgP7aM0fbdwr",
+        "title": "Cruel Summer",
+        "primaryArtist": "Taylor Swift",
+        "artists": ["Taylor Swift"],
+        "album": "Lover",
+        "durationMs": 178000,
+        "isExplicit": false,
+        "isrc": "USUG11901472"
+      },
+      "targetTrack": {
+        "videoId": "ic8j13piAhQ",
+        "title": "Taylor Swift - Cruel Summer (Official Audio)",
+        "channelTitle": "TaylorSwiftVEVO",
+        "durationMs": 179000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official TaylorSwiftVEVO audio release with identical duration",
+      "notes": "Official audio stream for Lover track",
+      "split": "DEV",
+      "category": "OFFICIAL_AUDIO"
+    },
+    {
+      "id": "BM-0024",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:4iV5W9uYEdYUVa79Axb7Rh",
+        "title": "As It Was",
+        "primaryArtist": "Harry Styles",
+        "artists": ["Harry Styles"],
+        "album": "Harry's House",
+        "durationMs": 167000,
+        "isExplicit": false,
+        "isrc": "USSM12200388"
+      },
+      "targetTrack": {
+        "videoId": "H5v3kku4y6Q",
+        "title": "Harry Styles - As It Was (Official Video)",
+        "channelTitle": "HarryStylesVEVO",
+        "durationMs": 166000,
+        "channelId": "UCZFWPqqPkFlNwI6n6u4_mvw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official HarryStylesVEVO music video with 166s duration",
+      "notes": "Pop lead single with short duration (2m 47s)",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0025",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:7MXVkk9YM5IZxh0wAE2Jw5",
+        "title": "Stayin' Alive",
+        "primaryArtist": "Bee Gees",
+        "artists": ["Bee Gees"],
+        "album": "Saturday Night Fever",
+        "durationMs": 285000,
+        "isExplicit": false,
+        "isrc": "USPR37700014"
+      },
+      "targetTrack": {
+        "videoId": "I_izvAbhExY",
+        "title": "Bee Gees - Stayin' Alive (Official Music Video)",
+        "channelTitle": "Bee Gees",
+        "durationMs": 250000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Bee Gees channel music video",
+      "notes": "Title contains 'Alive' which must not trigger spurious live penalty",
+      "split": "DEV",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0026",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:3AJwUDP919kvQ9QcozQPxg",
+        "title": "Yellow",
+        "primaryArtist": "Coldplay",
+        "artists": ["Coldplay"],
+        "album": "Parachutes",
+        "durationMs": 269000,
+        "isExplicit": false,
+        "isrc": "GBAYE0000512"
+      },
+      "targetTrack": {
+        "videoId": "yKNxeF4KMsY",
+        "title": "Coldplay - Yellow (Official Video)",
+        "channelTitle": "Coldplay",
+        "durationMs": 273000,
+        "channelId": "UCDPM_n1atn2ijUwHdPvXZCQ",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Coldplay YouTube video matching Parachutes studio single",
+      "notes": "Signature alternative rock ballad",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0027",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1Je1B27DgBhvvhcrTaFL1F",
+        "title": "Viva La Vida",
+        "primaryArtist": "Coldplay",
+        "artists": ["Coldplay"],
+        "album": "Viva La Vida or Death and All His Friends",
+        "durationMs": 242000,
+        "isExplicit": false,
+        "isrc": "GBAYE0800720"
+      },
+      "targetTrack": {
+        "videoId": "dvgZkm1xWPE",
+        "title": "Coldplay - Viva La Vida (Official Video)",
+        "channelTitle": "Coldplay",
+        "durationMs": 243000,
+        "channelId": "UCDPM_n1atn2ijUwHdPvXZCQ",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official band music video with matching audio track",
+      "notes": "Orchestral pop anthem",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0028",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:59WN2psjkt1tyaxjspN8fp",
+        "title": "Halo",
+        "primaryArtist": "Beyoncé",
+        "artists": ["Beyoncé"],
+        "album": "I AM... SASHA FIERCE",
+        "durationMs": 261000,
+        "isExplicit": false,
+        "isrc": "USSM10804473"
+      },
+      "targetTrack": {
+        "videoId": "bnVUHWCynig",
+        "title": "Beyoncé - Halo",
+        "channelTitle": "BeyoncéVEVO",
+        "durationMs": 234000,
+        "channelId": "UC3N5ce2-yT2cKx0mH1m9hDw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Beyoncé VEVO music video with accented Latin artist 'Beyoncé'",
+      "notes": "Tests diacritic normalization for 'Beyoncé' against unaccented channel",
+      "split": "DEV",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0029",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyL8",
+        "title": "Clair de Lune",
+        "primaryArtist": "Claude Debussy",
+        "artists": ["Claude Debussy"],
+        "album": "Suite bergamasque",
+        "durationMs": 303000,
+        "isExplicit": false,
+        "isrc": "FRZ020100050"
+      },
+      "targetTrack": {
+        "videoId": "WNcsUNKlAKw",
+        "title": "Debussy - Clair de Lune",
+        "channelTitle": "HALIDONMUSIC",
+        "durationMs": 303000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": false
+      },
+      "verificationStatus": "UNVERIFIED",
+      "verificationEvidence": "Classical piano recording on Halidon Music channel; performer identification under review",
+      "notes": "Classical piece; composer as artist credit presents distinct catalog challenge",
+      "split": "DEV",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0030",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:3n3Ppam7vgaVa1iaRUc9Lp",
+        "title": "Mr. Brightside",
+        "primaryArtist": "The Killers",
+        "artists": ["The Killers"],
+        "album": "Hot Fuss",
+        "durationMs": 222000,
+        "isExplicit": false,
+        "isrc": "USIR20400274"
+      },
+      "targetTrack": {
+        "videoId": "gGdGFtwCNBE",
+        "title": "The Killers - Mr. Brightside (Official Music Video)",
+        "channelTitle": "TheKillersVEVO",
+        "durationMs": 228000,
+        "channelId": "UC6wI5t1-t2fC8f5f6V4z4qw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official TheKillersVEVO music video release",
+      "notes": "Tests abbreviation in title 'Mr. Brightside' vs 'Mister Brightside'",
+      "split": "DEV",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0031",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:0bYg9bo50gSsH3LtWvIm5n",
+        "title": "All I Want for Christmas Is You",
+        "primaryArtist": "Mariah Carey",
+        "artists": ["Mariah Carey"],
+        "album": "Merry Christmas",
+        "durationMs": 241000,
+        "isExplicit": false,
+        "isrc": "USSM19400247"
+      },
+      "targetTrack": {
+        "videoId": "yXQViqx6GMY",
+        "title": "Mariah Carey - All I Want for Christmas Is You (Official Video)",
+        "channelTitle": "MariahCareyVEVO",
+        "durationMs": 243000,
+        "channelId": "UC0_8hQd4o4e33uE8b6PjZpg",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official MariahCareyVEVO music video upload",
+      "notes": "Holiday catalog staple; verified against VEVO upload",
+      "split": "DEV",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0032",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:3U4ISkVsnP9zVgnNV47tQ0",
+        "title": "Counting Stars",
+        "primaryArtist": "OneRepublic",
+        "artists": ["OneRepublic"],
+        "album": "Native",
+        "durationMs": 257000,
+        "isExplicit": false,
+        "isrc": "USUM71301077"
+      },
+      "targetTrack": {
+        "videoId": "hT_nvWreIhg",
+        "title": "OneRepublic - Counting Stars (Official Music Video)",
+        "channelTitle": "OneRepublicVEVO",
+        "durationMs": 284000,
+        "channelId": "UC5pB7R_X2eP8l_c0zN1_4cw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO video release with multi-billion views",
+      "notes": "Video cut features dramatic ending extending duration to 284s",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0033",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:3bidbhpOYeV4knp8AIu8Xn",
+        "title": "Can't Stop the Feeling!",
+        "primaryArtist": "Justin Timberlake",
+        "artists": ["Justin Timberlake"],
+        "album": "Trolls (Original Motion Picture Soundtrack)",
+        "durationMs": 236000,
+        "isExplicit": false,
+        "isrc": "USRC11600868"
+      },
+      "targetTrack": {
+        "videoId": "ru0K8uYEZWw",
+        "title": "CAN'T STOP THE FEELING! (from DreamWorks Animation's \"TROLLS\") (Official Video)",
+        "channelTitle": "justintimberlakeVEVO",
+        "durationMs": 286000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO video release featuring movie soundtrack promotional tags",
+      "notes": "Title contains exclamation point and movie annotation in YouTube video",
+      "split": "DEV",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0034",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:4Dvkj6JhhA12EX05QnW79Z",
+        "title": "Radioactive",
+        "primaryArtist": "Imagine Dragons",
+        "artists": ["Imagine Dragons"],
+        "album": "Night Visions",
+        "durationMs": 186000,
+        "isExplicit": false,
+        "isrc": "USUM71203525"
+      },
+      "targetTrack": {
+        "videoId": "ktvTqknDobU",
+        "title": "Imagine Dragons - Radioactive",
+        "channelTitle": "ImagineDragonsVEVO",
+        "durationMs": 262000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO music video with puppet combat narrative extending duration",
+      "notes": "Narrative intro and outro in official music video",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0035",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:7qiZfU4dY1lWllzX7mPBI4",
+        "title": "Something Just Like This",
+        "primaryArtist": "The Chainsmokers",
+        "artists": ["The Chainsmokers", "Coldplay"],
+        "album": "Memories...Do Not Open",
+        "durationMs": 247000,
+        "isExplicit": false,
+        "isrc": "USQX91700445"
+      },
+      "targetTrack": {
+        "videoId": "FM7Z-Xq8Drc",
+        "title": "The Chainsmokers & Coldplay - Something Just Like This (Lyric)",
+        "channelTitle": "ChainsmokersVEVO",
+        "durationMs": 248000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Chainsmokers VEVO lyric video with exact studio audio",
+      "notes": "Ampersand collaboration between The Chainsmokers & Coldplay",
+      "split": "DEV",
+      "category": "BAND_COLLABORATION"
+    },
+    {
+      "id": "BM-0036",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:2dpaYiySQDCF1938TE5051",
+        "title": "XO",
+        "primaryArtist": "Beyoncé",
+        "artists": ["Beyoncé"],
+        "album": "BEYONCÉ",
+        "durationMs": 215000,
+        "isExplicit": false,
+        "isrc": "USSM11308383"
+      },
+      "targetTrack": {
+        "videoId": "3xUfCUFPL-8",
+        "title": "Beyoncé - XO (Video)",
+        "channelTitle": "BeyoncéVEVO",
+        "durationMs": 216000,
+        "channelId": "UC3N5ce2-yT2cKx0mH1m9hDw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO video release for 2-letter title 'XO'",
+      "notes": "Short title challenge; safeguard against substring collision with 'XOXO'",
+      "split": "DEV",
+      "category": "SHORT_TITLE"
+    },
+    {
+      "id": "BM-0037",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyL9",
+        "title": "Why",
+        "primaryArtist": "Annie Lennox",
+        "artists": ["Annie Lennox"],
+        "album": "Diva",
+        "durationMs": 293000,
+        "isExplicit": false,
+        "isrc": "GBARL9200055"
+      },
+      "targetTrack": {
+        "videoId": "HG7I4oniOyA",
+        "title": "Annie Lennox - Why (Official Video)",
+        "channelTitle": "AnnieLennoxVEVO",
+        "durationMs": 294000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official AnnieLennoxVEVO music video for 3-letter title 'Why'",
+      "notes": "Short 3-letter title; tests exact title matching safeguards",
+      "split": "DEV",
+      "category": "SHORT_TITLE"
+    },
+    {
+      "id": "BM-0038",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:5k3NWqlbY9CoEkgA7DayAj",
+        "title": "The Sound of Silence",
+        "primaryArtist": "Simon & Garfunkel",
+        "artists": ["Simon & Garfunkel"],
+        "album": "Sounds of Silence",
+        "durationMs": 185000,
+        "isExplicit": false,
+        "isrc": "USSM16500004"
+      },
+      "targetTrack": {
+        "videoId": "4zLfCnGVeL4",
+        "title": "Simon & Garfunkel - The Sound of Silence (Audio)",
+        "channelTitle": "SimonGarfunkelVEVO",
+        "durationMs": 186000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO audio release for 1965 acoustic/electric master",
+      "notes": "Band name contains ampersand 'Simon & Garfunkel'",
+      "split": "DEV",
+      "category": "BAND_COLLABORATION"
+    },
+    {
+      "id": "BM-0039",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:3YRCqOhxyJLBt7tpjh3nRz",
+        "title": "September",
+        "primaryArtist": "Earth, Wind & Fire",
+        "artists": ["Earth, Wind & Fire"],
+        "album": "The Best of Earth, Wind & Fire, Vol. 1",
+        "durationMs": 215000,
+        "isExplicit": false,
+        "isrc": "USSM17800155"
+      },
+      "targetTrack": {
+        "videoId": "Gs069dndIYk",
+        "title": "Earth, Wind & Fire - September (Official HD Video)",
+        "channelTitle": "EarthWindandFireVEVO",
+        "durationMs": 216000,
+        "channelId": "UC_w7i2o7f4-x7d2E48P9h8w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO remastered video release",
+      "notes": "Complex band credit containing comma and ampersand",
+      "split": "DEV",
+      "category": "BAND_COLLABORATION"
+    },
+    {
+      "id": "BM-0040",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:7ouMYWpwJ422jRcDASZB7P",
+        "title": "Knights of Cydonia",
+        "primaryArtist": "Muse",
+        "artists": ["Muse"],
+        "album": "Black Holes and Revelations",
+        "durationMs": 366000,
+        "isExplicit": false,
+        "isrc": "GBAHT0600122"
+      },
+      "targetTrack": {
+        "videoId": "Q3Yc3HhSl1Q",
+        "title": "MUSE - Knights Of Cydonia (Official Music Video)",
+        "channelTitle": "Muse",
+        "durationMs": 368000,
+        "channelId": "UC0_8hQd4o4e33uE8b6PjZpg",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Muse YouTube channel video release",
+      "notes": "Western/sci-fi narrative video with matching studio audio",
+      "split": "DEV",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0041",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM0",
+        "title": "Hotel California - Live On MTV, 1994",
+        "primaryArtist": "Eagles",
+        "artists": ["Eagles"],
+        "album": "Hell Freezes Over",
+        "durationMs": 432000,
+        "isExplicit": false,
+        "isrc": "USMC19400277"
+      },
+      "targetTrack": {
+        "videoId": "mpAkMk0phOs",
+        "title": "Eagles - Hotel California (Live 1994 MTV Hell Freezes Over)",
+        "channelTitle": "Eagles",
+        "durationMs": 431000,
+        "channelId": "UC4S3z8m_d9rA_dSmfA5x45w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official live recording on Eagles channel matching 1994 acoustic reunion",
+      "notes": "Live variant: must match live 1994 version, NOT 1976 studio version",
+      "split": "DEV",
+      "category": "LIVE"
+    },
+    {
+      "id": "BM-0042",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM1",
+        "title": "Smells Like Teen Spirit - Live at Reading 1992",
+        "primaryArtist": "Nirvana",
+        "artists": ["Nirvana"],
+        "album": "Live at Reading",
+        "durationMs": 336000,
+        "isExplicit": false,
+        "isrc": "USUM70903332"
+      },
+      "targetTrack": {
+        "videoId": "R3XIGon2RjY",
+        "title": "Nirvana - Smells Like Teen Spirit (Live at Reading 1992)",
+        "channelTitle": "NirvanaVEVO",
+        "durationMs": 338000,
+        "channelId": "UC0_8hQd4o4e33uE8b6PjZpg",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO live performance release matching Reading 1992",
+      "notes": "Live version of canonical track; tests live alignment policy",
+      "split": "DEV",
+      "category": "LIVE"
+    },
+    {
+      "id": "BM-0043",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM2",
+        "title": "Layla - Acoustic; Live at MTV Unplugged",
+        "primaryArtist": "Eric Clapton",
+        "artists": ["Eric Clapton"],
+        "album": "Unplugged",
+        "durationMs": 289000,
+        "isExplicit": false,
+        "isrc": "USWB10400045"
+      },
+      "targetTrack": {
+        "videoId": "pKwQlm-wldA",
+        "title": "Eric Clapton - Layla (Live at MTV Unplugged, 1992) [Official Video]",
+        "channelTitle": "Eric Clapton",
+        "durationMs": 288000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Eric Clapton YouTube video for 1992 MTV Unplugged acoustic version",
+      "notes": "Acoustic live version; must match acoustic arrangement, not Derek & the Dominos electric original",
+      "split": "DEV",
+      "category": "ACOUSTIC"
+    },
+    {
+      "id": "BM-0044",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM3",
+        "title": "Hurt",
+        "primaryArtist": "Johnny Cash",
+        "artists": ["Johnny Cash"],
+        "album": "American IV: The Man Comes Around",
+        "durationMs": 218000,
+        "isExplicit": false,
+        "isrc": "USAM10200214"
+      },
+      "targetTrack": {
+        "videoId": "8AHCfZTRGiI",
+        "title": "Johnny Cash - Hurt (Official Music Video)",
+        "channelTitle": "JohnnyCashVEVO",
+        "durationMs": 249000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Johnny Cash VEVO music video for Nine Inch Nails cover",
+      "notes": "Cover version performed by Johnny Cash; must NOT match Nine Inch Nails original",
+      "split": "DEV",
+      "category": "COVER"
+    },
+    {
+      "id": "BM-0045",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM4",
+        "title": "I Will Always Love You",
+        "primaryArtist": "Whitney Houston",
+        "artists": ["Whitney Houston"],
+        "album": "The Bodyguard: Original Soundtrack Album",
+        "durationMs": 271000,
+        "isExplicit": false,
+        "isrc": "USAR19200155"
+      },
+      "targetTrack": {
+        "videoId": "3JWTaaS7LdU",
+        "title": "Whitney Houston - I Will Always Love You (Official 4K Video)",
+        "channelTitle": "whitneyhoustonVEVO",
+        "durationMs": 276000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Whitney Houston VEVO video; cover of Dolly Parton song",
+      "notes": "Iconic cover; must match Whitney Houston vocal, not Dolly Parton original",
+      "split": "DEV",
+      "category": "COVER"
+    },
+    {
+      "id": "BM-0046",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM5",
+        "title": "Here Comes The Sun - 2019 Mix",
+        "primaryArtist": "The Beatles",
+        "artists": ["The Beatles"],
+        "album": "Abbey Road (Super Deluxe Edition)",
+        "durationMs": 185000,
+        "isExplicit": false,
+        "isrc": "GBAYE1901083"
+      },
+      "targetTrack": {
+        "videoId": "KQetemT1sWc",
+        "title": "The Beatles - Here Comes The Sun (2019 Mix)",
+        "channelTitle": "The Beatles",
+        "durationMs": 185000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official The Beatles YouTube video matching 2019 stereo remix",
+      "notes": "Remastered/remixed edition representing the core Abbey Road master",
+      "split": "DEV",
+      "category": "REMASTER"
+    },
+    {
+      "id": "BM-0047",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM6",
+        "title": "Summertime Sadness (Cedric Gervais Remix)",
+        "primaryArtist": "Lana Del Rey",
+        "artists": ["Lana Del Rey", "Cedric Gervais"],
+        "album": "Summertime Sadness (Cedric Gervais Remix)",
+        "durationMs": 214000,
+        "isExplicit": false,
+        "isrc": "GBUM71302888"
+      },
+      "targetTrack": {
+        "videoId": "akhmS1D2Ce4",
+        "title": "Lana Del Rey vs Cedric Gervais - 'Summertime Sadness' (Remix)",
+        "channelTitle": "Spinnin' Records",
+        "durationMs": 215000,
+        "channelId": "UCpDJl2EmP7Oh90_DC9p4xYw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Spinnin' Records release matching Cedric Gervais EDM remix",
+      "notes": "Remix variant; must match Cedric Gervais EDM remix, NOT slow original album version",
+      "split": "DEV",
+      "category": "REMIX"
+    },
+    {
+      "id": "BM-0048",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM7",
+        "title": "Army of Me",
+        "primaryArtist": "Björk",
+        "artists": ["Björk"],
+        "album": "Post",
+        "durationMs": 234000,
+        "isExplicit": false,
+        "isrc": "GBAHT9500018"
+      },
+      "targetTrack": {
+        "videoId": "jPeheoBa2_o",
+        "title": "Björk - Army of Me (Official Music Video)",
+        "channelTitle": "Björk",
+        "durationMs": 236000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Björk YouTube video with Icelandic diacritic 'Björk'",
+      "notes": "Tests Icelandic diacritic 'ö' matching",
+      "split": "DEV",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0049",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:60a0Rd6pj0adQwvgKLvOB0",
+        "title": "Hoppípolla",
+        "primaryArtist": "Sigur Rós",
+        "artists": ["Sigur Rós"],
+        "album": "Takk...",
+        "durationMs": 268000,
+        "isExplicit": false,
+        "isrc": "GBAYE0501258"
+      },
+      "targetTrack": {
+        "videoId": "mZTb8WxEW78",
+        "title": "Sigur Rós - Hoppípolla (Official Video)",
+        "channelTitle": "Sigur Rós",
+        "durationMs": 277000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official artist YouTube video with Icelandic acute diacritics",
+      "notes": "Both title 'Hoppípolla' and artist 'Sigur Rós' have acute accents",
+      "split": "VALIDATION",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0050",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyM9",
+        "title": "Creep",
+        "primaryArtist": "Radiohead",
+        "artists": ["Radiohead"],
+        "album": "Pablo Honey",
+        "durationMs": 238000,
+        "isExplicit": true,
+        "isrc": "GBAYE9200070"
+      },
+      "targetTrack": {
+        "videoId": "XFkzRNyygfk",
+        "title": "Radiohead - Creep",
+        "channelTitle": "Radiohead",
+        "durationMs": 236000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Radiohead channel upload matching Pablo Honey track",
+      "notes": "Common title 'Creep'; must match Radiohead, not TLC song titled 'Creep'",
+      "split": "VALIDATION",
+      "category": "SAME_TITLE_DIFFERENT_ARTIST"
+    },
+    {
+      "id": "BM-0051",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN0",
+        "title": "Creep",
+        "primaryArtist": "TLC",
+        "artists": ["TLC"],
+        "album": "CrazySexyCool",
+        "durationMs": 268000,
+        "isExplicit": false,
+        "isrc": "USAR19400288"
+      },
+      "targetTrack": {
+        "videoId": "LlZydtG3xqI",
+        "title": "TLC - Creep (Official Video)",
+        "channelTitle": "TLCVEVO",
+        "durationMs": 266000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official TLC VEVO video for CrazySexyCool single",
+      "notes": "Same title as Radiohead; tests artist discriminator",
+      "split": "VALIDATION",
+      "category": "SAME_TITLE_DIFFERENT_ARTIST"
+    },
+    {
+      "id": "BM-0052",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN1",
+        "title": "Hello",
+        "primaryArtist": "Adele",
+        "artists": ["Adele"],
+        "album": "25",
+        "durationMs": 295000,
+        "isExplicit": false,
+        "isrc": "GBBKS1500214"
+      },
+      "targetTrack": {
+        "videoId": "YQHsXMglC9A",
+        "title": "Adele - Hello (Official Music Video)",
+        "channelTitle": "AdeleVEVO",
+        "durationMs": 367000,
+        "channelId": "UC6wI5t1-t2fC8f5f6V4z4qw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Adele VEVO music video with dialogue intro",
+      "notes": "Common title 'Hello'; must match Adele, not Lionel Richie; dialogue intro adds ~70s",
+      "split": "VALIDATION",
+      "category": "SAME_TITLE_DIFFERENT_ARTIST"
+    },
+    {
+      "id": "BM-0053",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN2",
+        "title": "Hello",
+        "primaryArtist": "Lionel Richie",
+        "artists": ["Lionel Richie"],
+        "album": "Can't Slow Down",
+        "durationMs": 248000,
+        "isExplicit": false,
+        "isrc": "USMO18400010"
+      },
+      "targetTrack": {
+        "videoId": "mHONNcZMQd8",
+        "title": "Lionel Richie - Hello (Official Music Video)",
+        "channelTitle": "LionelRichieVEVO",
+        "durationMs": 328000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Lionel Richie VEVO video for 1984 classic ballad",
+      "notes": "Tests artist separation against Adele 'Hello'",
+      "split": "VALIDATION",
+      "category": "SAME_TITLE_DIFFERENT_ARTIST"
+    },
+    {
+      "id": "BM-0054",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN3",
+        "title": "One",
+        "primaryArtist": "U2",
+        "artists": ["U2"],
+        "album": "Achtung Baby",
+        "durationMs": 276000,
+        "isExplicit": false,
+        "isrc": "GBAAN9100011"
+      },
+      "targetTrack": {
+        "videoId": "ftjEcrrf7r0",
+        "title": "U2 - One (Official Music Video)",
+        "channelTitle": "U2VEVO",
+        "durationMs": 276000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official U2 VEVO music video matching Achtung Baby single",
+      "notes": "Short 3-letter title 'One'; short title safeguard",
+      "split": "VALIDATION",
+      "category": "SHORT_TITLE"
+    },
+    {
+      "id": "BM-0055",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN4",
+        "title": "Teach Your Children",
+        "primaryArtist": "Crosby, Stills, Nash & Young",
+        "artists": ["Crosby, Stills, Nash & Young"],
+        "album": "Déjà Vu",
+        "durationMs": 173000,
+        "isExplicit": false,
+        "isrc": "USAT27000021"
+      },
+      "targetTrack": {
+        "videoId": "EkaKwXddT_I",
+        "title": "Crosby, Stills, Nash & Young - Teach Your Children (Official Audio)",
+        "channelTitle": "RHINO",
+        "durationMs": 175000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Rhino Entertainment catalog upload matching Déjà Vu release",
+      "notes": "Multi-name artist with commas and ampersand 'Crosby, Stills, Nash & Young'",
+      "split": "VALIDATION",
+      "category": "BAND_COLLABORATION"
+    },
+    {
+      "id": "BM-0056",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN5",
+        "title": "Spectrum (Say My Name) (Calvin Harris Remix)",
+        "primaryArtist": "Florence + The Machine",
+        "artists": ["Florence + The Machine", "Calvin Harris"],
+        "album": "Ceremonials",
+        "durationMs": 218000,
+        "isExplicit": false,
+        "isrc": "GBUM71203042"
+      },
+      "targetTrack": {
+        "videoId": "O3c4dPxN1qM",
+        "title": "Florence + The Machine - Spectrum (Say My Name) (Calvin Harris Remix)",
+        "channelTitle": "FlorenceMachineVEVO",
+        "durationMs": 218000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official FlorenceMachineVEVO remix video matching 218s duration",
+      "notes": "Band has plus sign 'Florence + The Machine'; Calvin Harris remix",
+      "split": "VALIDATION",
+      "category": "REMIX"
+    },
+    {
+      "id": "BM-0057",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN6",
+        "title": "Down in a Hole - MTV Unplugged",
+        "primaryArtist": "Alice In Chains",
+        "artists": ["Alice In Chains"],
+        "album": "MTV Unplugged",
+        "durationMs": 338000,
+        "isExplicit": false,
+        "isrc": "USSM19600988"
+      },
+      "targetTrack": {
+        "videoId": "r808G_dOsq0",
+        "title": "Alice In Chains - Down in a Hole (From MTV Unplugged)",
+        "channelTitle": "AliceInChainsVEVO",
+        "durationMs": 346000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official AliceInChainsVEVO acoustic live video",
+      "notes": "Acoustic variant; must match 1996 Unplugged performance, not Dirt studio master",
+      "split": "VALIDATION",
+      "category": "ACOUSTIC"
+    },
+    {
+      "id": "BM-0058",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN7",
+        "title": "Radio Ga Ga - Live Aid 1985",
+        "primaryArtist": "Queen",
+        "artists": ["Queen"],
+        "album": "Live Aid",
+        "durationMs": 361000,
+        "isExplicit": false,
+        "isrc": "GBUM71805541"
+      },
+      "targetTrack": {
+        "videoId": "gibp_D8fWkE",
+        "title": "Queen - Radio Ga Ga (Live Aid 1985)",
+        "channelTitle": "Queen Official",
+        "durationMs": 361000,
+        "channelId": "UCiMhD4jzUqG-IgPzUmmytRQ",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Queen band channel upload for Wembley 1985 Live Aid performance",
+      "notes": "Historic live concert performance",
+      "split": "VALIDATION",
+      "category": "LIVE"
+    },
+    {
+      "id": "BM-0059",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN8",
+        "title": "Space Oddity - 2015 Remaster",
+        "primaryArtist": "David Bowie",
+        "artists": ["David Bowie"],
+        "album": "Space Oddity",
+        "durationMs": 318000,
+        "isExplicit": false,
+        "isrc": "GBAYE1500055"
+      },
+      "targetTrack": {
+        "videoId": "iYYRH4apXCA",
+        "title": "David Bowie – Space Oddity (Official Video)",
+        "channelTitle": "David Bowie",
+        "durationMs": 305000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official David Bowie YouTube video release matching core recording",
+      "notes": "Remastered release; remaster penalty must be 0.0",
+      "split": "VALIDATION",
+      "category": "REMASTER"
+    },
+    {
+      "id": "BM-0060",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyN9",
+        "title": "Money - 2011 Remastered Version",
+        "primaryArtist": "Pink Floyd",
+        "artists": ["Pink Floyd"],
+        "album": "The Dark Side of the Moon (2011 Remastered)",
+        "durationMs": 382000,
+        "isExplicit": false,
+        "isrc": "GBN9Y1100058"
+      },
+      "targetTrack": {
+        "videoId": "cpbbuaIA3Ks",
+        "title": "Pink Floyd - Money (Official Audio)",
+        "channelTitle": "Pink Floyd",
+        "durationMs": 383000,
+        "channelId": "UC_w7i2o7f4-x7d2E48P9h8w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Pink Floyd audio release matching Dark Side of the Moon remaster",
+      "notes": "Remaster variation of signature 7/4 time track",
+      "split": "VALIDATION",
+      "category": "REMASTER"
+    },
+    {
+      "id": "BM-0061",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO0",
+        "title": "Tainted Love",
+        "primaryArtist": "Soft Cell",
+        "artists": ["Soft Cell"],
+        "album": "Non-Stop Erotic Cabaret",
+        "durationMs": 154000,
+        "isExplicit": false,
+        "isrc": "GBF088100140"
+      },
+      "targetTrack": {
+        "videoId": "XZVpR3Pk-r8",
+        "title": "Soft Cell - Tainted Love (Official Video)",
+        "channelTitle": "SoftCellVEVO",
+        "durationMs": 160000,
+        "channelId": "UCqECaJ8Gagnn7YCbPEzWH6g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official SoftCellVEVO video for Gloria Jones synth-pop cover",
+      "notes": "Iconic synth-pop cover; must match Soft Cell, not Gloria Jones 1965 original",
+      "split": "VALIDATION",
+      "category": "COVER"
+    },
+    {
+      "id": "BM-0062",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO1",
+        "title": "All Along the Watchtower",
+        "primaryArtist": "Jimi Hendrix",
+        "artists": ["Jimi Hendrix"],
+        "album": "Electric Ladyland",
+        "durationMs": 241000,
+        "isExplicit": false,
+        "isrc": "USMC16800042"
+      },
+      "targetTrack": {
+        "videoId": "TLV4_xaYynY",
+        "title": "The Jimi Hendrix Experience - All Along The Watchtower (Official Audio)",
+        "channelTitle": "JimiHendrixVEVO",
+        "durationMs": 241000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO audio upload for iconic Bob Dylan cover",
+      "notes": "Hendrix cover of Bob Dylan; must match Hendrix guitar performance",
+      "split": "VALIDATION",
+      "category": "COVER"
+    },
+    {
+      "id": "BM-0063",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO2",
+        "title": "Starboy",
+        "primaryArtist": "The Weeknd",
+        "artists": ["The Weeknd", "Daft Punk"],
+        "album": "Starboy",
+        "durationMs": 230000,
+        "isExplicit": true,
+        "isrc": "USUG11601728"
+      },
+      "targetTrack": {
+        "videoId": "34Na4j8AVgA",
+        "title": "The Weeknd - Starboy ft. Daft Punk (Official Music Video)",
+        "channelTitle": "TheWeekndVEVO",
+        "durationMs": 230000,
+        "channelId": "UC0WP5P-ufpRfjbNrmOWwLBQ",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO video release featuring Daft Punk",
+      "notes": "Collaboration between The Weeknd and Daft Punk; identical duration",
+      "split": "VALIDATION",
+      "category": "FEATURED_ARTIST"
+    },
+    {
+      "id": "BM-0064",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO3",
+        "title": "Cold Heart (PNAU Remix)",
+        "primaryArtist": "Elton John",
+        "artists": ["Elton John", "Dua Lipa", "PNAU"],
+        "album": "The Lockdown Sessions",
+        "durationMs": 202000,
+        "isExplicit": false,
+        "isrc": "GBUM72105151"
+      },
+      "targetTrack": {
+        "videoId": "qod038ao9mM",
+        "title": "Elton John, Dua Lipa - Cold Heart (PNAU Remix) (Official Video)",
+        "channelTitle": "EltonJohnVEVO",
+        "durationMs": 203000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official EltonJohnVEVO video matching PNAU mashup remix",
+      "notes": "Collaborative disco mashup remix; tests triple artist credit",
+      "split": "VALIDATION",
+      "category": "REMIX"
+    },
+    {
+      "id": "BM-0065",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO4",
+        "title": "Stan",
+        "primaryArtist": "Eminem",
+        "artists": ["Eminem", "Dido"],
+        "album": "The Marshall Mathers LP",
+        "durationMs": 404000,
+        "isExplicit": true,
+        "isrc": "USIR10000473"
+      },
+      "targetTrack": {
+        "videoId": "gOMhN-hfMtY",
+        "title": "Eminem - Stan (Long Version) ft. Dido",
+        "channelTitle": "EminemMusic",
+        "durationMs": 484000,
+        "channelId": "UCfM3zsQsOnfWNUppiycmBuw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Eminem channel music video for Stan featuring Dido",
+      "notes": "Video cut includes long cinematic narrative (484s vs 404s album cut)",
+      "split": "VALIDATION",
+      "category": "DURATION_DISCREPANCY"
+    },
+    {
+      "id": "BM-0066",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO5",
+        "title": "Thriller",
+        "primaryArtist": "Michael Jackson",
+        "artists": ["Michael Jackson"],
+        "album": "Thriller",
+        "durationMs": 357000,
+        "isExplicit": false,
+        "isrc": "USSM18200389"
+      },
+      "targetTrack": {
+        "videoId": "sOnqjkJTMaA",
+        "title": "Michael Jackson - Thriller (Official 4K Video)",
+        "channelTitle": "MichaelJacksonVEVO",
+        "durationMs": 822000,
+        "channelId": "UC5OrRvL69DYG5mXQQpfvE3g",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official 14-minute short film music video directed by John Landis",
+      "notes": "Massive duration discrepancy (13m42s video vs 5m57s audio); tests duration tolerance policy",
+      "split": "VALIDATION",
+      "category": "DURATION_DISCREPANCY"
+    },
+    {
+      "id": "BM-0067",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO6",
+        "title": "November Rain",
+        "primaryArtist": "Guns N' Roses",
+        "artists": ["Guns N' Roses"],
+        "album": "Use Your Illusion I",
+        "durationMs": 537000,
+        "isExplicit": false,
+        "isrc": "USGF19141808"
+      },
+      "targetTrack": {
+        "videoId": "8SbUCz75RQk",
+        "title": "Guns N' Roses - November Rain (Official Music Video)",
+        "channelTitle": "GunsNRosesVEVO",
+        "durationMs": 556000,
+        "channelId": "UC2X7v_5N1Jg0t9t4gZ4b8cw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official 9-minute music video release on GunsNRosesVEVO",
+      "notes": "9-minute epic rock ballad",
+      "split": "VALIDATION",
+      "category": "DURATION_DISCREPANCY"
+    },
+    {
+      "id": "BM-0068",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO7",
+        "title": "Everlong - Acoustic Version",
+        "primaryArtist": "Foo Fighters",
+        "artists": ["Foo Fighters"],
+        "album": "Greatest Hits",
+        "durationMs": 252000,
+        "isExplicit": false,
+        "isrc": "USRC10900455"
+      },
+      "targetTrack": {
+        "videoId": "Xy_p3PZgD58",
+        "title": "Foo Fighters - Everlong (Acoustic) (Official Video)",
+        "channelTitle": "foofightersVEVO",
+        "durationMs": 254000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO acoustic video release matching Dave Grohl acoustic performance",
+      "notes": "Acoustic variant; must match acoustic version, not 1997 hard rock single",
+      "split": "VALIDATION",
+      "category": "ACOUSTIC"
+    },
+    {
+      "id": "BM-0069",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO8",
+        "title": "Black Hole Sun",
+        "primaryArtist": "Soundgarden",
+        "artists": ["Soundgarden"],
+        "album": "Superunknown",
+        "durationMs": 318000,
+        "isExplicit": false,
+        "isrc": "USAM19400244"
+      },
+      "targetTrack": {
+        "videoId": "3mbBbFH9fAg",
+        "title": "Soundgarden - Black Hole Sun (Official Music Video)",
+        "channelTitle": "SoundgardenVEVO",
+        "durationMs": 319000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official SoundgardenVEVO video matching Superunknown master",
+      "notes": "90s grunge anchor track",
+      "split": "VALIDATION",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0070",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyO9",
+        "title": "Alive",
+        "primaryArtist": "Pearl Jam",
+        "artists": ["Pearl Jam"],
+        "album": "Ten",
+        "durationMs": 341000,
+        "isExplicit": false,
+        "isrc": "USSM19100588"
+      },
+      "targetTrack": {
+        "videoId": "qM0zINtulhM",
+        "title": "Pearl Jam - Alive (Official Video)",
+        "channelTitle": "PearlJamVEVO",
+        "durationMs": 342000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Pearl Jam VEVO video release",
+      "notes": "Title 'Alive' contains word 'live' substring; false-positive live indicator safeguard test",
+      "split": "VALIDATION",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0071",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP0",
+        "title": "Live to Tell",
+        "primaryArtist": "Madonna",
+        "artists": ["Madonna"],
+        "album": "True Blue",
+        "durationMs": 351000,
+        "isExplicit": false,
+        "isrc": "USWB10100411"
+      },
+      "targetTrack": {
+        "videoId": "IzAO9A9GjgI",
+        "title": "Madonna - Live To Tell (Official Video)",
+        "channelTitle": "Madonna",
+        "durationMs": 352000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Madonna channel video for True Blue ballad",
+      "notes": "Title starts with 'Live to Tell'; tests word-boundary safeguard preventing live penalty",
+      "split": "VALIDATION",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0072",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP1",
+        "title": "Chain Reaction",
+        "primaryArtist": "Diana Ross",
+        "artists": ["Diana Ross"],
+        "album": "Eaten Alive",
+        "durationMs": 228000,
+        "isExplicit": false,
+        "isrc": "GBAYE8500214"
+      },
+      "targetTrack": {
+        "videoId": "rI_233oT7kI",
+        "title": "Diana Ross - Chain Reaction (Official Video)",
+        "channelTitle": "DianaRossVEVO",
+        "durationMs": 230000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO video upload for Diana Ross disco classic",
+      "notes": "Title contains 'Reaction'; tests false-positive reaction penalty safeguard",
+      "split": "VALIDATION",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0073",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP2",
+        "title": "Under Cover of Darkness",
+        "primaryArtist": "The Strokes",
+        "artists": ["The Strokes"],
+        "album": "Angles",
+        "durationMs": 235000,
+        "isExplicit": false,
+        "isrc": "USRC11100055"
+      },
+      "targetTrack": {
+        "videoId": "_l09H-3zzgA",
+        "title": "The Strokes - Under Cover of Darkness (Official Video)",
+        "channelTitle": "TheStrokesVEVO",
+        "durationMs": 237000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official TheStrokesVEVO video for Angles lead single",
+      "notes": "Title contains 'Cover'; tests false-positive cover penalty safeguard",
+      "split": "VALIDATION",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0074",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP3",
+        "title": "Boy with a Coin",
+        "primaryArtist": "Iron & Wine",
+        "artists": ["Iron & Wine"],
+        "album": "The Shepherd's Dog",
+        "durationMs": 220000,
+        "isExplicit": false,
+        "isrc": "USSUB0774004"
+      },
+      "targetTrack": {
+        "videoId": "SHs4lFz-B7U",
+        "title": "Iron & Wine - Boy with a Coin [OFFICIAL VIDEO]",
+        "channelTitle": "Sub Pop",
+        "durationMs": 224000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Sub Pop official label channel upload matching The Shepherd's Dog studio recording",
+      "notes": "Moniker artist 'Iron & Wine'; tests exact matching without Maiden collision",
+      "split": "VALIDATION",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0075",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP4",
+        "title": "The Number of the Beast",
+        "primaryArtist": "Iron Maiden",
+        "artists": ["Iron Maiden"],
+        "album": "The Number of the Beast",
+        "durationMs": 290000,
+        "isExplicit": false,
+        "isrc": "GBAYE8200010"
+      },
+      "targetTrack": {
+        "videoId": "WxnN05vOuSM",
+        "title": "Iron Maiden - The Number Of The Beast (Official Video)",
+        "channelTitle": "Iron Maiden",
+        "durationMs": 293000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Iron Maiden band channel video",
+      "notes": "Heavy metal standard; tests distinct artist credit from 'Iron & Wine'",
+      "split": "VALIDATION",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0076",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP5",
+        "title": "Baba O'Riley",
+        "primaryArtist": "The Who",
+        "artists": ["The Who"],
+        "album": "Who's Next",
+        "durationMs": 300000,
+        "isExplicit": false,
+        "isrc": "GBUM77100014"
+      },
+      "targetTrack": {
+        "videoId": "gY5rBl47AAw",
+        "title": "The Who - Baba O'Riley (Audio)",
+        "channelTitle": "TheWhoVEVO",
+        "durationMs": 300000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official TheWhoVEVO audio release for Who's Next anthem",
+      "notes": "Artist 'The Who' must not collide with 'Wham!' prefix",
+      "split": "VALIDATION",
+      "category": "BAND_COLLABORATION"
+    },
+    {
+      "id": "BM-0077",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP6",
+        "title": "Wake Me Up Before You Go-Go",
+        "primaryArtist": "Wham!",
+        "artists": ["Wham!"],
+        "album": "Make It Big",
+        "durationMs": 231000,
+        "isExplicit": false,
+        "isrc": "GBARL8400045"
+      },
+      "targetTrack": {
+        "videoId": "pIgZ7C0goE8",
+        "title": "Wham! - Wake Me Up Before You Go-Go (Official HD Video)",
+        "channelTitle": "WhamVEVO",
+        "durationMs": 231000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official WhamVEVO HD remastered video",
+      "notes": "Artist 'Wham!' with exclamation mark; distinct from 'The Who'",
+      "split": "VALIDATION",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0078",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP7",
+        "title": "Mask Off",
+        "primaryArtist": "Future",
+        "artists": ["Future"],
+        "album": "FUTURE",
+        "durationMs": 204000,
+        "isExplicit": true,
+        "isrc": "USSM11700288"
+      },
+      "targetTrack": {
+        "videoId": "xvZqVHSUi34",
+        "title": "Future - Mask Off (Official Music Video)",
+        "channelTitle": "FutureVEVO",
+        "durationMs": 293000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official FutureVEVO music video",
+      "notes": "Artist 'Future' must not collide with 'Afterlife' substring",
+      "split": "VALIDATION",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0079",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP8",
+        "title": "Afterlife",
+        "primaryArtist": "Avenged Sevenfold",
+        "artists": ["Avenged Sevenfold"],
+        "album": "Avenged Sevenfold",
+        "durationMs": 361000,
+        "isExplicit": false,
+        "isrc": "USWB10703888"
+      },
+      "targetTrack": {
+        "videoId": "VNpy2K21IAI",
+        "title": "Avenged Sevenfold - Afterlife (Official Music Video)",
+        "channelTitle": "Warner Records Vault",
+        "durationMs": 247000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Warner Records video upload for Avenged Sevenfold single",
+      "notes": "Title 'Afterlife' contains 'life'; distinct from Future",
+      "split": "VALIDATION",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0080",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyP9",
+        "title": "Feel Good Inc.",
+        "primaryArtist": "Gorillaz",
+        "artists": ["Gorillaz", "De La Soul"],
+        "album": "Demon Days",
+        "durationMs": 223000,
+        "isExplicit": false,
+        "isrc": "GBAYE0500411"
+      },
+      "targetTrack": {
+        "videoId": "HyHNuVaZJ-k",
+        "title": "Gorillaz - Feel Good Inc. (Official Video)",
+        "channelTitle": "Gorillaz",
+        "durationMs": 223000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Gorillaz channel video featuring De La Soul",
+      "notes": "Title ends with abbreviation dot 'Inc.'; featured De La Soul",
+      "split": "VALIDATION",
+      "category": "FEATURED_ARTIST"
+    },
+    {
+      "id": "BM-0081",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ0",
+        "title": "Clint Eastwood",
+        "primaryArtist": "Gorillaz",
+        "artists": ["Gorillaz", "Del the Funky Homosapien"],
+        "album": "Gorillaz",
+        "durationMs": 341000,
+        "isExplicit": false,
+        "isrc": "GBAYE0100014"
+      },
+      "targetTrack": {
+        "videoId": "1V_xRb0x9aw",
+        "title": "Gorillaz - Clint Eastwood (Official Video)",
+        "channelTitle": "Gorillaz",
+        "durationMs": 269000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Gorillaz animated music video with Del the Funky Homosapien verse",
+      "notes": "Video cut is shorter (269s) than album cut (341s)",
+      "split": "TEST",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0082",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ1",
+        "title": "Seven Nation Army",
+        "primaryArtist": "The White Stripes",
+        "artists": ["The White Stripes"],
+        "album": "Elephant",
+        "durationMs": 231000,
+        "isExplicit": false,
+        "isrc": "GBBKS0300055"
+      },
+      "targetTrack": {
+        "videoId": "0J2Qd4vpmA4",
+        "title": "The White Stripes - Seven Nation Army (Official Music Video)",
+        "channelTitle": "The White Stripes",
+        "durationMs": 239000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official The White Stripes band video for Elephant lead single",
+      "notes": "Garage rock standard; tests clean title matching",
+      "split": "TEST",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0083",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ2",
+        "title": "Roxanne",
+        "primaryArtist": "The Police",
+        "artists": ["The Police"],
+        "album": "Outlandos d'Amour",
+        "durationMs": 192000,
+        "isExplicit": false,
+        "isrc": "GBAYE7800010"
+      },
+      "targetTrack": {
+        "videoId": "3T1c7GkzRQQ",
+        "title": "The Police - Roxanne (Official Music Video)",
+        "channelTitle": "ThePoliceVEVO",
+        "durationMs": 194000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official ThePoliceVEVO video upload",
+      "notes": "Classic new wave track from 1978",
+      "split": "TEST",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0084",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ3",
+        "title": "Every Breath You Take",
+        "primaryArtist": "The Police",
+        "artists": ["The Police"],
+        "album": "Synchronicity",
+        "durationMs": 253000,
+        "isExplicit": false,
+        "isrc": "GBAYE8300055"
+      },
+      "targetTrack": {
+        "videoId": "OMOGaugKpzs",
+        "title": "The Police - Every Breath You Take (Official Video)",
+        "channelTitle": "ThePoliceVEVO",
+        "durationMs": 234000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official ThePoliceVEVO video with black and white cinematography",
+      "notes": "Classic 1983 hit single",
+      "split": "TEST",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0085",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ4",
+        "title": "Message in a Bottle",
+        "primaryArtist": "The Police",
+        "artists": ["The Police"],
+        "album": "Reggatta de Blanc",
+        "durationMs": 290000,
+        "isExplicit": false,
+        "isrc": "GBAYE7900012"
+      },
+      "targetTrack": {
+        "videoId": "mbv-LcdLY-Y",
+        "title": "The Police - Message In A Bottle (Official Music Video)",
+        "channelTitle": "ThePoliceVEVO",
+        "durationMs": 289000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO music video matching 289s duration",
+      "notes": "Single from Reggatta de Blanc",
+      "split": "TEST",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0086",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ5",
+        "title": "Sultans of Swing",
+        "primaryArtist": "Dire Straits",
+        "artists": ["Dire Straits"],
+        "album": "Dire Straits",
+        "durationMs": 348000,
+        "isExplicit": false,
+        "isrc": "GBF077800010"
+      },
+      "targetTrack": {
+        "videoId": "0fAQhSRLQnM",
+        "title": "Dire Straits - Sultans Of Swing (Official Music Video)",
+        "channelTitle": "Dire Straits",
+        "durationMs": 269000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Dire Straits channel video for 1978 breakthrough single",
+      "notes": "Short video edit (269s) fades guitar solo earlier than 348s album track",
+      "split": "TEST",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0087",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ6",
+        "title": "Money for Nothing",
+        "primaryArtist": "Dire Straits",
+        "artists": ["Dire Straits"],
+        "album": "Brothers in Arms",
+        "durationMs": 505000,
+        "isExplicit": false,
+        "isrc": "GBF078500045"
+      },
+      "targetTrack": {
+        "videoId": "wTP2RUD_22k",
+        "title": "Dire Straits - Money For Nothing (Official Music Video)",
+        "channelTitle": "Dire Straits",
+        "durationMs": 246000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Dire Straits channel video for iconic computer-animated MTV single",
+      "notes": "Video edit is heavily edited (4m06s) compared to full album cut (8m25s)",
+      "split": "TEST",
+      "category": "DURATION_DISCREPANCY"
+    },
+    {
+      "id": "BM-0088",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ7",
+        "title": "Superstition",
+        "primaryArtist": "Stevie Wonder",
+        "artists": ["Stevie Wonder"],
+        "album": "Talking Book",
+        "durationMs": 245000,
+        "isExplicit": false,
+        "isrc": "USMO17200055"
+      },
+      "targetTrack": {
+        "videoId": "ftdZ363R9kQ",
+        "title": "Stevie Wonder - Superstition",
+        "channelTitle": "Stevie Wonder",
+        "durationMs": 266000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Stevie Wonder channel audio for Talking Book track",
+      "notes": "Funk clavinet classic",
+      "split": "TEST",
+      "category": "OFFICIAL_AUDIO"
+    },
+    {
+      "id": "BM-0089",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ8",
+        "title": "Sir Duke",
+        "primaryArtist": "Stevie Wonder",
+        "artists": ["Stevie Wonder"],
+        "album": "Songs in the Key of Life",
+        "durationMs": 234000,
+        "isExplicit": false,
+        "isrc": "USMO17600122"
+      },
+      "targetTrack": {
+        "videoId": "s6fPN5a8_wk",
+        "title": "Stevie Wonder - Sir Duke (Official Audio)",
+        "channelTitle": "Stevie Wonder",
+        "durationMs": 233000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Stevie Wonder audio release with matching 233s duration",
+      "notes": "Classic brass tribute from Songs in the Key of Life",
+      "split": "TEST",
+      "category": "OFFICIAL_AUDIO"
+    },
+    {
+      "id": "BM-0090",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyQ9",
+        "title": "What's Going On",
+        "primaryArtist": "Marvin Gaye",
+        "artists": ["Marvin Gaye"],
+        "album": "What's Going On",
+        "durationMs": 233000,
+        "isExplicit": false,
+        "isrc": "USMO17100010"
+      },
+      "targetTrack": {
+        "videoId": "o5TmORitlKk",
+        "title": "Marvin Gaye - What's Going On (Official Video)",
+        "channelTitle": "MarvinGayeVEVO",
+        "durationMs": 237000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official MarvinGayeVEVO video release matching 1971 Motown landmark",
+      "notes": "Motown soul masterpiece",
+      "split": "TEST",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0091",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR0",
+        "title": "Let's Get It On",
+        "primaryArtist": "Marvin Gaye",
+        "artists": ["Marvin Gaye"],
+        "album": "Let's Get It On",
+        "durationMs": 291000,
+        "isExplicit": false,
+        "isrc": "USMO17300045"
+      },
+      "targetTrack": {
+        "videoId": "x6QZn9xiuOE",
+        "title": "Marvin Gaye - Let's Get It On (Official Music Video)",
+        "channelTitle": "MarvinGayeVEVO",
+        "durationMs": 242000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official MarvinGayeVEVO music video for title track",
+      "notes": "Single edit fades early at 242s",
+      "split": "TEST",
+      "category": "OFFICIAL_MUSIC_VIDEO"
+    },
+    {
+      "id": "BM-0092",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR1",
+        "title": "Ain't No Mountain High Enough",
+        "primaryArtist": "Marvin Gaye",
+        "artists": ["Marvin Gaye", "Tammi Terrell"],
+        "album": "United",
+        "durationMs": 149000,
+        "isExplicit": false,
+        "isrc": "USMO16700012"
+      },
+      "targetTrack": {
+        "videoId": "IC53cDuN5G8",
+        "title": "Marvin Gaye, Tammi Terrell - Ain't No Mountain High Enough",
+        "channelTitle": "MarvinGayeVEVO",
+        "durationMs": 150000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official MarvinGayeVEVO video duet with Tammi Terrell",
+      "notes": "Duet co-credit with Tammi Terrell; comma separator",
+      "split": "TEST",
+      "category": "FEATURED_ARTIST"
+    },
+    {
+      "id": "BM-0093",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR2",
+        "title": "Respect",
+        "primaryArtist": "Aretha Franklin",
+        "artists": ["Aretha Franklin"],
+        "album": "I Never Loved a Man the Way I Love You",
+        "durationMs": 147000,
+        "isExplicit": false,
+        "isrc": "USAT26700010"
+      },
+      "targetTrack": {
+        "videoId": "6FOUqQt3Kg0",
+        "title": "Aretha Franklin - Respect [1967] (Official Audio)",
+        "channelTitle": "RHINO",
+        "durationMs": 148000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Rhino catalog audio release for 1967 Otis Redding cover",
+      "notes": "Cover of Otis Redding; Aretha Franklin's definitive performance",
+      "split": "TEST",
+      "category": "COVER"
+    },
+    {
+      "id": "BM-0094",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR3",
+        "title": "Good Vibrations",
+        "primaryArtist": "The Beach Boys",
+        "artists": ["The Beach Boys"],
+        "album": "Smiley Smile",
+        "durationMs": 217000,
+        "isExplicit": false,
+        "isrc": "USCA20100055"
+      },
+      "targetTrack": {
+        "videoId": "mdt0SOqPJcg",
+        "title": "The Beach Boys - Good Vibrations (Official Music Video)",
+        "channelTitle": "TheBeachBoysVEVO",
+        "durationMs": 222000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Beach Boys VEVO music video",
+      "notes": "Brian Wilson pocket symphony production standard",
+      "split": "TEST",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0095",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR4",
+        "title": "God Only Knows",
+        "primaryArtist": "The Beach Boys",
+        "artists": ["The Beach Boys"],
+        "album": "Pet Sounds",
+        "durationMs": 175000,
+        "isExplicit": false,
+        "isrc": "USCA26600021"
+      },
+      "targetTrack": {
+        "videoId": "AOMgS7V3x1c",
+        "title": "The Beach Boys - God Only Knows (Official Lyric Video)",
+        "channelTitle": "TheBeachBoysVEVO",
+        "durationMs": 178000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official VEVO lyric video for Pet Sounds classic",
+      "notes": "Title contains promotional marker (Official Lyric Video) on destination",
+      "split": "TEST",
+      "category": "TOPIC_CHANNEL"
+    },
+    {
+      "id": "BM-0096",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR5",
+        "title": "Wouldn't It Be Nice",
+        "primaryArtist": "The Beach Boys",
+        "artists": ["The Beach Boys"],
+        "album": "Pet Sounds",
+        "durationMs": 145000,
+        "isExplicit": false,
+        "isrc": "USCA26600010"
+      },
+      "targetTrack": {
+        "videoId": "nZBKFoeDKJo",
+        "title": "The Beach Boys - Wouldn't It Be Nice (Official Audio)",
+        "channelTitle": "The Beach Boys",
+        "durationMs": 143000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Beach Boys YouTube audio release for Pet Sounds track 1",
+      "notes": "Short opening pop masterpiece",
+      "split": "TEST",
+      "category": "TOPIC_CHANNEL"
+    },
+    {
+      "id": "BM-0097",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR6",
+        "title": "A Day In The Life - 2017 Remix",
+        "primaryArtist": "The Beatles",
+        "artists": ["The Beatles"],
+        "album": "Sgt. Pepper's Lonely Hearts Club Band (50th Anniversary Edition)",
+        "durationMs": 337000,
+        "isExplicit": false,
+        "isrc": "GBAYE1700688"
+      },
+      "targetTrack": {
+        "videoId": "usNsCeOV4GM",
+        "title": "The Beatles - A Day In The Life",
+        "channelTitle": "The Beatles",
+        "durationMs": 308000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official Beatles channel video matching 50th anniversary remix",
+      "notes": "Sgt. Pepper closing track with sustained orchestral crescendo",
+      "split": "TEST",
+      "category": "REMASTER"
+    },
+    {
+      "id": "BM-0098",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR7",
+        "title": "Penny Lane",
+        "primaryArtist": "The Beatles",
+        "artists": ["The Beatles"],
+        "album": "Magical Mystery Tour",
+        "durationMs": 180000,
+        "isExplicit": false,
+        "isrc": "GBAYE0601445"
+      },
+      "targetTrack": {
+        "videoId": "S-rB0pHI9fU",
+        "title": "The Beatles - Penny Lane",
+        "channelTitle": "The Beatles",
+        "durationMs": 185000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official band YouTube video release",
+      "notes": "1967 non-album single later compiled on Magical Mystery Tour",
+      "split": "TEST",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0099",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR8",
+        "title": "Strawberry Fields Forever",
+        "primaryArtist": "The Beatles",
+        "artists": ["The Beatles"],
+        "album": "Magical Mystery Tour",
+        "durationMs": 247000,
+        "isExplicit": false,
+        "isrc": "GBAYE0601444"
+      },
+      "targetTrack": {
+        "videoId": "HtUH9z_Oey8",
+        "title": "The Beatles - Strawberry Fields Forever",
+        "channelTitle": "The Beatles",
+        "durationMs": 266000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official promotional film video on The Beatles channel",
+      "notes": "Psychedelic milestone; tests studio audio matching promotional film",
+      "split": "TEST",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0100",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyR9",
+        "title": "Paint It, Black",
+        "primaryArtist": "The Rolling Stones",
+        "artists": ["The Rolling Stones"],
+        "album": "Aftermath",
+        "durationMs": 202000,
+        "isExplicit": false,
+        "isrc": "USA250201211"
+      },
+      "targetTrack": {
+        "videoId": "O4irXQhgMqg",
+        "title": "The Rolling Stones - Paint It, Black (Official Lyric Video)",
+        "channelTitle": "ABKCOVEVO",
+        "durationMs": 204000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official ABKCOVEVO lyric video release for 1966 sitar rock single",
+      "notes": "Title contains comma 'Paint It, Black'; tests punctuation tolerance",
+      "split": "TEST",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0101",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyS0",
+        "title": "Sympathy For The Devil",
+        "primaryArtist": "The Rolling Stones",
+        "artists": ["The Rolling Stones"],
+        "album": "Beggars Banquet",
+        "durationMs": 378000,
+        "isExplicit": false,
+        "isrc": "USA250201255"
+      },
+      "targetTrack": {
+        "videoId": "GgnClrx8N2k",
+        "title": "The Rolling Stones - Sympathy For The Devil (Official Lyric Video)",
+        "channelTitle": "ABKCOVEVO",
+        "durationMs": 378000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official ABKCOVEVO lyric video with exact 378s duration match",
+      "notes": "Samba-rock opening track from Beggars Banquet",
+      "split": "TEST",
+      "category": "TOPIC_CHANNEL"
+    },
+    {
+      "id": "BM-0102",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyS1",
+        "title": "Gimme Shelter",
+        "primaryArtist": "The Rolling Stones",
+        "artists": ["The Rolling Stones"],
+        "album": "Let It Bleed",
+        "durationMs": 270000,
+        "isExplicit": false,
+        "isrc": "USA250201288"
+      },
+      "targetTrack": {
+        "videoId": "RbmS3tQJ7Os",
+        "title": "The Rolling Stones - Gimme Shelter (Official Lyric Video)",
+        "channelTitle": "ABKCOVEVO",
+        "durationMs": 271000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official ABKCOVEVO lyric video featuring Merry Clayton vocals",
+      "notes": "Classic rock opening track with uncredited Merry Clayton guest vocals",
+      "split": "TEST",
+      "category": "TOPIC_CHANNEL"
+    },
+    {
+      "id": "BM-0103",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyS2",
+        "title": "(I Can't Get No) Satisfaction",
+        "primaryArtist": "The Rolling Stones",
+        "artists": ["The Rolling Stones"],
+        "album": "Out of Our Heads",
+        "durationMs": 223000,
+        "isExplicit": false,
+        "isrc": "USA250201188"
+      },
+      "targetTrack": {
+        "videoId": "nrIPxlFzDi0",
+        "title": "The Rolling Stones - (I Can't Get No) Satisfaction (Official Lyric Video)",
+        "channelTitle": "ABKCOVEVO",
+        "durationMs": 228000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official ABKCOVEVO lyric video for 1965 fuzz-guitar classic",
+      "notes": "Title contains parenthetical prefix '(I Can't Get No)'; tests parenthetical handling",
+      "split": "TEST",
+      "category": "TYPO_PUNCTUATION"
+    },
+    {
+      "id": "BM-0104",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyS3",
+        "title": "You Can't Always Get What You Want",
+        "primaryArtist": "The Rolling Stones",
+        "artists": ["The Rolling Stones"],
+        "album": "Let It Bleed",
+        "durationMs": 448000,
+        "isExplicit": false,
+        "isrc": "USA250201299"
+      },
+      "targetTrack": {
+        "videoId": "j7lePOV_K4w",
+        "title": "The Rolling Stones - You Can't Always Get What You Want (Official Lyric Video)",
+        "channelTitle": "ABKCOVEVO",
+        "durationMs": 450000,
+        "channelId": "UC4d2-qJ4g0E8-Zz5K8y2E4w",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official ABKCOVEVO video with London Bach Choir opening",
+      "notes": "Closing epic track from Let It Bleed; 7m28s duration",
+      "split": "TEST",
+      "category": "TOPIC_CHANNEL"
+    },
+    {
+      "id": "BM-0105",
+      "expectedOutcome": "MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:1zB4vmk8tFRmM9UulaPyS4",
+        "title": "Angie",
+        "primaryArtist": "The Rolling Stones",
+        "artists": ["The Rolling Stones"],
+        "album": "Goats Head Soup",
+        "durationMs": 273000,
+        "isExplicit": false,
+        "isrc": "GBUM77300055"
+      },
+      "targetTrack": {
+        "videoId": "RcZn2-b5380",
+        "title": "The Rolling Stones - Angie - OFFICIAL PROMO (Version 1)",
+        "channelTitle": "The Rolling Stones",
+        "durationMs": 273000,
+        "channelId": "UCc_9g2d7o4w4T3Z7Q6r4eJw",
+        "isOfficial": true
+      },
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Official promotional video on The Rolling Stones band channel",
+      "notes": "Acoustic ballad from Goats Head Soup; exact duration match",
+      "split": "TEST",
+      "category": "STANDARD_POPULAR"
+    },
+    {
+      "id": "BM-0106",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:demo01_acoustic",
+        "title": "Morning Coffee Bedroom Improvisation (Take 1)",
+        "primaryArtist": "Alex Rivera",
+        "artists": ["Alex Rivera"],
+        "album": "Unreleased Home Tapes",
+        "durationMs": 115000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Audited local private audio recording absent from all YouTube catalog distributions",
+      "notes": "Legitimate non-match; unreleased home recording must yield NO_MATCH rather than false positive match",
+      "split": "DEV",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0107",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:rehearsal_jam_2024",
+        "title": "Studio Jam in A Minor (Rough Desk Mix)",
+        "primaryArtist": "The Basement Collective",
+        "artists": ["The Basement Collective"],
+        "album": null,
+        "durationMs": 182000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Private rehearsal room recording with zero public distribution",
+      "notes": "Legitimate non-match; engine must produce NO_MATCH due to candidate absence",
+      "split": "DEV",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0108",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:live_soundboard_2019",
+        "title": "Untitled Instrumental Soundcheck (Austin 2019)",
+        "primaryArtist": "Lone Star Outlaws",
+        "artists": ["Lone Star Outlaws"],
+        "album": null,
+        "durationMs": 240000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Soundboard soundcheck audio with no commercial YouTube presence",
+      "notes": "Legitimate non-match; prevents false matching on unrelated instrumental tracks",
+      "split": "DEV",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0109",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:deleted_ep_track3",
+        "title": "Ghost in the Wire (Pre-Master)",
+        "primaryArtist": "Synthetica Project",
+        "artists": ["Synthetica Project"],
+        "album": "Deleted Early Works",
+        "durationMs": 210000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Withdrawn independent release completely removed from online platforms",
+      "notes": "Withdrawn digital catalog item; legitimate non-match",
+      "split": "DEV",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0110",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:voice_memo_song_idea",
+        "title": "Voice Memo #42 (Chorus Sketch)",
+        "primaryArtist": "Maya Lin",
+        "artists": ["Maya Lin"],
+        "album": null,
+        "durationMs": 48000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "48-second phone voice memo file loaded via Spotify local files",
+      "notes": "Very short local voice memo; legitimate non-match",
+      "split": "VALIDATION",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0111",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:ambient_field_rec_rain",
+        "title": "Rain on Cabin Tin Roof (15 Min Field Loop)",
+        "primaryArtist": "Northern Soundscapes",
+        "artists": ["Northern Soundscapes"],
+        "album": "Private Environmental Recordings",
+        "durationMs": 900000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Private personal ambient field recording absent from streaming services",
+      "notes": "Long field recording with zero YouTube matches",
+      "split": "VALIDATION",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0112",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:podcast_intro_cue_v2",
+        "title": "Tech Talk Theme Cue (Stinger Edit)",
+        "primaryArtist": "Dave Miller Production Music",
+        "artists": ["Dave Miller Production Music"],
+        "album": null,
+        "durationMs": 14000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Private podcast theme bumper music not indexed on YouTube",
+      "notes": "Short stinger cue; legitimate non-match",
+      "split": "VALIDATION",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0113",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:student_recital_bach_prelude",
+        "title": "Prelude in C Major (Student Conservatory Recital 2018)",
+        "primaryArtist": "Claire Dupont",
+        "artists": ["Claire Dupont"],
+        "album": null,
+        "durationMs": 132000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Student conservatory live audio recording with no public release",
+      "notes": "Classical student recital; must NOT match generic professional recordings of the same piece",
+      "split": "VALIDATION",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0114",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:garage_band_practice_90s",
+        "title": "Sunday Garage Session 1998 (Cassette Rip)",
+        "primaryArtist": "The Static Heads",
+        "artists": ["The Static Heads"],
+        "album": null,
+        "durationMs": 284000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Personal digitized cassette tape of defunct 1990s local band",
+      "notes": "Analog tape digitisation with zero online presence",
+      "split": "TEST",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0115",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:unreleased_remix_club_rip",
+        "title": "Starlight (DJ Shadowbox Unofficial Dubplate Rip)",
+        "primaryArtist": "Nova Collective",
+        "artists": ["Nova Collective", "DJ Shadowbox"],
+        "album": null,
+        "durationMs": 375000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Private DJ unreleased dubplate audio not uploaded to YouTube",
+      "notes": "Unofficial club dubplate; legitimate non-match",
+      "split": "TEST",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0116",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:wedding_first_dance_custom",
+        "title": "Sarah & Tom Wedding Medley (Live Acoustic Edit)",
+        "primaryArtist": "The Occasions Duo",
+        "artists": ["The Occasions Duo"],
+        "album": null,
+        "durationMs": 310000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Private bespoke wedding live acoustic medley recording",
+      "notes": "Custom private commission audio; legitimate non-match",
+      "split": "TEST",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0117",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:deleted_indie_ep_b_side",
+        "title": "Neon Shadows (Instrumental Outtake)",
+        "primaryArtist": "The Velvet Drones",
+        "artists": ["The Velvet Drones"],
+        "album": "Withdrawn B-Sides",
+        "durationMs": 195000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Deleted indie B-side outtake withdrawn from digital stores",
+      "notes": "Withdrawn digital track; legitimate non-match",
+      "split": "TEST",
+      "category": "LEGITIMATE_NO_MATCH"
+    },
+    {
+      "id": "BM-0118",
+      "expectedOutcome": "NO_MATCH",
+      "sourceTrack": {
+        "id": "spotify:track:local:personal_dictation_note",
+        "title": "Audio Note: Song Lyric Ideas 2023-11",
+        "primaryArtist": "Jordan Scott",
+        "artists": ["Jordan Scott"],
+        "album": null,
+        "durationMs": 62000,
+        "isExplicit": false,
+        "isrc": null
+      },
+      "targetTrack": null,
+      "verificationStatus": "VERIFIED",
+      "verificationEvidence": "Spoken word dictation audio memo loaded as Spotify local file",
+      "notes": "Spoken word dictation memo; legitimate non-match",
+      "split": "TEST",
+      "category": "LEGITIMATE_NO_MATCH"
+    }
+  ]
+}
