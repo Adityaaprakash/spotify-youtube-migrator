@@ -3,9 +3,38 @@
 Last Updated: 2026-10-13
 
 Current Phase: Phase 7 — Matching Engine
-Current Subphase: Phase 7A + 7B COMPLETE (Matching Contracts & Candidate Feature Extraction Implemented, Tested, Ready for Phase 7C Title Scorer)
+Current Subphase: Phase 7C + 7D COMPLETE (Title & Artist Similarity Scorers Implemented, Tested, Ready for Phase 7E Duration Scorer)
 
 ## Completed
+### Phase 7C & 7D (Title Similarity & Artist Similarity Scoring)
+- **Phase 7C (Title Similarity Scoring)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - `TitleSimilarityScorer`: Core interface for evaluating source vs. candidate title similarity, taking `SourceTrackFeatures` and `CandidateTrackFeatures` and returning a normalized `Double` in `[0.0, 1.0]` or `null` if title evidence is absent.
+  - `DefaultTitleSimilarityScorer`: Stateless Spring `@Component` implementing multi-signal normalized title similarity:
+    - Exact match fast-path: returns `1.0`.
+    - Character-level Levenshtein similarity: normalized edit distance `1.0 - (distance / max(len1, len2))`.
+    - Token-sort similarity: whitespace-split token sort permutation tolerance capped at `0.95` when characters differ to reward true canonical word order over scrambled tokens.
+    - Delimiter segment matching: handles common YouTube title conventions (` - `, ` | `, ` : `) by checking segment candidates (e.g. `daft punk - get lucky` matched against `get lucky`).
+    - Token overlap / Jaccard similarity: measures set overlap of whitespace tokens.
+    - Short-title safeguard: titles with length <= 3 (e.g. "XO", "Why") strictly constrain substring and partial-token matches, requiring high edit distance to avoid false positives.
+    - Preserves honest missing data as `null`.
+- **Phase 7D (Artist Similarity Scoring)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - `ArtistSimilarityScorer`: Core interface for evaluating source vs. candidate artist similarity, returning a normalized `Double` in `[0.0, 1.0]` or `null` if artist evidence is absent.
+  - `DefaultArtistSimilarityScorer`: Stateless Spring `@Component` implementing multi-artist credit matching:
+    - Constructor-injects Phase 5 `ArtistNormalizer` to normalize candidate channel names and video title artist credits.
+    - Exact primary artist match: returns `1.0`.
+    - Official channel equivalence: reuses Phase 7B `OfficialSignalEvidence.isArtistVerifiedName()` (handling VEVO channels and Topic channels where spaces are stripped) to award `1.0` for verified official artist channels.
+    - Multi-artist optimal 1-to-1 bipartite assignment: matches candidate artist credits against source discrete artists with exact optimal assignment, completely preventing duplicate-credit inflation and supporting inverted artist orders (`0.90`).
+    - Canonical Unicode & diacritic folding: standardizes accented Latin names (`Beyoncé` vs `Beyonce`, `Sigur Rós` vs `Sigur Ros`, `Björk` vs `Bjork`) to `1.0` using NFD diacritic stripping.
+    - Primary vs. featured priority: primary match weighted heavily; when primary artists differ, a shared featured artist alone is strictly bounded and capped at `0.35` (or `0.40` for multiple shared featured artists) to prevent featured-only false matches.
+    - Substring collision safeguards: strict length-bounded edit distance thresholds prevent superficial substring collisions (`Future` vs `Afterlife`, `The Who` vs `Wham!`, `Iron & Wine` vs `Iron Maiden`) from receiving spurious credit (`0.0` or `< 0.50`).
+    - Preserves honest missing data as `null`.
+- **Integration Seam (`CandidateSimilarityScorer`, `DefaultCandidateSimilarityScorer`)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - Composition component that independently evaluates title and artist similarity and populates `MatchScoreBreakdown` (`titleScore`, `artistScore`), preserving future fields (`durationScore`, `albumScore`, `officialSignalScore`, `versionPenalty`) as `null`.
+  - Zero premature ranking, decision assignment, or calibrated probability computation.
+
 ### Phase 7A & 7B (Matching Architecture, Immutable Contracts & Candidate Feature Extraction)
 - **Phase 7A (Matching Engine Architecture & Contracts)**:
   - Package: `com.spotifyyoutube.migrator.matching.engine`
@@ -266,8 +295,9 @@ Current Subphase: Phase 7A + 7B COMPLETE (Matching Contracts & Candidate Feature
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 7C: Title Similarity Scorer.
-- Phase 7D+: Artist, Duration, Album, Official Signal Scorer, Composite Scoring, Ranking & Decision Engine.
+- Phase 7E: Duration Similarity Scorer.
+- Phase 7F: Album Similarity Scorer.
+- Phase 7G+: Official Signal Scorer, Version Penalty Engine, Composite Scoring, Ranking & Decision Engine.
 - Matching Evaluation & Benchmarking (Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
@@ -275,6 +305,9 @@ Current Subphase: Phase 7A + 7B COMPLETE (Matching Contracts & Candidate Feature
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
 - Focused Matching Engine & Feature Extraction Suite: **PASS** (11 test classes covering contracts, feature extraction, edge cases, immutability, determinism)
+- Phase 7C Title Similarity Scorer Suite (`TitleSimilarityScorerTest`): **PASS** (15 tests across 7 nested classes)
+- Phase 7D Artist Similarity Scorer Suite (`ArtistSimilarityScorerTest`): **PASS** (20 tests across 7 nested classes)
+- Phase 7C/7D Integration Suite (`CandidateSimilarityScorerIntegrationTest`): **PASS** (5 integration tests)
 - Focused Candidate Discovery & Mapping Suite: **PASS** (133 tests passing across discovery and mapping)
 - Focused Normalization Test Suite: **PASS** (227 tests passing)
 - Full Non-Repository Unit Test Suite: **PASS** (100% passing across domain, identity, spotify, youtube, migration, playlist, matching)
@@ -288,6 +321,8 @@ Current Subphase: Phase 7A + 7B COMPLETE (Matching Contracts & Candidate Feature
 - **Phase 6 (Candidate Discovery Subsystem)**: COMPLETE / FROZEN
 - **Phase 7A (Matching Architecture & Contracts)**: COMPLETE
 - **Phase 7B (Candidate Feature Extraction)**: COMPLETE
+- **Phase 7C (Title Similarity Scoring)**: COMPLETE
+- **Phase 7D (Artist Similarity Scoring)**: COMPLETE
 
 ## Next Recommended Work
-1. Phase 7C: Title Similarity Scorer (Token-aware string similarity algorithms, Levenshtein/Jaro-Winkler, word-order tolerance).
+1. Phase 7E: Duration Similarity Scorer (Duration ratio / difference scoring with millisecond tolerance and boundary guards).

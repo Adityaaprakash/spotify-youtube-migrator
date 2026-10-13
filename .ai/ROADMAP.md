@@ -57,9 +57,9 @@ When a future requirement affects current architecture, document the architectur
 ### **Phase 7 — Matching Engine** [ACTIVE PHASE]
 - **Phase 7A**: [COMPLETE] Matching Architecture & Contracts (ADR-012, `TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`, provider-neutral immutable models, honest missing-data semantics).
 - **Phase 7B**: [COMPLETE] Candidate Feature Extraction (`TrackFeatureExtractor`, `DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`, `VersionIndicator`, `CandidateVersionEvidence`, `OfficialSignalEvidence`, conservative official channel policy, word-boundary false-positive safeguards, no premature scoring/penalties).
-- **Phase 7C**: [NEXT ACTIVE SUBPHASE] Title Similarity Scorer (Token-aware similarity, Levenshtein/Jaro-Winkler, word-order tolerance).
-- **Phase 7D**: Artist Similarity Scorer.
-- **Phase 7E**: Duration Similarity Scorer.
+- **Phase 7C**: [COMPLETE] Title Similarity Scorer (`TitleSimilarityScorer`, `DefaultTitleSimilarityScorer`, Levenshtein character edit distance, token-sort permutation tolerance, delimiter segment matching, short-title false-positive safeguards, honest missing-data handling).
+- **Phase 7D**: [COMPLETE] Artist Similarity Scorer (`ArtistSimilarityScorer`, `DefaultArtistSimilarityScorer`, Phase 5 `ArtistNormalizer` reuse, official channel equivalence, greedy 1-to-1 multi-artist matching, primary vs featured priority, bounded featured-only scores, substring collision safeguards).
+- **Phase 7E**: [NEXT ACTIVE SUBPHASE] Duration Similarity Scorer.
 - **Phase 7F**: Album Similarity Scorer.
 - **Phase 7G**: Official Signal Scorer & Version Penalty Engine.
 - **Phase 7H**: Composite Scoring, Candidate Ranking, and Decision Engine.
