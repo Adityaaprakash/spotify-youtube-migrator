@@ -172,7 +172,7 @@ Implemented and verified (11 test suites covering Phase 7A contracts and Phase 7
   - Multiple and conflicting indicators: captures multiple indicators (`(Live Acoustic Cover)`); detects conflicting indicators (`(Sped Up / Slowed Down)`); flags ambiguity on 3+ indicators.
   - Official provenance evidence: topic channels, VEVO, description label delivery; conservative rule on channels claiming "official".
   - Batch extraction and determinism: encounter-order preservation, filtering blank candidate IDs, idempotent repeated execution.
-- `TitleSimilarityScorerTest` (Phase 7C): 15 tests across 7 nested categories:
+- `TitleSimilarityScorerTest` (Phase 7C): 21 tests across 8 nested categories:
   - Exact and casing matches: exact match (`1.0`), case insensitivity, harmless whitespace trimming.
   - Typographical and punctuation differences: minor typo edit distance (`>= 0.8`), punctuation standardization.
   - Word order tolerance: permuted token order scored with high similarity (`0.95`), rewarding true exact word order above permuted tokens.
@@ -180,7 +180,7 @@ Implemented and verified (11 test suites covering Phase 7A contracts and Phase 7
   - Short-title safeguard: very short titles ("XO", "Why") protected against superficial substring collisions (e.g. "XO" vs "XOXO" scored `<= 0.7`), avoiding false positive match inflation.
   - Missing and empty handling: returns `null` when source or candidate normalized title is missing or blank.
   - Unicode, determinism & immutability: non-Latin scripts (Japanese/Cyrillic) scored accurately, repeated invocations deterministic, feature inputs unmodified.
-- `ArtistSimilarityScorerTest` (Phase 7D): 20 tests across 7 nested categories:
+- `ArtistSimilarityScorerTest` (Phase 7D): 20 tests across 6 nested categories:
   - Exact and primary artist matches: exact primary artist (`1.0`), case insensitivity, whitespace trimming.
   - Official channel equivalence: auto-generated Topic channel and VEVO channel without spaces (`DuaLipaVEVO`) matching source artist scored as `1.0`.
   - Multi-artist credits & reordering: all artists matching (`1.0`), primary artist matching with missing featured artist scoring high (`>= 0.85`), featured artist in different position recognized, inverted artist order (`Dua Lipa feat. Calvin Harris` vs `Calvin Harris & Dua Lipa`) awarded `0.90` (`>= 0.85`).
@@ -188,25 +188,36 @@ Implemented and verified (11 test suites covering Phase 7A contracts and Phase 7
   - Primary vs. featured priority: primary artist match outranks featured-only match; different primary artists sharing a featured artist strictly bounded to low score (`<= 0.35`).
   - Substring collision safeguards: distinct artists sharing tokens ("Iron & Wine" vs "Iron Maiden") or prefix collisions ("Future" vs "Afterlife", "The Who" vs "Wham!") strictly scored `0.0` or `< 0.50`.
   - Unicode, diacritics & determinism: accented Latin names (`Beyoncé` vs `Beyonce`, `Sigur Rós` vs `Sigur Ros`, `Björk` vs `Bjork`) scored `1.0` via NFD diacritic stripping; Cyrillic preserved; missing artist metadata returns `null` honestly; idempotent execution.
-- `CandidateSimilarityScorerIntegrationTest`: 5 integration tests:
-  - End-to-end scoring of matching track: exact title and artist yield `1.0` in `MatchScoreBreakdown`.
+- `CandidateSimilarityScorerIntegrationTest`: 7 integration tests:
+  - End-to-end scoring of matching track: exact title, artist, and duration yield `1.0` in `MatchScoreBreakdown`.
+  - Album evidence extraction: candidate description with album details populates `albumScore` (`1.0`).
+  - Duration penalty isolation: duration discrepancies (>60s) penalized to `0.0` while title and artist scores remain high.
   - Permuted candidate title with embedded artist: `daft punk - get lucky` on official channel yields high title and artist scores.
   - Partial match preservation: mismatched artist preserves high title score while artist score is low.
-  - Honest missing data: absent candidate metadata yields `null` scores in breakdown, preserving future phase fields as `null`.
-  - Determinism & immutability: repeated scoring produces identical breakdowns without modifying feature records.
+  - Honest missing data: absent candidate metadata yields `null` scores across missing dimensions (`titleScore`, `artistScore`, `durationScore`, `albumScore`).
+  - Validation: rejects null inputs with `NullPointerException`.
+- `DurationSimilarityScorerTest` (Phase 7E.1): 15 tests across 4 nested categories:
+  - Exact and tolerance matches: exact match (`1.0`), offset within 2.0s tolerance window (`1.0`), candidate shorter within tolerance (`1.0`).
+  - Piecewise continuous decay: linear decay in small offset range 2s–10s (`0.85`–`1.0`), moderate range 10s–30s (`0.40`–`0.85`), large range 30s–60s (`0.0`–`0.40`), cutoff beyond 60s (`0.0`).
+  - Monotonicity & invariants: monotonic non-increasing with respect to offset (piecewise constant on [0s, 2s] and >60s), symmetric across source and candidate, bounded in `[0.0, 1.0]`.
+  - Missing metadata & validation: returns `null` when source or candidate duration is missing, rejects negative values with `IllegalArgumentException`, strictly deterministic.
+- `AlbumSimilarityScorerTest` (Phase 7E.2): 19 tests across 5 nested categories:
+  - Exact and normalized matches: exact match (`1.0`), case insensitivity, smart quote & dash normalization, whitespace collapsing.
+  - Unicode & accent folding: accented Latin (`Ágætis byrjun` vs `Agaetis byrjun` $\to 1.0$), Cyrillic, Japanese scripts.
+  - Typos & unrelated mismatches: minor typo on long album title ($\ge 0.88$), unrelated albums (`0.0`), substring collisions (`War` vs `Star Wars` $\to 0.0$), generic title collisions (`Queen: Greatest Hits` vs `Blink-182: Greatest Hits` $\to 0.0$).
+  - Candidate description extraction: explicit `Album: <name>` line, standard YouTube topic delivery layout line 3, missing album in description returns `null`.
+  - Missing metadata & validation: returns `null` when source or candidate album missing, rejects null feature objects with `NullPointerException`, strictly deterministic.
 
-## Future Testing Scope (Phase 7E+)
+## Future Testing Scope (Phase 7F+)
 As the migrator logic scales, testing will expand to:
-- Duration Similarity Scorer Test Suite (Phase 7E)
-- Album Similarity Scorer Test Suite (Phase 7F)
-- Official Signal Scorer & Version Penalty Engine (Phase 7G)
-- Composite Scoring & Decision Engine (Phase 7H)
+- Official Signal Scorer & Version Penalty Engine Test Suite (Phase 7F)
+- Composite Scoring & Decision Engine (Phase 7G/7H)
 - Matching Benchmark Test Suite (Phase 8)
 - Migration State Machine Test Suite (Phase 9)
 - Full End-to-End Migration Flow Testing
 
 ## Current Blockers & Status
-- **Phase 7A, 7B, 7C & 7D Complete**: Core Matching Engine contracts (`TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`), Candidate Feature Extraction (`DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`), Title Similarity Scorer (`DefaultTitleSimilarityScorer`), Artist Similarity Scorer (`DefaultArtistSimilarityScorer`), and composition seam (`DefaultCandidateSimilarityScorer`) implemented and verified across 14 test suites.
+- **Phase 7A, 7B, 7C, 7D & 7E Complete**: Core Matching Engine contracts (`TrackMatchRequest`, `TrackMatchResult`, `MatchDecision`, `MatchScoreBreakdown`, `CandidateMatchEvaluation`, `MatchConfidence`), Candidate Feature Extraction (`DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`), Title Similarity Scorer (`DefaultTitleSimilarityScorer`), Artist Similarity Scorer (`DefaultArtistSimilarityScorer`), Duration Similarity Scorer (`DefaultDurationSimilarityScorer`), Album Similarity Scorer (`DefaultAlbumSimilarityScorer`), and composition seam (`DefaultCandidateSimilarityScorer`) implemented and verified across 16 test suites.
 - **Phase 6 Complete & Frozen**: Full Candidate Discovery pipeline (Phases 6A–6G) verified across 133 discovery tests. Phase 6 is FROZEN.
 - **Phase 5 Freeze**: Normalization subsystem (Phases 5A–5H) fully verified with 227 passing normalization tests and 0 Checkstyle violations. Phase 5 is FROZEN.
 - **Phase 4 Freeze**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets.

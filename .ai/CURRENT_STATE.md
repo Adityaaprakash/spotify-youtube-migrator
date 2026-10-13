@@ -3,9 +3,36 @@
 Last Updated: 2026-10-13
 
 Current Phase: Phase 7 — Matching Engine
-Current Subphase: Phase 7C + 7D COMPLETE (Title & Artist Similarity Scorers Implemented, Tested, Ready for Phase 7E Duration Scorer)
+Current Subphase: Phase 7E COMPLETE (Duration & Album Similarity Scorers Implemented, Tested, Ready for Phase 7F Official Signal & Version Penalty Engine)
 
 ## Completed
+### Phase 7E (Duration & Album Similarity Scoring)
+- **Phase 7E.1 (Duration Similarity Scoring)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - `DurationSimilarityScorer`: Core interface for evaluating duration alignment between source and candidate tracks, returning a normalized `Double` in `[0.0, 1.0]` or `null` if duration is absent on either side.
+  - `DefaultDurationSimilarityScorer`: Stateless Spring `@Component` implementing a continuous, monotonic non-increasing, piecewise decay function:
+    - $\le 2.0$s offset: full `1.0` credit (tolerance window for container padding, trailing silence, encoding round-off).
+    - $2.0$s to $10.0$s offset: linear decay from `1.0` to `0.85` (small provider offsets).
+    - $10.0$s to $30.0$s offset: linear decay from `0.85` to `0.40` (moderate narrative intros, extended outros, radio edits).
+    - $30.0$s to $60.0$s offset: linear decay from `0.40` to `0.0` (substantial edit discrepancies).
+    - $> 60.0$s offset: `0.0` (disqualifying duration mismatch).
+    - Symmetric, monotonic non-increasing (constant on [0s, 2s] and >60s), safe against arithmetic overflow, preserves honest missing data as `null`.
+- **Phase 7E.2 (Album Similarity Scoring)**:
+  - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
+  - `AlbumSimilarityScorer`: Core interface for evaluating album title alignment, returning a normalized `Double` in `[0.0, 1.0]` or `null` if album metadata is absent on either side.
+  - `DefaultAlbumSimilarityScorer`: Stateless Spring `@Component` implementing album comparison:
+    - Constructor-injects Phase 5 `AlbumNormalizer` (Unicode NFC, case folding, curly quote/dash standardization, whitespace collapsing).
+    - Extracts candidate album from structured description lines (`Album: <name>`, `Provided to YouTube by...` multi-line layout).
+    - Exact normalized match: `1.0`. Whitespace-collapsed match: `1.0`.
+    - Accent / diacritic folding (e.g. `Ágætis byrjun` vs `Agaetis byrjun`): `1.0`.
+    - Minor typographical differences on long titles (Levenshtein $\ge 0.88$, length diff $\le 2$): normalized edit distance.
+    - Protection against generic collisions (`Queen: Greatest Hits` vs `Blink-182: Greatest Hits`) and substring collisions (`War` vs `Star Wars`): strictly `0.0`.
+    - Preserves honest missing data as `null` when album evidence is absent on either side.
+- **Integration Seam (`DefaultCandidateSimilarityScorer`)**:
+  - Injects `TitleSimilarityScorer`, `ArtistSimilarityScorer`, `DurationSimilarityScorer`, and `AlbumSimilarityScorer`.
+  - Populates `titleScore`, `artistScore`, `durationScore`, and `albumScore` in `MatchScoreBreakdown`.
+  - Preserves future dimensions (`officialSignalScore`, `versionPenalty`) honestly as `null`.
+
 ### Phase 7C & 7D (Title Similarity & Artist Similarity Scoring)
 - **Phase 7C (Title Similarity Scoring)**:
   - Package: `com.spotifyyoutube.migrator.matching.engine.scorer`
@@ -295,9 +322,8 @@ Current Subphase: Phase 7C + 7D COMPLETE (Title & Artist Similarity Scorers Impl
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 7E: Duration Similarity Scorer.
-- Phase 7F: Album Similarity Scorer.
-- Phase 7G+: Official Signal Scorer, Version Penalty Engine, Composite Scoring, Ranking & Decision Engine.
+- Phase 7F: Official Signal Scorer & Version Penalty Engine.
+- Phase 7G: Composite Scoring, Candidate Ranking, and Decision Engine.
 - Matching Evaluation & Benchmarking (Phase 8).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 
@@ -305,9 +331,11 @@ Current Subphase: Phase 7C + 7D COMPLETE (Title & Artist Similarity Scorers Impl
 - Backend Compilation: `.\mvnw.cmd test-compile` — **PASS**
 - Checkstyle: `.\mvnw.cmd checkstyle:check` — **PASS** (0 violations)
 - Focused Matching Engine & Feature Extraction Suite: **PASS** (11 test classes covering contracts, feature extraction, edge cases, immutability, determinism)
-- Phase 7C Title Similarity Scorer Suite (`TitleSimilarityScorerTest`): **PASS** (15 tests across 7 nested classes)
-- Phase 7D Artist Similarity Scorer Suite (`ArtistSimilarityScorerTest`): **PASS** (20 tests across 7 nested classes)
-- Phase 7C/7D Integration Suite (`CandidateSimilarityScorerIntegrationTest`): **PASS** (5 integration tests)
+- Phase 7C Title Similarity Scorer Suite (`TitleSimilarityScorerTest`): 21 tests across 8 nested classes
+- Phase 7D Artist Similarity Scorer Suite (`ArtistSimilarityScorerTest`): 20 tests across 6 nested classes
+- Phase 7E Duration Similarity Scorer Suite (`DurationSimilarityScorerTest`): 15 tests across 4 nested classes
+- Phase 7E Album Similarity Scorer Suite (`AlbumSimilarityScorerTest`): 19 tests across 5 nested classes
+- Phase 7C/7D/7E Integration Suite (`CandidateSimilarityScorerIntegrationTest`): 7 integration tests
 - Focused Candidate Discovery & Mapping Suite: **PASS** (133 tests passing across discovery and mapping)
 - Focused Normalization Test Suite: **PASS** (227 tests passing)
 - Full Non-Repository Unit Test Suite: **PASS** (100% passing across domain, identity, spotify, youtube, migration, playlist, matching)
@@ -323,6 +351,7 @@ Current Subphase: Phase 7C + 7D COMPLETE (Title & Artist Similarity Scorers Impl
 - **Phase 7B (Candidate Feature Extraction)**: COMPLETE
 - **Phase 7C (Title Similarity Scoring)**: COMPLETE
 - **Phase 7D (Artist Similarity Scoring)**: COMPLETE
+- **Phase 7E (Duration & Album Similarity Scoring)**: COMPLETE
 
 ## Next Recommended Work
-1. Phase 7E: Duration Similarity Scorer (Duration ratio / difference scoring with millisecond tolerance and boundary guards).
+1. Phase 7F: Official Signal Scorer & Version Penalty Engine (evaluating official provenance signals and applying version/content discrepancy deductions).

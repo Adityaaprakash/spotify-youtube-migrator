@@ -59,9 +59,9 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 7B**: [COMPLETE] Candidate Feature Extraction (`TrackFeatureExtractor`, `DefaultTrackFeatureExtractor`, `SourceTrackFeatures`, `CandidateTrackFeatures`, `VersionIndicator`, `CandidateVersionEvidence`, `OfficialSignalEvidence`, conservative official channel policy, word-boundary false-positive safeguards, no premature scoring/penalties).
 - **Phase 7C**: [COMPLETE] Title Similarity Scorer (`TitleSimilarityScorer`, `DefaultTitleSimilarityScorer`, Levenshtein character edit distance, token-sort permutation tolerance, delimiter segment matching, short-title false-positive safeguards, honest missing-data handling).
 - **Phase 7D**: [COMPLETE] Artist Similarity Scorer (`ArtistSimilarityScorer`, `DefaultArtistSimilarityScorer`, Phase 5 `ArtistNormalizer` reuse, official channel equivalence, greedy 1-to-1 multi-artist matching, primary vs featured priority, bounded featured-only scores, substring collision safeguards).
-- **Phase 7E**: [NEXT ACTIVE SUBPHASE] Duration Similarity Scorer.
-- **Phase 7F**: Album Similarity Scorer.
-- **Phase 7G**: Official Signal Scorer & Version Penalty Engine.
+- **Phase 7E**: [COMPLETE] Duration & Album Similarity Scoring (`DurationSimilarityScorer`, `DefaultDurationSimilarityScorer`, continuous monotonic piecewise decay function, `AlbumSimilarityScorer`, `DefaultAlbumSimilarityScorer`, Phase 5 `AlbumNormalizer` reuse, YouTube description extraction, substring collision safeguards, honest missing-data handling).
+- **Phase 7F**: [NEXT PLANNED SUBPHASE - NOT STARTED] Official Signal Scorer & Version Penalty Engine.
+- **Phase 7G**: Composite Scoring, Candidate Ranking, and Decision Engine.
 - **Phase 7H**: Composite Scoring, Candidate Ranking, and Decision Engine.
 - **Phase 7I**: Subsystem Verification & Matching Freeze.
 ### **Phase 8 — Matching Evaluation & Benchmark**
