@@ -30,6 +30,10 @@ public class HighConfidenceMetricsCalculator {
      * @return computed high-confidence metrics
      */
     public HighConfidenceMetrics calculate(List<BenchmarkExampleResult> results, double threshold) {
+        if (Double.isNaN(threshold) || threshold <= 0.0 || threshold > 1.0) {
+            throw new IllegalArgumentException("threshold must be in (0.0, 1.0]: " + threshold);
+        }
+
         if (results == null || results.isEmpty()) {
             return HighConfidenceMetrics.unavailable("No benchmark results provided", threshold);
         }

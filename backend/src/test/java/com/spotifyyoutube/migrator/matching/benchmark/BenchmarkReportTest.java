@@ -67,6 +67,9 @@ class BenchmarkReportTest {
         assertThat(report.totalExamples()).isEqualTo(2);
         assertThat(report.eligibleExamples()).isEqualTo(2);
         assertThat(report.excludedExamples()).isEqualTo(0);
+        assertThat(report.failedExamples()).isEqualTo(0);
+        assertThat(report.eligibleExamples() + report.excludedExamples() + report.failedExamples())
+                .isEqualTo(report.totalExamples());
         assertThat(report.datasetVersion()).isEqualTo("1.0.0");
 
         // Format to Markdown

@@ -64,10 +64,11 @@ public class BenchmarkReportGenerator {
         }
         int failedCount = 0;
         for (BenchmarkExampleResult r : results) {
-            if (!r.eligible()) {
+            if (!r.eligible() && r.exclusionReason() != EvaluationExclusionReason.EXECUTION_FAILURE) {
                 exclusionBreakdown.merge(r.exclusionReason(), 1, Integer::sum);
             }
-            if (r.errorClassification() == BenchmarkErrorCategory.EXECUTION_FAILURE) {
+            if (r.exclusionReason() == EvaluationExclusionReason.EXECUTION_FAILURE
+                    || r.errorClassification() == BenchmarkErrorCategory.EXECUTION_FAILURE) {
                 failedCount++;
             }
         }

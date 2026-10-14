@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /**
  * Immutable container for a ground-truth music matching benchmark dataset.
@@ -13,7 +12,7 @@ import java.util.stream.Collectors;
  * @param version non-null semantic dataset version identifier (e.g. "1.0.0")
  * @param description non-null descriptive summary of dataset contents
  * @param createdAt non-null ISO-8601 creation date string (e.g. "2026-10-13")
- * @param examples unmodifiable list of benchmark examples
+ * @param examples non-null, unmodifiable list of benchmark examples
  */
 public record BenchmarkDataset(
         String version,
@@ -32,7 +31,8 @@ public record BenchmarkDataset(
         description = description.trim();
         Objects.requireNonNull(createdAt, "createdAt must not be null");
         createdAt = createdAt.trim();
-        examples = examples != null ? List.copyOf(examples) : List.of();
+        Objects.requireNonNull(examples, "examples must not be null");
+        examples = List.copyOf(examples);
     }
 
     /**

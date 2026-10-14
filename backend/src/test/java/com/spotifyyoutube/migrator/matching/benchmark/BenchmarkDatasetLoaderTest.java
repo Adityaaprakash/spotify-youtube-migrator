@@ -168,11 +168,62 @@ class BenchmarkDatasetLoaderTest {
             BenchmarkExample restoredEx = restored.examples().get(0);
             assertThat(restoredEx.id()).isEqualTo("BM-9999");
             assertThat(restoredEx.expectedOutcome()).isEqualTo(BenchmarkExpectedOutcome.MATCH);
+            assertThat(restoredEx.sourceTrack().id()).isEqualTo("spotify:track:rt1");
+            assertThat(restoredEx.sourceTrack().getId()).contains("spotify:track:rt1");
             assertThat(restoredEx.sourceTrack().title()).isEqualTo("Roundtrip Title");
             assertThat(restoredEx.sourceTrack().artists()).containsExactly("Roundtrip Artist", "Guest");
             assertThat(restoredEx.targetTrack().videoId()).isEqualTo("abcdefghijk");
             assertThat(restoredEx.split()).isEqualTo(BenchmarkDatasetSplit.DEV);
             assertThat(restoredEx.category()).isEqualTo(BenchmarkTrackCategory.FEATURED_ARTIST);
+        }
+
+        @Test
+        @DisplayName("should round-trip dataset with absent optional source track id")
+        void shouldRoundTripDatasetWithAbsentSourceTrackId() {
+            BenchmarkSourceTrack sourceWithoutId = new BenchmarkSourceTrack(
+                    null,
+                    "Roundtrip Title Without ID",
+                    "Roundtrip Artist",
+                    List.of("Roundtrip Artist"),
+                    null,
+                    null,
+                    null,
+                    null
+            );
+
+            BenchmarkTargetCandidate target = new BenchmarkTargetCandidate(
+                    "abcdefghijk",
+                    "Roundtrip Artist - Roundtrip Title",
+                    "Roundtrip Channel",
+                    195000L,
+                    "channel123",
+                    true
+            );
+
+            BenchmarkExample example = BenchmarkExample.verifiedMatch(
+                    "BM-9998",
+                    sourceWithoutId,
+                    target,
+                    "Verified record without source id",
+                    BenchmarkDatasetSplit.DEV,
+                    BenchmarkTrackCategory.STANDARD_POPULAR
+            );
+
+            BenchmarkDataset dataset = new BenchmarkDataset(
+                    "1.0.0",
+                    "Absent ID Dataset",
+                    "2026-10-14",
+                    List.of(example)
+            );
+
+            String json = loader.toJson(dataset);
+            BenchmarkDataset restored = loader.loadFromJson(json);
+
+            assertThat(restored.examples()).hasSize(1);
+            BenchmarkSourceTrack restoredSource = restored.examples().get(0).sourceTrack();
+            assertThat(restoredSource.id()).isNull();
+            assertThat(restoredSource.getId()).isEmpty();
+            assertThat(restoredSource.title()).isEqualTo("Roundtrip Title Without ID");
         }
 
         @Test

@@ -1,6 +1,5 @@
 package com.spotifyyoutube.migrator.matching.benchmark.metric;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,12 +16,14 @@ import java.util.Optional;
  * @param baselineBrierScore comparative baseline Brier score: variance of empirical positive base rate
  * @param expectedCalibrationError Expected Calibration Error (ECE) across reliability bins
  * @param buckets list of reliability histogram buckets
+ * @param targetDefinition explicit definition of the forecasted event and ground-truth binary label
  * @param meanConfidenceCorrect mean predicted probability for correct matches
  * @param meanConfidenceIncorrect mean predicted probability for incorrect predictions
  */
 public record CalibrationMetrics(
         boolean available,
         String unavailabilityReason,
+        String targetDefinition,
         int evaluableCount,
         Double brierScore,
         Double baselineBrierScore,
@@ -32,14 +33,47 @@ public record CalibrationMetrics(
         Double meanConfidenceIncorrect
 ) {
 
+    public static final String DEFAULT_TARGET_DEFINITION =
+            "CANDIDATE_CORRECTNESS: P(evaluated candidate is the true target recording) against binary label y = 1 if (isMatch && candidateMatchesExpected) else 0";
+
     public CalibrationMetrics {
+        targetDefinition = targetDefinition != null ? targetDefinition : DEFAULT_TARGET_DEFINITION;
         buckets = buckets != null ? List.copyOf(buckets) : List.of();
+    }
+
+    /**
+     * Backward-compatible constructor defaulting targetDefinition to {@link #DEFAULT_TARGET_DEFINITION}.
+     */
+    public CalibrationMetrics(
+            boolean available,
+            String unavailabilityReason,
+            int evaluableCount,
+            Double brierScore,
+            Double baselineBrierScore,
+            Double expectedCalibrationError,
+            List<CalibrationBucket> buckets,
+            Double meanConfidenceCorrect,
+            Double meanConfidenceIncorrect
+    ) {
+        this(
+                available,
+                unavailabilityReason,
+                DEFAULT_TARGET_DEFINITION,
+                evaluableCount,
+                brierScore,
+                baselineBrierScore,
+                expectedCalibrationError,
+                buckets,
+                meanConfidenceCorrect,
+                meanConfidenceIncorrect
+        );
     }
 
     public static CalibrationMetrics unavailable(String reason) {
         return new CalibrationMetrics(
                 false,
                 reason,
+                DEFAULT_TARGET_DEFINITION,
                 0,
                 null,
                 null,
@@ -52,6 +86,10 @@ public record CalibrationMetrics(
 
     public Optional<String> getUnavailabilityReason() {
         return Optional.ofNullable(unavailabilityReason);
+    }
+
+    public Optional<String> getTargetDefinition() {
+        return Optional.ofNullable(targetDefinition);
     }
 
     public Optional<Double> getBrierScore() {

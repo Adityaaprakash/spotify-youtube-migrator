@@ -299,7 +299,11 @@ class BenchmarkDatasetValidatorTest {
                     .isInstanceOf(BenchmarkValidationException.class)
                     .satisfies(ex -> {
                         BenchmarkValidationException bve = (BenchmarkValidationException) ex;
-                        assertThat(bve.errors()).isNotEmpty();
+                        assertThat(bve.getValidationErrors())
+                                .isNotEmpty()
+                                .anyMatch(msg -> msg.contains("semantic versioning"))
+                                .anyMatch(msg -> msg.contains("description must not be blank"))
+                                .anyMatch(msg -> msg.contains("at least one benchmark example"));
                         assertThat(bve.getMessage()).contains("Benchmark dataset validation failed");
                     });
         }

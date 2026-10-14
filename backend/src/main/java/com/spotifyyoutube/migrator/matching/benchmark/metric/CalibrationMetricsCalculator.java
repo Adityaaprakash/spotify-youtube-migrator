@@ -69,8 +69,10 @@ public class CalibrationMetricsCalculator {
 
         for (BenchmarkExampleResult r : evaluable) {
             double p = r.predictedProbability();
-            // y = 1.0 if correct positive match, 0.0 otherwise
-            double y = r.isCorrectAutoAccept() ? 1.0 : 0.0;
+            // Ground-truth binary label for candidate correctness:
+            // y = 1.0 if evaluated candidate is the true expected target, 0.0 otherwise.
+            // Explicitly decoupled from decision policy abstention (REVIEW_REQUIRED).
+            double y = r.isCandidateCorrect() ? 1.0 : 0.0;
 
             squaredErrorSum += Math.pow(p - y, 2);
             if (y == 1.0) {
@@ -137,6 +139,7 @@ public class CalibrationMetricsCalculator {
         return new CalibrationMetrics(
                 true,
                 null,
+                CalibrationMetrics.DEFAULT_TARGET_DEFINITION,
                 n,
                 round4(brierScore),
                 round4(baselineBrierScore),

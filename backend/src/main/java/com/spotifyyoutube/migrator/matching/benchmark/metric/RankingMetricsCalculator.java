@@ -3,7 +3,6 @@ package com.spotifyyoutube.migrator.matching.benchmark.metric;
 import com.spotifyyoutube.migrator.matching.benchmark.runner.BenchmarkExampleResult;
 
 import java.util.List;
-import java.util.Objects;
 
 /**
  * Calculator for candidate ranking metrics (Top-1 and Top-3 accuracy).

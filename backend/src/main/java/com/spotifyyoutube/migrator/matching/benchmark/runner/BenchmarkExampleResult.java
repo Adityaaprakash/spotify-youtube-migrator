@@ -110,7 +110,7 @@ public record BenchmarkExampleResult(
                 candidatePoolSize,
                 targetPresentInCandidatePool,
                 false,
-                true,
+                false,
                 EvaluationExclusionReason.EXECUTION_FAILURE,
                 category,
                 split,
@@ -144,6 +144,16 @@ public record BenchmarkExampleResult(
             }
         }
         return false;
+    }
+
+    /**
+     * Indicates whether the evaluated candidate corresponds to the true expected target track,
+     * regardless of whether the final decision policy auto-accepted, abstained (REVIEW_REQUIRED), or rejected.
+     * <p>
+     * Decouples candidate correctness from decision-policy classification.
+     */
+    public boolean isCandidateCorrect() {
+        return expectedOutcome.isMatch() && predictedTargetMatchesExpected;
     }
 
     /**

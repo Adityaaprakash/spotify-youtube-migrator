@@ -3,7 +3,6 @@ package com.spotifyyoutube.migrator.matching.benchmark;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 

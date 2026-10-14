@@ -1,12 +1,10 @@
 package com.spotifyyoutube.migrator.matching.benchmark.report;
 
 import com.spotifyyoutube.migrator.matching.benchmark.BenchmarkDatasetSplit;
-import com.spotifyyoutube.migrator.matching.benchmark.BenchmarkTrackCategory;
 import com.spotifyyoutube.migrator.matching.benchmark.metric.BenchmarkMetrics;
 import com.spotifyyoutube.migrator.matching.benchmark.metric.CalibrationBucket;
 import com.spotifyyoutube.migrator.matching.benchmark.metric.DecisionPolicyMetrics;
 import com.spotifyyoutube.migrator.matching.benchmark.metric.RankingMetrics;
-import com.spotifyyoutube.migrator.matching.benchmark.runner.BenchmarkErrorCategory;
 import com.spotifyyoutube.migrator.matching.benchmark.runner.EvaluationExclusionReason;
 
 import java.util.Locale;
@@ -142,6 +140,8 @@ public class BenchmarkReportFormatter {
         }
 
         if (report.overallMetrics().calibration().available()) {
+            sb.append(String.format(Locale.ROOT, "- **Calibration Target:** `%s`\n",
+                    report.overallMetrics().calibration().targetDefinition()));
             sb.append(String.format(Locale.ROOT, "- **Brier Score:** `%.4f`\n",
                     report.overallMetrics().calibration().brierScore()));
             sb.append(String.format(Locale.ROOT, "- **Baseline Brier Score:** `%.4f`\n",

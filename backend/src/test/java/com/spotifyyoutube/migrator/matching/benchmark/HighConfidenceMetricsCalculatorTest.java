@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("HighConfidenceMetricsCalculator Hand-Calculated Evaluation Tests")
 class HighConfidenceMetricsCalculatorTest {
@@ -131,6 +132,30 @@ class HighConfidenceMetricsCalculatorTest {
             assertThat(m.highConfidenceIncorrectCount()).isEqualTo(0);
             assertThat(m.errorRate()).isNull();
             assertThat(m.getErrorRate()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("should reject invalid thresholds outside (0.0, 1.0] with IllegalArgumentException")
+        void shouldRejectInvalidThresholds() {
+            List<BenchmarkExampleResult> results = List.of(
+                    resultWithProb("BM-1", BenchmarkExpectedOutcome.MATCH, "vid1", "vid1", MatchDecision.MATCH, 0.95, true)
+            );
+
+            assertThatThrownBy(() -> calculator.calculate(results, 0.0))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("threshold must be in (0.0, 1.0]");
+
+            assertThatThrownBy(() -> calculator.calculate(results, -0.5))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("threshold must be in (0.0, 1.0]");
+
+            assertThatThrownBy(() -> calculator.calculate(results, 1.05))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("threshold must be in (0.0, 1.0]");
+
+            assertThatThrownBy(() -> calculator.calculate(results, Double.NaN))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("threshold must be in (0.0, 1.0]");
         }
     }
 }

@@ -116,7 +116,60 @@ class CalibrationMetricsCalculatorTest {
             assertThat(b4.count()).isEqualTo(2);
             assertThat(b4.meanConfidence()).isEqualTo(0.8500);
             assertThat(b4.accuracy()).isEqualTo(1.0000);
+
+            assertThat(m.targetDefinition()).isEqualTo(CalibrationMetrics.DEFAULT_TARGET_DEFINITION);
+            assertThat(m.getTargetDefinition()).contains(CalibrationMetrics.DEFAULT_TARGET_DEFINITION);
         }
+
+        @Test
+        @DisplayName("should decouple candidate correctness from decision policy abstention (REVIEW_REQUIRED)")
+        void shouldDecoupleCandidateCorrectnessFromDecisionPolicy() {
+            // Case 1: candidate is correct (isCandidateCorrect == true), but decision is REVIEW_REQUIRED
+            // p = 0.80, y = 1.0 -> squared error = (0.80 - 1.0)^2 = 0.0400
+            BenchmarkExampleResult r1 = resultWithDecision("BM-1", true, MatchDecision.REVIEW_REQUIRED, 0.80);
+            // Case 2: candidate is incorrect (wrong candidate), decision is REVIEW_REQUIRED
+            // p = 0.20, y = 0.0 -> squared error = (0.20 - 0.0)^2 = 0.0400
+            BenchmarkExampleResult r2 = resultWithDecision("BM-2", false, MatchDecision.REVIEW_REQUIRED, 0.20);
+
+            CalibrationMetrics m = calculator.calculate(List.of(r1, r2), 5);
+
+            assertThat(m.available()).isTrue();
+            assertThat(m.evaluableCount()).isEqualTo(2);
+            // Brier score = (0.04 + 0.04) / 2 = 0.0400
+            assertThat(m.brierScore()).isEqualTo(0.0400);
+            assertThat(m.targetDefinition()).contains("CANDIDATE_CORRECTNESS");
+            assertThat(m.meanConfidenceCorrect()).isEqualTo(0.8000);
+            assertThat(m.meanConfidenceIncorrect()).isEqualTo(0.2000);
+        }
+    }
+
+    private BenchmarkExampleResult resultWithDecision(
+            String id,
+            boolean isCorrectMatch,
+            MatchDecision decision,
+            Double probability
+    ) {
+        return new BenchmarkExampleResult(
+                id,
+                BenchmarkExpectedOutcome.MATCH,
+                "targetVid",
+                isCorrectMatch ? "targetVid" : "wrongVid",
+                decision,
+                MatchConfidence.GOOD,
+                0.85,
+                probability,
+                List.of(),
+                1,
+                true,
+                isCorrectMatch,
+                true,
+                EvaluationExclusionReason.NONE,
+                BenchmarkTrackCategory.STANDARD_POPULAR,
+                BenchmarkDatasetSplit.DEV,
+                15L,
+                isCorrectMatch ? BenchmarkErrorCategory.CORRECT_MATCH : BenchmarkErrorCategory.WRONG_TARGET_SELECTED,
+                null
+        );
     }
 
     @Nested

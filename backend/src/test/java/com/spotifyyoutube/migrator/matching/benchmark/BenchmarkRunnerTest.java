@@ -386,8 +386,13 @@ class BenchmarkRunnerTest {
 
             assertThat(result.totalExamples()).isEqualTo(1);
             assertThat(result.failedCount()).isEqualTo(1);
+            assertThat(result.eligibleCount()).isEqualTo(0);
+            assertThat(result.excludedCount()).isEqualTo(0);
+            assertThat(result.eligibleCount() + result.excludedCount() + result.failedCount())
+                    .isEqualTo(result.totalExamples());
 
             BenchmarkExampleResult r = result.exampleResults().get(0);
+            assertThat(r.eligible()).isFalse();
             assertThat(r.errorClassification()).isEqualTo(BenchmarkErrorCategory.EXECUTION_FAILURE);
             assertThat(r.errorMessage()).contains("Simulated matching engine crash");
         }

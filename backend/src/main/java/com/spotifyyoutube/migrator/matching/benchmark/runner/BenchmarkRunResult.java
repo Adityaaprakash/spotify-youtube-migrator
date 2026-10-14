@@ -5,7 +5,6 @@ import com.spotifyyoutube.migrator.matching.benchmark.BenchmarkExpectedOutcome;
 import com.spotifyyoutube.migrator.matching.benchmark.BenchmarkTrackCategory;
 import com.spotifyyoutube.migrator.matching.engine.MatchDecision;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,16 +35,21 @@ public record BenchmarkRunResult(
     }
 
     public int eligibleCount() {
-        return (int) exampleResults.stream().filter(BenchmarkExampleResult::eligible).count();
+        return (int) exampleResults.stream()
+                .filter(BenchmarkExampleResult::eligible)
+                .count();
     }
 
     public int excludedCount() {
-        return (int) exampleResults.stream().filter(r -> !r.eligible()).count();
+        return (int) exampleResults.stream()
+                .filter(r -> !r.eligible() && r.exclusionReason() != EvaluationExclusionReason.EXECUTION_FAILURE)
+                .count();
     }
 
     public int failedCount() {
         return (int) exampleResults.stream()
-                .filter(r -> r.errorClassification() == BenchmarkErrorCategory.EXECUTION_FAILURE)
+                .filter(r -> r.exclusionReason() == EvaluationExclusionReason.EXECUTION_FAILURE
+                        || r.errorClassification() == BenchmarkErrorCategory.EXECUTION_FAILURE)
                 .count();
     }
 
@@ -57,13 +61,14 @@ public record BenchmarkRunResult(
 
     public List<BenchmarkExampleResult> excludedResults() {
         return exampleResults.stream()
-                .filter(r -> !r.eligible())
+                .filter(r -> !r.eligible() && r.exclusionReason() != EvaluationExclusionReason.EXECUTION_FAILURE)
                 .toList();
     }
 
     public List<BenchmarkExampleResult> failedResults() {
         return exampleResults.stream()
-                .filter(r -> r.errorClassification() == BenchmarkErrorCategory.EXECUTION_FAILURE)
+                .filter(r -> r.exclusionReason() == EvaluationExclusionReason.EXECUTION_FAILURE
+                        || r.errorClassification() == BenchmarkErrorCategory.EXECUTION_FAILURE)
                 .toList();
     }
 

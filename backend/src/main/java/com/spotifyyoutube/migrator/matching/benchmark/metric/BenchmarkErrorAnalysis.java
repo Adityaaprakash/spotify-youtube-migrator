@@ -6,7 +6,6 @@ import com.spotifyyoutube.migrator.matching.benchmark.BenchmarkTrackCategory;
 import com.spotifyyoutube.migrator.matching.benchmark.runner.BenchmarkErrorCategory;
 import com.spotifyyoutube.migrator.matching.engine.MatchDecision;
 
-import java.util.Collections;
 import java.util.Map;
 
 /**

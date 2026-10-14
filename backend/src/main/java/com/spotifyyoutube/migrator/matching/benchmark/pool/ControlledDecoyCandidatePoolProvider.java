@@ -70,7 +70,7 @@ public class ControlledDecoyCandidatePoolProvider implements BenchmarkCandidateP
         // 3. Assemble pool with deterministic placement
         if (targetCandidate != null) {
             // Place target deterministically within the pool rather than always at index 0
-            int insertIndex = Math.abs(example.id().hashCode()) % (decoys.size() + 1);
+            int insertIndex = (example.id().hashCode() & 0x7fffffff) % (decoys.size() + 1);
             pool.addAll(decoys);
             pool.add(insertIndex, targetCandidate);
         } else {

@@ -110,6 +110,14 @@ class BenchmarkDatasetTest {
                     .isInstanceOf(NullPointerException.class)
                     .hasMessageContaining("examples");
         }
+
+        @Test
+        @DisplayName("should allow empty examples list in constructor")
+        void shouldAllowEmptyExamplesListInConstructor() {
+            BenchmarkDataset emptyDataset = new BenchmarkDataset("1.0.0", "desc", "2026-10-13", List.of());
+            assertThat(emptyDataset.examples()).isEmpty();
+            assertThat(emptyDataset.size()).isZero();
+        }
     }
 
     @Nested

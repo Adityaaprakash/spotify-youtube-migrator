@@ -5,7 +5,6 @@ import com.spotifyyoutube.migrator.matching.benchmark.BenchmarkTrackCategory;
 import com.spotifyyoutube.migrator.matching.benchmark.metric.BenchmarkMetrics;
 import com.spotifyyoutube.migrator.matching.benchmark.runner.EvaluationExclusionReason;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;

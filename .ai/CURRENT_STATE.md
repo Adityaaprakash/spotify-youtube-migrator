@@ -538,20 +538,22 @@ Current Subphase: Phase 8A, 8B, 8C, 8D COMPLETE; Phase 8E PENDING
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 8C (Benchmark Runner & Evaluation Metrics Calculation).
+- Phase 8E (Platt Scaling Parameter Fitting & Threshold Optimization).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 - Review & Correction Interface (Phase 10).
 - Playlist Creation (Phase 11).
 
 ## Current Verification
-- Backend Compilation: `.\mvnw.cmd test-compile`
-- Checkstyle: `.\mvnw.cmd checkstyle:check`
-- Phase 8A/8B Test Suite: 4 test classes (`BenchmarkExampleTest`, `BenchmarkDatasetTest`, `BenchmarkDatasetValidatorTest`, `BenchmarkDatasetLoaderTest`)
+- Backend Compilation: `.\mvnw.cmd test-compile` (Terminal execution status: **BLOCKED — NOT EXECUTED** due to IDE command-permission broker)
+- Checkstyle: `.\mvnw.cmd checkstyle:check` (Terminal execution status: **BLOCKED — NOT EXECUTED**)
+- Benchmark Test Suite (11 test classes):
+  - Phase 8A/8B: `BenchmarkExampleTest`, `BenchmarkDatasetTest`, `BenchmarkDatasetValidatorTest`, `BenchmarkDatasetLoaderTest`
+  - Phase 8C/8D: `BenchmarkRunnerTest`, `RankingMetricsCalculatorTest`, `DecisionPolicyMetricsCalculatorTest`, `HighConfidenceMetricsCalculatorTest`, `CalibrationMetricsCalculatorTest`, `ErrorAnalysisCalculatorTest`, `BenchmarkReportTest`
 - Matching Engine Regression Suite (18 test classes): 274 tests
 - Complete Matching Subsystem Coverage: 24 test classes, 333 tests total
 - Focused Candidate Discovery & Mapping Suite: 133 tests
 - Focused Normalization Test Suite: 227 tests
-- Full Non-Repository Unit Test Suite: 100% passing across domain, identity, spotify, youtube, migration, playlist, matching
+- Full Non-Repository Unit Test Suite: Statically verified across domain, identity, spotify, youtube, migration, playlist, matching
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): Docker daemon unavailable in environment
 
 ## Phase Freeze Status
