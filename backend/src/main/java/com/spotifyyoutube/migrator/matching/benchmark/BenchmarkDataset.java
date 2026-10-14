@@ -100,6 +100,16 @@ public record BenchmarkDataset(
     }
 
     /**
+     * Alias for {@link #getExamplesByVerificationStatus(BenchmarkVerificationStatus)}.
+     *
+     * @param status verification status
+     * @return unmodifiable list of matching examples
+     */
+    public List<BenchmarkExample> getExamplesByStatus(BenchmarkVerificationStatus status) {
+        return getExamplesByVerificationStatus(status);
+    }
+
+    /**
      * Filters examples by track typology category.
      *
      * @param category track category
@@ -126,7 +136,13 @@ public record BenchmarkDataset(
         int noMatch = 0;
 
         Map<BenchmarkDatasetSplit, Integer> splitCounts = new EnumMap<>(BenchmarkDatasetSplit.class);
+        for (BenchmarkDatasetSplit split : BenchmarkDatasetSplit.values()) {
+            splitCounts.put(split, 0);
+        }
         Map<BenchmarkTrackCategory, Integer> categoryCounts = new EnumMap<>(BenchmarkTrackCategory.class);
+        for (BenchmarkTrackCategory category : BenchmarkTrackCategory.values()) {
+            categoryCounts.put(category, 0);
+        }
 
         for (BenchmarkExample e : examples) {
             switch (e.verificationStatus()) {

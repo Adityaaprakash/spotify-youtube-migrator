@@ -1,11 +1,61 @@
 # Current State
 
-Last Updated: 2026-10-13
+Last Updated: 2026-10-14
 
-Current Phase: Phase 8 — Matching Evaluation & Benchmark (IN PROGRESS: 8A+8B COMPLETE)
-Current Subphase: Phase 8A + 8B COMPLETE (Benchmark Foundation & Ground-Truth Dataset); Phase 8C PENDING
+Current Phase: Phase 8 — Matching Evaluation & Benchmark (IN PROGRESS: 8A+8B+8C+8D COMPLETE)
+Current Subphase: Phase 8A, 8B, 8C, 8D COMPLETE; Phase 8E PENDING
 
 ## Completed
+### Phase 8C + 8D (Benchmark Runner, Evaluation Metrics & Error Analysis)
+- **Phase 8C (Benchmark Runner & Candidate Pool Sourcing)**:
+  - Package: `com.spotifyyoutube.migrator.matching.benchmark.pool`, `com.spotifyyoutube.migrator.matching.benchmark.runner`
+  - Candidate Pool Strategy Abstraction (`BenchmarkCandidatePoolProvider`):
+    - Decouples candidate generation from live YouTube APIs to ensure deterministic, reproducible offline evaluation.
+    - `ControlledDecoyCandidatePoolProvider`: Generates deterministic, challenging distractors (live versions, covers, remixes, and different artists with the same title) alongside the ground-truth target candidate for positive matches. Clearly labels synthetic candidates with `decoy_...` identifiers and reports `hasRealisticPool = false`.
+    - `FixtureCandidatePoolProvider`: Supports loading pre-recorded, version-controlled candidate fixtures mapped by example ID.
+    - `TargetOnlyCandidatePoolProvider`: Non-discriminating baseline passing only the single expected candidate for isolated component regression testing.
+    - `EmptyCandidatePoolProvider`: Returns zero candidates for testing candidate recall / discovery failures.
+  - Evaluation Eligibility Engine (`BenchmarkEligibilityPolicy`):
+    - Excludes `UNVERIFIED` examples (specifically `BM-0029`) and `DISPUTED` examples from official metrics by default.
+    - Supports targeted evaluation by dataset split (`forSplit(DEV/VALIDATION/TEST)`) and diagnostic runs (`diagnosticPolicy()`).
+    - Reports explicit exclusion reasons (`UNVERIFIED_STATUS`, `DISPUTED_STATUS`, `SPLIT_EXCLUDED`, `CATEGORY_EXCLUDED`, `EMPTY_CANDIDATE_POOL`, `INVALID_SOURCE_METADATA`, `EXECUTION_FAILURE`).
+  - Runner Execution Engine (`BenchmarkRunner`, `DefaultBenchmarkRunner`):
+    - Validates dataset schema via `BenchmarkDatasetValidator.validateAndThrow(dataset)`.
+    - Normalizes source track metadata via Phase 5 `NormalizationOrchestrator` without modifying frozen Phase 5 code.
+    - Invokes frozen Phase 7 `TrackMatchingEngine.matchTrack(request)` through its real public contract without modifying Phase 7.
+    - Maps predictions, ranked candidate evaluations, confidence levels, execution durations, and deterministic error classifications into immutable `BenchmarkExampleResult` records.
+    - Aggregates execution outcomes into `BenchmarkRunResult`.
+- **Phase 8D (Evaluation Metrics, Calibration & Reporting)**:
+  - Package: `com.spotifyyoutube.migrator.matching.benchmark.metric`, `com.spotifyyoutube.migrator.matching.benchmark.report`
+  - Candidate Ranking Metrics (`RankingMetricsCalculator`, `RankingMetrics`):
+    - Evaluates Top-1 and Top-3 accuracy strictly on eligible positive `MATCH` examples.
+    - Reports metrics across both all eligible positive examples and the candidate-present subset to separate discovery recall failures from ranking errors.
+    - Enforces safe zero-denominator behavior returning clean undefined/null states instead of NaN.
+    - Never counts legitimate `NO_MATCH` examples as Top-1 matches.
+  - Decision Policy & Confusion Metrics (`DecisionPolicyMetricsCalculator`, `DecisionPolicyMetrics`):
+    - Formulates an explicit 6-way mutually exclusive confusion matrix: `correctAutoAccept` (TP), `wrongCandidateAccepted` (FP), `falseAcceptanceOfNoMatch` (FP), `reviewRequiredPositive` (Abstention on match), `reviewRequiredNoMatch` (Abstention on non-match), `correctNoMatch` (TN), `incorrectRejection` (FN).
+    - Calculates precision, recall, false positive rate, false negative rate, NO_MATCH precision, NO_MATCH recall, review rate, automatic acceptance rate, and overall accuracy.
+    - Preserves decision coverage and prevents `REVIEW_REQUIRED` abstentions from artificially inflating precision.
+  - High-Confidence Error Rate (`HighConfidenceMetricsCalculator`, `HighConfidenceMetrics`):
+    - Evaluates false acceptance rates above probability threshold (0.90).
+    - Honestly reports `available = false` when operating against the default uncalibrated matching engine baseline (`DefaultMatchProbabilityCalibrator` baseline mode).
+  - Statistical Probability Calibration (`CalibrationMetricsCalculator`, `CalibrationMetrics`):
+    - Computes empirical Brier score ($\frac{1}{N} \sum (p_i - y_i)^2$), empirical baseline comparative Brier score ($\bar{y}(1-\bar{y})$), Expected Calibration Error (ECE), reliability diagram bins, and mean confidence for correct vs. incorrect predictions.
+  - Structured Error Analysis (`ErrorAnalysisCalculator`, `BenchmarkErrorAnalysis`):
+    - Classifies 14 structured error categories (`CORRECT_MATCH`, `CORRECT_NO_MATCH`, `WRONG_TARGET_SELECTED`, `TARGET_ABSENT_FROM_CANDIDATE_POOL`, `FALSE_ACCEPTANCE_OF_NO_MATCH`, `FALSE_NO_MATCH_FOR_POSITIVE`, `REVIEW_REQUIRED`, `VERSION_MISMATCH`, `ARTIST_TITLE_CONFUSION`, `EXECUTION_FAILURE`, `EXCLUDED_UNVERIFIED`, `EXCLUDED_DISPUTED`, `EXCLUDED_INELIGIBLE`, `UNKNOWN_ERROR`).
+    - Aggregates distributions overall and sliced by split, category, expected outcome, and predicted decision.
+  - Evaluation Reporting Engine (`BenchmarkEvaluationReport`, `BenchmarkReportGenerator`, `BenchmarkReportFormatter`):
+    - Generates complete evaluation reports and formats them into GitHub Flavored Markdown (with tables and alerts) and plain text.
+    - Documents evaluation limitations and notes held-out discipline for the `TEST` split.
+- **Phase 8C + 8D Automated Tests**:
+  - `BenchmarkRunnerTest`: 10 comprehensive tests covering positive Top-1, positive Top-3, target absent recall failure, legitimate NO_MATCH, REVIEW_REQUIRED version mismatch, unverified/disputed exclusion by default, diagnostic policy inclusion, split filtering, execution failure handling, deterministic repeatability, and full 118-track dataset execution.
+  - `RankingMetricsCalculatorTest`: Hand-calculated tests for Top-1/Top-3 over all vs. present subsets, recall rate, zero denominators, and NO_MATCH exclusion.
+  - `DecisionPolicyMetricsCalculatorTest`: Hand-calculated 6-way confusion matrix verification, precision, recall, FPR, FNR, review rate, auto-accept rate, and zero-denominator safety.
+  - `HighConfidenceMetricsCalculatorTest`: Hand-calculated high-confidence error rate, uncalibrated baseline honest unavailability reporting, and thresholding.
+  - `CalibrationMetricsCalculatorTest`: Hand-calculated Brier score, baseline score, ECE across reliability bins, empty bucket handling, and uncalibrated baseline unavailability reporting.
+  - `ErrorAnalysisCalculatorTest`: Multi-dimensional aggregation across splits, categories, outcomes, decisions, and empty-slice verification.
+  - `BenchmarkReportTest`: End-to-end report generation, Markdown formatting, plain text formatting, and limitations note emission.
+
 ### Phase 8A + 8B (Benchmark Architecture and Ground-Truth Dataset)
 - **Phase 8A (Benchmark Architecture and Dataset Contract)**:
   - Package: `com.spotifyyoutube.migrator.matching.benchmark`
@@ -523,7 +573,9 @@ Current Subphase: Phase 8A + 8B COMPLETE (Benchmark Foundation & Ground-Truth Da
 - **Phase 8 (Matching Evaluation & Benchmark)**: IN PROGRESS
   - **Phase 8A (Benchmark Architecture and Dataset Contract)**: COMPLETE
   - **Phase 8B (Ground-Truth Benchmark Dataset)**: COMPLETE
-  - **Phase 8C (Benchmark Runner & Evaluation Metrics)**: NOT STARTED / PENDING
+  - **Phase 8C (Benchmark Runner & Candidate Pool Sourcing)**: COMPLETE
+  - **Phase 8D (Evaluation Metrics, Calibration & Error Analysis)**: COMPLETE
+  - **Phase 8E (Platt Scaling Parameter Fitting & Test Evaluation)**: NOT STARTED / PENDING
 
 ## Next Recommended Work
-1. Phase 8C: Benchmark Runner & Evaluation Metrics (evaluate frozen Phase 7 engine against the 118-track dataset, calculate Top-1, Top-3, Precision, Recall, False-Positive Rate, calibration metrics).
+1. Phase 8E: Empirical probability calibration fitting (fit logistic Platt scaling parameters $A$ and $B$ on VALIDATION split, evaluate calibration curves against held-out TEST split).

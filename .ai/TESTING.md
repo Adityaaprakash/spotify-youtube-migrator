@@ -272,12 +272,10 @@ Verified across the comprehensive matching regression suite and focused Phase 7H
 - Phase 7A–7H Matching Regression Suite (18 test classes):
   - Classes: `SourceTrackFeaturesTest`, `CandidateTrackFeaturesTest`, `DefaultTrackFeatureExtractorTest`, `TitleSimilarityScorerTest`, `ArtistSimilarityScorerTest`, `DurationSimilarityScorerTest`, `AlbumSimilarityScorerTest`, `VersionPenaltyScorerTest`, `CandidateSimilarityScorerIntegrationTest`, `OfficialSignalScorerTest`, `CompositeScoreCalculatorTest`, `CandidateRankingEngineTest`, `MatchDecisionEngineTest`, `TrackMatchingEngineIntegrationTest`, `CalibrationResultTest`, `DefaultMatchProbabilityCalibratorTest`, `TrackMatchResultTest`, `CandidateMatchEvaluationTest`.
   - Results: 274 tests run, 0 failures, 0 errors, 0 skipped.
-- Total Matching Subsystem Test Coverage: 24 test classes, 333 tests total, 100% passing.
-- Checkstyle: 0 violations across all backend source files.
 - Phase 5 & Phase 6 Boundary Audit: 100% untouched and preserved.
 
-### Benchmark Subsystem Testing Scope (Phase 8A + 8B Complete)
-Implemented and verified across 4 dedicated test classes:
+### Benchmark Subsystem Testing Scope (Phase 8A, 8B, 8C, 8D Complete)
+Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7 Phase 8C/8D runner and evaluation test classes):
 - `BenchmarkExampleTest`: 8 tests across 4 nested classes:
   - Positive match invariants: verified construction, target candidate retention, rejection of positive matches with null targets.
   - No-match invariants: verified construction, null target representation, rejection of no-match examples carrying target candidates.
@@ -294,14 +292,82 @@ Implemented and verified across 4 dedicated test classes:
 - `BenchmarkDatasetLoaderTest`: 9 tests across 2 nested classes:
   - Default ground-truth dataset loading: loads `ground_truth_benchmark.json` from classpath, verifies target threshold ($\ge 100$, actual 118 tracks), verifies 105 matches and 13 legitimate non-matches, 117 verified and 1 unverified record, confirms presence in all 3 splits (`DEV` 52, `VALIDATION` 36, `TEST` 30), verifies typology coverage across all 17 categories, and asserts strict invariants on all 118 records.
   - Serialization and round-trip: JSON round-trip via `toJson` and `loadFromJson`, non-existent resource error handling, malformed JSON error handling, semantically invalid dataset rejection via `BenchmarkValidationException`.
+- `BenchmarkRunnerTest` (Phase 8C): 11 tests:
+  - Positive example with correct target ranked first (`isTop1Match == true`).
+  - Positive example with target in top 3 but not first (`isTop3Match == true, isTop1Match == false`).
+  - Target absent from candidate pool correctly classified as candidate recall failure (`TARGET_ABSENT_FROM_CANDIDATE_POOL`).
+  - Legitimate NO_MATCH example produces `CORRECT_MATCH` with no candidate selected.
+  - Positive example with wrong candidate selected classified as `WRONG_TARGET_SELECTED`.
+  - Borderline / penalty candidate classified as `REVIEW_REQUIRED`.
+  - Default eligibility policy excludes `UNVERIFIED` example (`BM-0029`) from scored evaluation.
+  - Default eligibility policy excludes `DISPUTED` examples from scored evaluation.
+  - Empty candidate pool handled gracefully without unhandled exceptions.
+  - Determinism across repeated executions producing identical scores and ranks.
+  - Engine execution failure captured with structured `EXECUTION_FAILURE` error category without silent omission.
+- `RankingMetricsCalculatorTest` (Phase 8D): 8 tests:
+  - Top-1 and Top-3 accuracy calculation against hand-crafted counts.
+  - Disaggregation of overall Top-1/Top-3 vs. candidate-present Top-1/Top-3.
+  - Candidate recall rate calculation and absent target reporting.
+  - NO_MATCH examples excluded from ranking denominators.
+  - Zero-denominator handling returning `OptionalDouble.empty()`.
+  - Empty results list handling returning zeroed evaluable metrics.
+  - Rejection of null results collection with `NullPointerException`.
+  - Immutability and determinism of metric objects.
+- `DecisionPolicyMetricsCalculatorTest` (Phase 8D): 10 tests:
+  - 6-way confusion matrix counts verified against hand-calculated expected values.
+  - Precision, Recall, False-Positive Rate, False-Negative Rate verified.
+  - NO_MATCH detection precision and recall calculations verified.
+  - `REVIEW_REQUIRED` rate and automatic acceptance rate verified.
+  - Correct abstention vs. incorrect rejection classification verified.
+  - Zero-denominator handling returning `OptionalDouble.empty()` across all rate formulas.
+  - Empty result set handling returning zero counts and empty optional rates.
+  - Rejection of null results collection.
+  - Independent calculation without internal cross-coupling.
+  - Complete metric object immutability and record semantics.
+- `HighConfidenceMetricsCalculatorTest` (Phase 8D): 6 tests:
+  - High-confidence incorrect match rate calculation with hand-calculated values at threshold 0.90.
+  - High-confidence correct match calculation at threshold 0.90.
+  - Uncalibrated baseline handling: reports `available = false` and `unavailableReason` when probabilities are null.
+  - Zero high-confidence predictions handling returning `OptionalDouble.empty()`.
+  - Threshold validation rejecting values outside `(0.0, 1.0]`.
+  - Empty results handling returning zero counts.
+- `CalibrationMetricsCalculatorTest` (Phase 8D): 8 tests:
+  - Brier score calculation verified against hand-calculated ground-truth formula $\frac{1}{N}\sum(p_i - y_i)^2$.
+  - Empirical baseline comparative Brier score verified ($\bar{y}(1-\bar{y})$).
+  - Expected Calibration Error (ECE) verified across 10 equal-width bins $[0.0, 1.0]$.
+  - Reliability bucket assignments and empty-bucket behavior verified.
+  - Mean confidence calculation for correct vs. incorrect predictions verified.
+  - Uncalibrated baseline handling: reports `available = false` when calibrated probabilities are absent.
+  - Zero-denominator safety on empty results.
+  - Rejection of invalid bucket counts ($\le 0$).
+- `ErrorAnalysisCalculatorTest` (Phase 8D): 7 tests:
+  - Aggregate error classification counts verified against hand-calculated ground truth.
+  - Slicing and aggregation by dataset split (`DEV`, `VALIDATION`, `TEST`).
+  - Slicing and aggregation by track category (17 categories).
+  - Slicing and aggregation by expected outcome (`MATCH`, `NO_MATCH`) and predicted decision.
+  - Empty slices explicitly marked with 0 evaluable records.
+  - Rejection of null results collection.
+  - Immutability of aggregated error structures.
+- `BenchmarkReportTest` (Phase 8D): 6 tests:
+  - Report model generation from runner results via `BenchmarkReportGenerator`.
+  - Markdown report generation via `BenchmarkReportFormatter` containing all required headers and tables.
+  - Plain-text summary generation for console/CI logs.
+  - Excluded records table verification displaying example ID, status, and reason.
+  - Data limitation and candidate pool provenance transparency notes verification.
+  - Numerical consistency: summary totals reconcile exactly with per-example slice sums.
 
-## Future Testing Scope (Phase 8C+)
+## Future Testing Scope (Phase 8E+)
 As the migrator logic scales, testing will expand to:
-- Benchmark Runner & Metric Evaluation Test Suite (Phase 8C: Top-1, Top-3, Precision, Recall, False-Positive Rate, Platt scaling parameter fitting)
-- Migration State Machine & Orchestration Test Suite (Phase 9 & Phase 12)
-- Review & Correction Flow Testing (Phase 10)
-- Destination Playlist Creation Testing (Phase 11)
-- Full End-to-End Migration Flow Testing
+- Probability Calibration Parameter Fitting & Validation (Phase 8E: Platt scaling parameter fitting using `VALIDATION` split, held-out `TEST` split evaluation, calibration verification).
+- Decision Threshold Optimization (Phase 8E: empirical ROC/PR threshold sweeps, confidence margin tuning).
+- Migration State Machine & Orchestration Test Suite (Phase 9 & Phase 12).
+- Review & Correction Flow Testing (Phase 10).
+- Destination Playlist Creation Testing (Phase 11).
+- Full End-to-End Migration Flow Testing.
+
+## Test Execution Status
+- **Phase 8C & 8D Tests**: **BLOCKED — NOT EXECUTED** due to IDE command-permission broker blocking terminal execution (`permission check failed: unexpected user interaction type: not permission`).
+- **Static Verification**: All 11 benchmark test classes and 14 implementation classes were statically inspected, type-checked against frozen interfaces, and designed with hand-calculated test fixtures and rigorous edge-case coverage. Zero modifications were made to frozen Phase 5, Phase 6, or Phase 7 production files.
 
 ## Current Blockers & Status
 - **Phase 7 Complete & Frozen**: Full Matching Engine subsystem (Phases 7A–7I) verified with 274 regression tests passing across 18 test classes (333 tests across 24 test classes), 0 Checkstyle violations, and full contract invariant verification. Phase 7 is **FROZEN**.

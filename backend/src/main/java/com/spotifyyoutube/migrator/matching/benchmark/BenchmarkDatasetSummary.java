@@ -29,4 +29,32 @@ public record BenchmarkDatasetSummary(
         countBySplit = countBySplit != null ? Map.copyOf(countBySplit) : Map.of();
         countByCategory = countByCategory != null ? Map.copyOf(countByCategory) : Map.of();
     }
+
+    public int verifiedCount() {
+        return verifiedExamples;
+    }
+
+    public int unverifiedCount() {
+        return unverifiedExamples;
+    }
+
+    public int disputedCount() {
+        return disputedExamples;
+    }
+
+    public int matchCount() {
+        return positiveMatches;
+    }
+
+    public int noMatchCount() {
+        return noMatches;
+    }
+
+    public Map<BenchmarkDatasetSplit, Integer> splitCounts() {
+        return countBySplit;
+    }
+
+    public Map<BenchmarkTrackCategory, Integer> categoryCounts() {
+        return countByCategory;
+    }
 }

@@ -96,15 +96,27 @@ Controllers MUST NOT:
   - **Decision Policy Gates**: Transparent 7-gate decision policy enforces safety gates: empty candidates ($\to$ `NO_MATCH`), version penalty $> 0.10$ on viable candidate ($\to$ `REVIEW_REQUIRED`), score $< 0.50$ ($\to$ `NO_MATCH`), borderline score $0.50 \le s < 0.75$ ($\to$ `REVIEW_REQUIRED`), ambiguity margin $< 0.05$ ($\to$ `REVIEW_REQUIRED`). Probability divergence gate applies strictly to empirically validated models.
   - **Subsystem Freeze**: The Matching Engine subsystem is complete, verified, and **FROZEN** at Phase 7I.
 
-## Benchmark & Evaluation Layer (Phase 8A + 8B)
+## Benchmark & Evaluation Layer (Phase 8A, 8B, 8C, 8D)
 
-- Package: `com.spotifyyoutube.migrator.matching.benchmark`
+- Packages:
+  - Core & Dataset: `com.spotifyyoutube.migrator.matching.benchmark`
+  - Candidate Pools: `com.spotifyyoutube.migrator.matching.benchmark.pool`
+  - Runner & Execution Models: `com.spotifyyoutube.migrator.matching.benchmark.runner`
+  - Metric Calculators: `com.spotifyyoutube.migrator.matching.benchmark.metric`
+  - Evaluation Reporting: `com.spotifyyoutube.migrator.matching.benchmark.report`
 - Resources: `benchmark/ground_truth_benchmark.json`
-- Purpose: Ground-truth benchmark data architecture, dataset validation, offline dataset loading, and auditable verification for evaluating matching performance.
+- Architecture Decisions: ADR-018 (Dataset & Foundation), ADR-019 (Runner & Metrics)
+- Purpose: Ground-truth benchmark data architecture, candidate pool management, deterministic benchmark execution against frozen matching engine, rigorous multi-dimensional evaluation metrics, probability calibration assessment, structured error analysis, and CI/diagnostic reporting.
 - Architecture Rules:
-  - **Zero Production Intrusion**: Benchmark domain models, validation, and dataset loaders MUST NOT modify, alter, or introduce branches into the frozen Phase 5 normalization engine, Phase 6 candidate discovery, or Phase 7 matching engine.
+  - **Zero Production Intrusion**: Benchmark domain models, runner, candidate pool providers, and metric calculators MUST NOT modify, alter, or introduce branches into the frozen Phase 5 normalization engine, Phase 6 candidate discovery, or Phase 7 matching engine.
   - **Explicit Outcome Representation**: Matches (`MATCH`) and legitimate non-matches (`NO_MATCH`) MUST be represented unambiguously as explicit enum variants. A non-match MUST NOT be represented as a match with a null video ID.
   - **Strong Invariant Validation**: `BenchmarkExample` enforces constructor invariants: positive matches require non-null `BenchmarkTargetCandidate`; non-matches forbid target candidates; `VERIFIED` status requires non-blank `verificationEvidence`.
   - **Deterministic Validator**: `BenchmarkDatasetValidator` enforces semantic versioning, uniqueness of example IDs, completeness of mandatory metadata, and produces itemized fatal errors and non-fatal warnings without silently modifying data.
   - **Offline Storage & Jackson Loading**: Benchmark datasets are stored in version-controlled JSON on the classpath and parsed using `BenchmarkDatasetLoader` without live network calls, remote databases, or container dependencies.
-  - **Future Runner Integration Contract**: Future Phase 8C benchmark runner will consume `BenchmarkDatasetLoader.loadDefault()` and evaluate the frozen `TrackMatchingEngine` without conflating ground truth, predicted matches, candidate sets, decision outcomes, or human review statuses.
+  - **Candidate-Pool Integrity**: The runner MUST NOT leak ground-truth targets into candidate pools to guarantee predictions. Ranking evaluation against trivial single-candidate pools is rejected. Where realistic pre-recorded discovery fixtures are absent, `ControlledDecoyCandidatePoolProvider` supplies deterministic synthetic decoys (covers, live variants, remixes, alternate artist distractors) for component verification while explicitly reporting `hasRealisticPool() = false`.
+  - **Candidate Recall vs. Ranking Distinction**: When a target candidate is absent from the candidate pool, it is classified strictly as a candidate-recall/retrieval failure (`TARGET_ABSENT_FROM_CANDIDATE_POOL`), never hidden as a ranking failure.
+  - **Default Evaluation Eligibility Policy**: Unverified records (e.g. `BM-0029`) and disputed records are excluded by default from scored evaluation metrics and reported transparently under excluded records with documented reasons (`UNVERIFIED_STATUS`, `DISPUTED_STATUS`). Diagnostic mode allows inspecting excluded records without skewing formal metrics.
+  - **TEST Split Protection**: The 30-track `TEST` split remains strictly held out. Phase 8C/8D does not tune matching thresholds or Platt scaling parameters.
+  - **Mathematical Metric Rigor & Zero-Denominator Safety**: Every metric calculator enforces documented mathematical definitions and returns empty/uncomputable states (`OptionalDouble.empty()`, `rate = null`) instead of `NaN`, `Infinity`, or misleading zeros when denominators are empty.
+  - **Decision Policy Clarity**: Metrics distinguish 6 discrete outcomes: correct auto-accept, wrong candidate auto-accept, false acceptance of no-match, review required (positive), review required (no-match), and correct no-match. `REVIEW_REQUIRED` is treated as human escalation/abstention and never conflated with automatic match or automatic rejection.
+  - **Honest Probability Semantics**: `HighConfidenceMetricsCalculator` and `CalibrationMetricsCalculator` evaluate probability calibration only when valid calibrated probabilities are present. Under the frozen uncalibrated baseline (`calibratedProbability = null`), metrics report `available = false` rather than misrepresenting heuristic composite similarity scores as probabilities.

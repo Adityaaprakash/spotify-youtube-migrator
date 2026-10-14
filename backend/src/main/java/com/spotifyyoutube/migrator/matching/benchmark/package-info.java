@@ -14,9 +14,18 @@
  *   <li><b>Phase 8B (Ground-Truth Benchmark Dataset):</b> Version-controlled, representative
  *       ground-truth dataset with positive matches and legitimate non-matches across diverse
  *       track categories (DEV, VALIDATION, and TEST splits).</li>
- *   <li><b>Phase 8C (Future Benchmark Runner Contract):</b> Decoupled integration contract
- *       where a benchmark runner evaluates matching accuracy (Top-1, Top-3, Precision, Recall,
- *       Brier score, calibration curve) against fixed ground truth.</li>
+ *   <li><b>Phase 8C (Benchmark Runner &amp; Candidate Pools):</b>
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.runner.BenchmarkRunner},
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.runner.DefaultBenchmarkRunner},
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.runner.BenchmarkEligibilityPolicy},
+ *       and {@link com.spotifyyoutube.migrator.matching.benchmark.pool.BenchmarkCandidatePoolProvider}.</li>
+ *   <li><b>Phase 8D (Evaluation Metrics &amp; Error Analysis):</b>
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.metric.RankingMetricsCalculator},
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.metric.DecisionPolicyMetricsCalculator},
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.metric.HighConfidenceMetricsCalculator},
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.metric.CalibrationMetricsCalculator},
+ *       {@link com.spotifyyoutube.migrator.matching.benchmark.metric.ErrorAnalysisCalculator},
+ *       and {@link com.spotifyyoutube.migrator.matching.benchmark.report.BenchmarkReportGenerator}.</li>
  * </ul>
  */
 package com.spotifyyoutube.migrator.matching.benchmark;
