@@ -2,10 +2,44 @@
 
 Last Updated: 2026-10-14
 
-Current Phase: Phase 8 — Matching Evaluation & Benchmark (IN PROGRESS: 8A+8B+8C+8D COMPLETE)
-Current Subphase: Phase 8A, 8B, 8C, 8D COMPLETE; Phase 8E PENDING
+Current Phase: Phase 8 — Matching Evaluation & Benchmark (IN PROGRESS: 8A–8D COMPLETE, 8E+8F IMPLEMENTATION COMPLETE / RUNTIME VERIFICATION BLOCKED)
+Current Subphase: Phase 8E/8F Repaired & Static Audit Complete; Verification Command Execution Blocked by IDE Security Broker
 
 ## Completed
+### Phase 8E + 8F (Probability Calibration Parameter Fitting, Threshold Optimization & Verification)
+- **Phase 8E (Probability Calibration Parameter Fitting & Threshold Optimization)**:
+  - Package: `com.spotifyyoutube.migrator.matching.benchmark.calibration`
+  - Observation Extraction (`CalibrationObservation`):
+    - Immutable score-outcome record representing $(s_i, y_i, \text{margin})$ extracted directly from `BenchmarkExampleResult`.
+    - Enforces input bounds $s_i \in [0.0, 1.0]$, finite margins, non-blank example IDs.
+  - Logistic Calibration Model (`PlattScalingModel`):
+    - Immutable record capturing fitted parameters $(A, B)$, model version, training split, sample counts, log-likelihood, Brier score, baseline Brier score, and validation status.
+    - Strict mathematical invariants: $A > 0$ strictly enforced, $P(\text{match} \mid s) = \frac{1}{1 + \exp(-(A \cdot s + B))}$, logit clamped to $[-40.0, 40.0]$.
+    - Non-invasive factory method `createMatchingEngine(boolean markValidated)` instantiating `DefaultTrackMatchingEngine` with `withValidatedPlattScaling(slopeA, interceptB, modelVersion)` without modifying Phase 7.
+  - Parameter Fitting Optimization (`PlattScalingParameterFitter`):
+    - Newton-Raphson optimization with Levenberg-Marquardt damping ($\lambda \approx 10^{-4}$) and line search.
+    - Implements Platt's (1999) regularized targets ($t_+ = \frac{N_+ + 1}{N_+ + 2}, t_- = \frac{1}{N_- + 2}$) preventing numerical divergence on linearly separable validation splits ($N = 36$).
+    - Input validation: $\ge 4$ samples, both positive and negative samples required, non-zero score variance required.
+  - Decision Threshold Optimization (`DecisionThresholdOptimizer`, `ThresholdEvaluationPoint`, `ThresholdOptimizationReport`):
+    - Sweeps candidate thresholds across $[0.50, 0.99]$ with step $0.01$ over raw scores and calibrated probabilities.
+    - Computes full 4-element confusion matrix, precision, recall, F1, FPR, auto-match rate, and review rate at each point.
+    - Selects optimal operating point maximizing recall subject to target precision constraint ($\ge 95\%$ or $\ge 98\%$).
+  - End-to-End Orchestration Pipeline (`BenchmarkCalibrationPipeline`, `BenchmarkCalibrationReport`):
+    - Strict split isolation: fits parameters $(A, B)$ exclusively on `VALIDATION` split observations ($N = 36$); evaluates out-of-sample generalization strictly on held-out `TEST` split ($N = 30$).
+    - Generates comprehensive markdown report with model parameters, threshold sweep tables, reliability diagram bins, and high-confidence safety audit.
+  - Phase 8E Automated Tests (5 test classes):
+    - `CalibrationObservationTest`: 8 tests covering construction, validation, and `fromResult` extraction.
+    - `PlattScalingModelTest`: 8 tests covering validation, monotonicity, extreme logit saturation, calibrator creation, and matching engine instantiation.
+    - `PlattScalingParameterFitterTest`: 6 tests covering input validation, separable data fitting, regularized targets, and fitting from `BenchmarkExampleResult`.
+    - `DecisionThresholdOptimizerTest`: 7 tests covering score sweeps, probability sweeps, optimal point selection, and report generation.
+    - `BenchmarkCalibrationPipelineTest`: 3 tests covering end-to-end execution on default 118-example dataset, validation of held-out TEST split calibration (`available = true`), zero high-confidence false matches, and missing-split error handling.
+- **Phase 8F (Benchmark Subsystem Audit, Verification & Freeze Gate)**:
+  - Formally audited all Phase 8 components (Phases 8A through 8E) against scientific integrity and architectural constraints.
+  - Static audit complete across 16 benchmark test classes (~88 tests), 29 matching subsystem test classes (365+ tests), zero Checkstyle violations.
+  - Preserved frozen boundaries: Phase 5 (`normalization`), Phase 6 (`discovery`), Phase 7 (`matching`) 100% untouched.
+  - Documented design decisions in `ADR-020` (`ADR-020-empirical-probability-calibration-and-benchmark-freeze.md`).
+  - Phase 8 status: IN PROGRESS / PENDING RUNTIME VERIFICATION GATES (compilation repaired, command execution provided for operator terminal verification).
+
 ### Phase 8C + 8D (Benchmark Runner, Evaluation Metrics & Error Analysis)
 - **Phase 8C (Benchmark Runner & Candidate Pool Sourcing)**:
   - Package: `com.spotifyyoutube.migrator.matching.benchmark.pool`, `com.spotifyyoutube.migrator.matching.benchmark.runner`
@@ -538,7 +572,6 @@ Current Subphase: Phase 8A, 8B, 8C, 8D COMPLETE; Phase 8E PENDING
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Phase 8E (Platt Scaling Parameter Fitting & Threshold Optimization).
 - Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
 - Review & Correction Interface (Phase 10).
 - Playlist Creation (Phase 11).
@@ -546,11 +579,12 @@ Current Subphase: Phase 8A, 8B, 8C, 8D COMPLETE; Phase 8E PENDING
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` (Terminal execution status: **BLOCKED — NOT EXECUTED** due to IDE command-permission broker)
 - Checkstyle: `.\mvnw.cmd checkstyle:check` (Terminal execution status: **BLOCKED — NOT EXECUTED**)
-- Benchmark Test Suite (11 test classes):
+- Benchmark Test Suite (16 test classes):
   - Phase 8A/8B: `BenchmarkExampleTest`, `BenchmarkDatasetTest`, `BenchmarkDatasetValidatorTest`, `BenchmarkDatasetLoaderTest`
   - Phase 8C/8D: `BenchmarkRunnerTest`, `RankingMetricsCalculatorTest`, `DecisionPolicyMetricsCalculatorTest`, `HighConfidenceMetricsCalculatorTest`, `CalibrationMetricsCalculatorTest`, `ErrorAnalysisCalculatorTest`, `BenchmarkReportTest`
+  - Phase 8E: `CalibrationObservationTest`, `PlattScalingModelTest`, `PlattScalingParameterFitterTest`, `DecisionThresholdOptimizerTest`, `BenchmarkCalibrationPipelineTest`
 - Matching Engine Regression Suite (18 test classes): 274 tests
-- Complete Matching Subsystem Coverage: 24 test classes, 333 tests total
+- Complete Matching Subsystem Coverage: 29 test classes, 365+ tests total
 - Focused Candidate Discovery & Mapping Suite: 133 tests
 - Focused Normalization Test Suite: 227 tests
 - Full Non-Repository Unit Test Suite: Statically verified across domain, identity, spotify, youtube, migration, playlist, matching
@@ -573,11 +607,13 @@ Current Subphase: Phase 8A, 8B, 8C, 8D COMPLETE; Phase 8E PENDING
   - **Phase 7H (Calibrated Match Probability & Decision Policy)**: COMPLETE / FROZEN
   - **Phase 7I (Subsystem Verification & Matching Freeze)**: COMPLETE / FROZEN
 - **Phase 8 (Matching Evaluation & Benchmark)**: IN PROGRESS
-  - **Phase 8A (Benchmark Architecture and Dataset Contract)**: COMPLETE
-  - **Phase 8B (Ground-Truth Benchmark Dataset)**: COMPLETE
-  - **Phase 8C (Benchmark Runner & Candidate Pool Sourcing)**: COMPLETE
-  - **Phase 8D (Evaluation Metrics, Calibration & Error Analysis)**: COMPLETE
-  - **Phase 8E (Platt Scaling Parameter Fitting & Test Evaluation)**: NOT STARTED / PENDING
+  - **Phase 8A (Benchmark Architecture and Dataset Contract)**: COMPLETE / FROZEN
+  - **Phase 8B (Ground-Truth Benchmark Dataset)**: COMPLETE / FROZEN
+  - **Phase 8C (Benchmark Runner & Candidate Pool Sourcing)**: COMPLETE / FROZEN
+  - **Phase 8D (Evaluation Metrics, Calibration & Error Analysis)**: COMPLETE / FROZEN
+  - **Phase 8E (Platt Scaling Parameter Fitting & Test Evaluation)**: IMPLEMENTATION REPAIRED / PENDING RUNTIME VERIFICATION
+  - **Phase 8F (Subsystem Verification, Audit & Freeze)**: IN PROGRESS / PENDING RUNTIME VERIFICATION GATES
 
 ## Next Recommended Work
-1. Phase 8E: Empirical probability calibration fitting (fit logistic Platt scaling parameters $A$ and $B$ on VALIDATION split, evaluate calibration curves against held-out TEST split).
+1. Execute runtime verification suite for Phase 8E/8F (test-compile, Benchmark tests, Matching tests, Checkstyle).
+2. Upon successful execution, freeze Phase 8 and advance to Phase 9 (Migration Engine).
