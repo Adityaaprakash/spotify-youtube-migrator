@@ -120,3 +120,30 @@ Controllers MUST NOT:
   - **Mathematical Metric Rigor & Zero-Denominator Safety**: Every metric calculator enforces documented mathematical definitions and returns empty/uncomputable states (`OptionalDouble.empty()`, `rate = null`) instead of `NaN`, `Infinity`, or misleading zeros when denominators are empty.
   - **Decision Policy Clarity**: Metrics distinguish 6 discrete outcomes: correct auto-accept, wrong candidate auto-accept, false acceptance of no-match, review required (positive), review required (no-match), and correct no-match. `REVIEW_REQUIRED` is treated as human escalation/abstention and never conflated with automatic match or automatic rejection.
   - **Honest Probability Semantics**: `HighConfidenceMetricsCalculator` and `CalibrationMetricsCalculator` evaluate probability calibration only when valid calibrated probabilities are present. Under the frozen uncalibrated baseline (`calibratedProbability = null`), metrics report `available = false` rather than misrepresenting heuristic composite similarity scores as probabilities.
+
+## Probability Calibration & Threshold Tuning Layer (Phase 8E, 8F)
+
+- Package: `com.spotifyyoutube.migrator.matching.benchmark.calibration`
+- Architecture Decisions: ADR-020 (Empirical Probability Calibration and Benchmark Subsystem Freeze)
+- Purpose: Estimation of Platt scaling logistic parameters $(A, B)$ on validation split, decision threshold optimization under precision constraints ($\ge 95\%$ or $\ge 98\%$), and held-out test split generalization verification.
+- Architecture Rules:
+  - **Regularized Targets**: Uses Platt (1999) regularized targets ($t_+ = \frac{N_+ + 1}{N_+ + 2}, t_- = \frac{1}{N_- + 2}$) to prevent divergence on linearly separable validation partitions.
+  - **Strict Split Isolation**: Calibration parameter fitting and threshold sweeps are performed strictly on `VALIDATION` split observations ($N = 36$). The `TEST` partition ($N = 30$) is strictly held out for generalization verification.
+  - **Monotonicity & Clamping**: Requires $A > 0$ and clamps logits to $[-40.0, 40.0]$ with stable log-sum-exp implementations.
+  - **Zero Frozen Code Intrusion**: The matching engine is instantiated via public constructor `DefaultTrackMatchingEngine` with `withValidatedPlattScaling(slopeA, interceptB, modelVersion)` without modifying Phase 5–7 production code.
+
+## Playlist Migration Orchestration & Evaluation Layer (Phase 8G, 8H)
+
+- Packages:
+  - Workflow Orchestration: `com.spotifyyoutube.migrator.migration.application.orchestration`
+  - Workflow Evaluation: `com.spotifyyoutube.migrator.migration.application.evaluation`
+- Architecture Decisions: ADR-021 (Playlist Migration Workflow Orchestration, Deduplication, and Verification)
+- Purpose: Connects source playlist metadata and track retrieval $\to$ Phase 5 normalization $\to$ Phase 6 candidate discovery $\to$ Phase 7 calibrated matching $\to$ Phase 4 destination playlist creation and sequential track addition, with comprehensive outcome accounting and offline workflow evaluation.
+- Architecture Rules:
+  - **Sequential Destination Ordering**: Destination insertions use explicit 0-indexed positions (`processedCount`) matching the destination playlist size, preserving relative source encounter order without holes when intermediate tracks fail or require review.
+  - **Partial Progress & Terminal State Integrity**: Individual track errors are caught, sanitized, and stored as `FAILED` tasks while subsequent tracks proceed. Playlist-level startup/metadata/destination failures transition the persistent job to terminal `FAILED` status with completion timestamps, preserving cause for diagnosis while protecting already completed jobs.
+  - **Review Holdback**: Ambiguous tracks requiring human review (`REVIEW_REQUIRED`) are held back from automated destination insertion to preserve destination playlist hygiene.
+  - **Deduplication**: Destination candidate deduplication prevents inserting duplicate video IDs into the target playlist within the migration run when enabled; allows duplicates when disabled.
+  - **Credential & Secret Protection**: All log messages, diagnostic strings, and `MigrationTask.errorMessage` records are sanitized with regex scrubbing of `Bearer` tokens, `access_token=`, `refresh_token=`, `token=`, `api_key=`, `apikey=`, `key=`, `client_secret=`, `secret=`, and `password=` values. Raw exception objects and stack traces are excluded from log statements.
+  - **Provider Isolation**: Provider-specific Spotify and YouTube DTOs remain strictly encapsulated in their respective packages; orchestration communicates via domain models and provider-neutral interfaces (`MusicDestination`, `SpotifyPlaylistService`).
+  - **Disjoint Metric Partition**: `MigrationWorkflowEvaluator` enforces a mutually exclusive partition where $\text{totalTracks} = \text{successfullyMigrated} + \text{unmatched} + \text{reviewRequired} + \text{duplicatePrevented} + \text{failedTracks}$, distinguishing between aggregate unmigrated database counts in `MigrationExecutionSummary.failedTracks` and genuine processing/API errors in `MigrationWorkflowEvaluationReport.failedTracks`.

@@ -16,4 +16,6 @@ public interface MigrationService {
     List<MigrationJob> getUserMigrationJobs(UUID userId);
 
     List<MigrationTask> getMigrationTasks(UUID jobId);
+
+    MigrationJob executeMigration(UUID jobId);
 }

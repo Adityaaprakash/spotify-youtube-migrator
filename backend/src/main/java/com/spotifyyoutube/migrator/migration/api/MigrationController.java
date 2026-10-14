@@ -45,4 +45,10 @@ public class MigrationController {
         var tasks = migrationService.getMigrationTasks(id);
         return ResponseEntity.ok(MigrationMapper.toTaskResponseList(tasks));
     }
+
+    @PostMapping("/{id}/execute")
+    public ResponseEntity<MigrationJobResponse> executeMigration(@PathVariable UUID id) {
+        var job = migrationService.executeMigration(id);
+        return ResponseEntity.ok(MigrationMapper.toJobResponse(job));
+    }
 }

@@ -116,4 +116,37 @@ public class MigrationControllerTest {
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"))
                 .andExpect(jsonPath("$.message").value("User not found"));
     }
+
+    @Test
+    public void testExecuteMigration_Success() throws Exception {
+        UUID jobId = UUID.randomUUID();
+        User mockUser = new User("test@test.com");
+        MigrationJob mockJob = new MigrationJob();
+        mockJob.setId(jobId);
+        mockJob.setUser(mockUser);
+        mockJob.setSourcePlaylistId("spotify-pl-1");
+        mockJob.setSourcePlatform(Platform.SPOTIFY);
+        mockJob.setTargetPlatform(Platform.YOUTUBE);
+        mockJob.setStatus(MigrationStatus.COMPLETED);
+
+        when(migrationService.executeMigration(jobId)).thenReturn(mockJob);
+
+        mockMvc.perform(post("/api/migrations/{id}/execute", jobId)
+                .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(jobId.toString()))
+                .andExpect(jsonPath("$.status").value("COMPLETED"));
+    }
+
+    @Test
+    public void testExecuteMigration_NotFound() throws Exception {
+        UUID jobId = UUID.randomUUID();
+        when(migrationService.executeMigration(jobId))
+                .thenThrow(new ResourceNotFoundException("Migration job not found with id: " + jobId));
+
+        mockMvc.perform(post("/api/migrations/{id}/execute", jobId)
+                .with(csrf()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
 }

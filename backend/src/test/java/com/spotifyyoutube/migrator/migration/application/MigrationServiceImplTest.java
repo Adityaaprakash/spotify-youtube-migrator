@@ -11,6 +11,7 @@ import com.spotifyyoutube.migrator.migration.domain.MigrationTask;
 import com.spotifyyoutube.migrator.migration.repository.MigrationJobRepository;
 import com.spotifyyoutube.migrator.migration.repository.MigrationTaskRepository;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
+import com.spotifyyoutube.migrator.migration.application.orchestration.PlaylistMigrationOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -36,6 +37,9 @@ public class MigrationServiceImplTest {
 
     @Mock
     private UserRepository userRepository;
+
+    @Mock
+    private PlaylistMigrationOrchestrator migrationOrchestrator;
 
     @InjectMocks
     private MigrationServiceImpl migrationService;
@@ -114,5 +118,25 @@ public class MigrationServiceImplTest {
         when(migrationTaskRepository.findByJobId(jobId)).thenReturn(List.of(new MigrationTask()));
 
         assertEquals(1, migrationService.getMigrationTasks(jobId).size());
+    }
+
+    @Test
+    public void testExecuteMigration_Success() {
+        UUID jobId = UUID.randomUUID();
+        MigrationJob job = new MigrationJob();
+        when(migrationOrchestrator.executeMigration(jobId)).thenReturn(job);
+
+        MigrationJob result = migrationService.executeMigration(jobId);
+        assertNotNull(result);
+        assertEquals(job, result);
+    }
+
+    @Test
+    public void testExecuteMigration_OrchestratorNotConfigured() {
+        MigrationServiceImpl serviceWithoutOrchestrator = new MigrationServiceImpl(
+                migrationJobRepository, migrationTaskRepository, userRepository, null);
+        UUID jobId = UUID.randomUUID();
+
+        assertThrows(IllegalStateException.class, () -> serviceWithoutOrchestrator.executeMigration(jobId));
     }
 }

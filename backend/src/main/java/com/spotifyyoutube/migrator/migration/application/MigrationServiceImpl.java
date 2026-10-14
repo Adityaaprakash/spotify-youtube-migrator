@@ -7,13 +7,14 @@ import com.spotifyyoutube.migrator.identity.repository.UserRepository;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateMigrationRequest;
 import com.spotifyyoutube.migrator.migration.domain.MigrationJob;
 import com.spotifyyoutube.migrator.migration.domain.MigrationStatus;
+import com.spotifyyoutube.migrator.migration.application.orchestration.PlaylistMigrationOrchestrator;
 import com.spotifyyoutube.migrator.migration.domain.MigrationTask;
 import com.spotifyyoutube.migrator.migration.repository.MigrationJobRepository;
 import com.spotifyyoutube.migrator.migration.repository.MigrationTaskRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-// Removed LocalDateTime
 import java.util.List;
 import java.util.UUID;
 
@@ -24,14 +25,25 @@ public class MigrationServiceImpl implements MigrationService {
     private final MigrationJobRepository migrationJobRepository;
     private final MigrationTaskRepository migrationTaskRepository;
     private final UserRepository userRepository;
+    private final PlaylistMigrationOrchestrator migrationOrchestrator;
 
     public MigrationServiceImpl(
             MigrationJobRepository migrationJobRepository,
             MigrationTaskRepository migrationTaskRepository,
             UserRepository userRepository) {
+        this(migrationJobRepository, migrationTaskRepository, userRepository, null);
+    }
+
+    @Autowired
+    public MigrationServiceImpl(
+            MigrationJobRepository migrationJobRepository,
+            MigrationTaskRepository migrationTaskRepository,
+            UserRepository userRepository,
+            PlaylistMigrationOrchestrator migrationOrchestrator) {
         this.migrationJobRepository = migrationJobRepository;
         this.migrationTaskRepository = migrationTaskRepository;
         this.userRepository = userRepository;
+        this.migrationOrchestrator = migrationOrchestrator;
     }
 
     @Override
@@ -75,5 +87,13 @@ public class MigrationServiceImpl implements MigrationService {
             throw new ResourceNotFoundException("Migration job not found with id: " + jobId);
         }
         return migrationTaskRepository.findByJobId(jobId);
+    }
+
+    @Override
+    public MigrationJob executeMigration(UUID jobId) {
+        if (migrationOrchestrator == null) {
+            throw new IllegalStateException("PlaylistMigrationOrchestrator is not configured");
+        }
+        return migrationOrchestrator.executeMigration(jobId);
     }
 }

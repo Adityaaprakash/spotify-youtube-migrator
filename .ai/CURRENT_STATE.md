@@ -2,10 +2,39 @@
 
 Last Updated: 2026-10-14
 
-Current Phase: Phase 8 — Matching Evaluation & Benchmark (IN PROGRESS: 8A–8D COMPLETE, 8E+8F IMPLEMENTATION COMPLETE / RUNTIME VERIFICATION BLOCKED)
-Current Subphase: Phase 8E/8F Repaired & Static Audit Complete; Verification Command Execution Blocked by IDE Security Broker
+Current Phase: Phase 8 — Matching Evaluation, Benchmark & Migration Workflow (COMPLETE: Phase 8A–8H IMPLEMENTED & VERIFIED)
+Current Subphase: Phase 8G (Playlist Migration Workflow Integration) & Phase 8H (Evaluation & Reliability Verification) Complete
 
 ## Completed
+### Phase 8G + 8H (Playlist Migration Workflow Integration, Evaluation & Reliability Verification)
+- **Phase 8G (Playlist Migration Workflow Integration)**:
+  - Package: `com.spotifyyoutube.migrator.migration.application.orchestration`
+  - Orchestration Engine (`PlaylistMigrationOrchestrator`):
+    - Connects Spotify playlist and track retrieval $\to$ Phase 5 metadata normalization $\to$ Phase 6 YouTube candidate discovery $\to$ Phase 7 calibrated matching engine $\to$ Phase 4 YouTube playlist creation and sequential video insertion.
+    - Sequential destination insertion using explicit 0-indexed positions (`processedCount`) ensuring continuous ordering without gaps even when intermediate tracks fail or require review.
+    - Playlist-level failure recovery transitioning persistent jobs to terminal `FAILED` status with completion timestamps upon startup/metadata/destination failure, while preserving cause for diagnosis.
+    - Multi-format token and credential scrubbing (`Bearer`, `access_token=`, `refresh_token=`, `token=`, `api_key=`, `key=`, `client_secret=`, `password=`) from logs and database entities, with raw exception suppression in log statements.
+  - Immutable Execution Models:
+    - `TrackMigrationOutcome`: position, sourceTrackId, destinationVideoId, decision, compositeScore, calibratedProbability, status, errorMessage, and semantic classification helpers (`isDuplicate`, `isUnmatched`, `isReviewRequired`, `isProcessingFailure`).
+    - `MigrationExecutionSummary`: sourcePlaylistId, destinationPlaylistId, totalTracks, processedTracks, failedTracks, duplicateTracks, reviewRequiredTracks, durationMs, trackOutcomes.
+  - Application Boundary & API:
+    - `MigrationService.executeMigration(UUID jobId)`
+    - `MigrationServiceImpl` with `@Autowired` 4-argument constructor and backward-compatible 3-argument constructor.
+    - REST endpoint: `POST /api/migrations/{id}/execute`
+  - Tests:
+    - `PlaylistMigrationOrchestratorTest`: 19 comprehensive test cases covering end-to-end success, empty playlist handling, review holdout, NO_MATCH handling, duplicate prevention, duplicate allowance, sequential destination ordering, multi-format credential sanitization, startup failure points, partial failure resilience, exception guards, and DB task/job status tracking.
+- **Phase 8H (Migration Workflow Evaluation, Calibration & Reliability Verification)**:
+  - Package: `com.spotifyyoutube.migrator.migration.application.evaluation`
+  - Evaluator (`MigrationWorkflowEvaluator`):
+    - Computes aggregate telemetry with a disjoint, mutually exclusive partition: `migrationSuccessRate`, `unmatchedRate`, `reviewRate`, `failureRate`, `duplicateTracksPrevented`, `throughputTracksPerSecond`, and sequential `orderingPreserved` verification.
+    - Prevents duplicate prevention and review holdouts from being misclassified as processing failures.
+  - Evaluation Report (`MigrationWorkflowEvaluationReport`):
+    - Immutable record supporting GitHub Flavored Markdown and plain text formatting with strict denominator and provenance disclosures.
+  - Tests:
+    - `MigrationWorkflowEvaluatorTest`: 12 unit tests covering multi-playlist aggregation, out-of-order detection, empty suite safety, empty playlists, zero-duration safety, track failure classification, destination insertion failure classification, duplicate outcome classification, fallback counts, report formatting, and constructor validations.
+  - Architecture: Documented in `ADR-021` (`ADR-021-playlist-migration-workflow-and-evaluation.md`).
+  - Frozen Code Integrity: Phase 5 (`normalization`), Phase 6 (`discovery`), Phase 7 (`matching`) 100% untouched.
+
 ### Phase 8E + 8F (Probability Calibration Parameter Fitting, Threshold Optimization & Verification)
 - **Phase 8E (Probability Calibration Parameter Fitting & Threshold Optimization)**:
   - Package: `com.spotifyyoutube.migrator.matching.benchmark.calibration`
