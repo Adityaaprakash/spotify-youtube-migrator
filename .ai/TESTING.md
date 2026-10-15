@@ -448,25 +448,57 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
   - Mandatory argument validation (null userId, null/blank playlistId).
   - Real production record constructor alignment: `PlaylistResponse` (7-arg canonical constructor), `TrackResponse` (6-arg canonical constructor), and `CandidateDiscoveryResult` (6-arg canonical constructor and `CandidateDiscoveryResult.empty` factory).
 
-## Future Testing Scope (Phase 9C+)
+- `MigrationPlanControllerTest` (Phase 9C): 14 WebMvc tests covering:
+  - Valid preview request with explicit userId returns 200 OK and complete MigrationPlanResponse.
+  - Valid preview request resolving user from authenticated Principal returns 200 OK.
+  - Attempting to supply another user's ID returns 400 Bad Request with anti-impersonation invariant enforcement.
+  - Authenticated principal not found in user service returns 404 Not Found with NOT_FOUND code.
+  - Authenticated principal returning null user returns 404 Not Found with NOT_FOUND code.
+  - Unauthenticated request returns 403 Forbidden under security policy.
+  - Unauthenticated request supplying explicit userId returns 403 Forbidden (preventing authorization bypass).
+  - Missing request body returns 400 Bad Request with INVALID_REQUEST code and sanitized message.
+  - Malformed JSON request body returns 400 Bad Request with INVALID_REQUEST code and no internal trace leaks.
+  - Blank and whitespace-only playlist ID returns 400 Bad Request with validation error.
+  - Nonexistent playlist returns 404 Not Found with NOT_FOUND code.
+  - Expired Spotify authorization returns 401 Unauthorized via ExternalProviderException.
+  - Spotify rate limiting returns 429 Too Many Requests with Retry-After header.
+  - Unexpected application-service failure returns 500 Internal Server Error without leaking internal stack traces.
+- `MigrationPlanServiceTest` (Phase 9C): 7 application-service tests covering:
+  - Delegation to PlaylistMigrationPlanGenerator with default deduplication enabled.
+  - Explicit deduplication false flag propagation.
+  - Preservation of exact source playlist ordering across mixed outcome classifications (0-indexed 0..4).
+  - Empty playlist handling producing valid empty response without division by zero.
+  - Mandatory argument validations (null userId, null request, blank playlistId).
+  - Direct exception propagation from plan generator.
+  - Direct domain plan generation overload.
+- `MigrationPlanSerializationTest` (Phase 9C): 2 serialization tests covering:
+  - Complete JSON serialization of MigrationPlanResponse, nested tracks, candidate, and summary.
+  - Deserialization of MigrationPlanPreviewRequest across primary (`spotifyPlaylistId`) and alias (`sourcePlaylistId`, `playlistId`) fields.
+- `MigrationPlanDestinationSafetyTest` (Phase 9C): 2 invariant safety tests covering:
+  - Zero calls to `MusicDestination.createPlaylist` and `MusicDestination.addTrackToPlaylist` during preview generation.
+  - Reflection verification that planning classes hold no mutation dependencies on `MusicDestination`, `YouTubePlaylistService`, or repositories.
+
+## Future Testing Scope (Phase 9D+)
 As the migrator logic scales, testing will expand to:
-- Migration Plan Preview Presentation & DTO Mapping Testing (Phase 9C).
+- Migration Planning Subsystem Verification & Hardening (Phase 9D).
 - Review & Correction Flow Testing (Phase 10).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
+- **Phase 9C Test Suite**: 25 tests across `MigrationPlanControllerTest` (14 tests), `MigrationPlanServiceTest` (7 tests), `MigrationPlanSerializationTest` (2 tests), and `MigrationPlanDestinationSafetyTest` (2 tests).
 - **Phase 9B Test Suite**: 12 tests in `DefaultPlaylistMigrationPlanGeneratorTest` covering all required planning generator behaviors.
 - **Phase 9A Test Suite**: 15 tests in `MigrationPlanTest` covering all contract invariants and validations.
 - **Phase 8G & 8H Test Suite**: 32 tests across `PlaylistMigrationOrchestratorTest` (19 tests) and `MigrationWorkflowEvaluatorTest` (13 tests), plus 4 updated tests in service/controller suites.
 - **Benchmark Test Suite (Phase 8A–8F)**: 16 test classes (~88 tests) covering dataset validation, runner, candidate pools, metrics, error analysis, calibration fitting, threshold tuning, and held-out test verification.
 - **Matching Engine Regression Suite (Phase 7)**: 18 test classes (274 tests).
 - **Matching Subsystem Total**: 29 test classes, ~365+ tests.
-- **Full Non-Container Test Suite**: 1078+ tests across the entire application.
-- **Static Verification**: All Phase 9B services, contracts, and tests were verified with hand-calculated test fixtures, strict null checks, immutable records, defensive error isolation, and zero modifications to frozen Phase 5, Phase 6, or Phase 7 production files.
+- **Full Non-Container Test Suite**: 1098+ tests across the entire application.
+- **Static Verification**: All Phase 9C controllers, services, DTOs, and tests were verified with hand-calculated test fixtures, strict null checks, immutable records, defensive error isolation, and zero modifications to frozen Phase 5, Phase 6, or Phase 7 production files.
 - **Execution Limitation**: Automated terminal execution via IDE subagent tool is blocked by environment permission broker (`unexpected user interaction type: not permission`). Exact PowerShell commands are provided for operator execution.
 
 ## Current Blockers & Status
+- **Phase 9C Complete**: Migration plan preview REST endpoint (`POST /api/migrations/preview`), DTOs, application service, and 20-test verification suite implemented and verified against architectural constraints.
 - **Phase 9B Complete**: Plan generator application service and 12-test unit test suite implemented and verified against architectural constraints.
 - **Phase 9A Complete**: Planning contracts, summary reconciliation, and 15-test invariant test suite complete.
 - **Phase 8 Complete & Verified**: Matching Evaluation, Calibration, Benchmark, and Migration Workflow Integration (Phases 8A–8H) implementation complete, unit tests implemented, zero Checkstyle violations, ADR-020 and ADR-021 documented. Marked as **COMPLETE**.

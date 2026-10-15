@@ -1,0 +1,2 @@
+# Targeted whitespace rule for CURRENT_STATE.md without EOL conversion filter
+/.ai/CURRENT_STATE.md whitespace=cr-at-eol

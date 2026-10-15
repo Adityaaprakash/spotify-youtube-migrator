@@ -2,10 +2,34 @@
 
 Last Updated: 2026-10-15
 
-Current Phase: Phase 9 — Migration Engine (Phase 9B Implementation: Migration Plan Generation)
-Current Subphase: Phase 9B Complete (Migration Plan Generation Service & Unit Test Suite)
+Current Phase: Phase 9 — Migration Engine (Phase 9C Implementation: Migration Plan Preview API)
+Current Subphase: Phase 9C Complete (Migration Plan Preview REST Controller, DTOs & Test Suites)
 
 ## Completed
+### Phase 9C (Migration Plan Preview API & Presentation Layer)
+- **Phase 9C.1 (Migration Preview REST Controller & Endpoints)**:
+  - Route: `POST /api/migrations/preview` implemented in `MigrationPlanController` (`com.spotifyyoutube.migrator.migration.api`).
+  - Architecture: Thin controller validating requests, resolving user identity via `Principal` or explicit `userId`, and delegating directly to `MigrationPlanService`.
+  - Invariants strictly enforced:
+    - Target Isolation: Zero calls to `MusicDestination.createPlaylist` or `addTrackToPlaylist`. Strictly read-only preview.
+    - Deterministic Ordering: Source tracks preserved in exact 0-indexed positions `track.position() == i`.
+    - Single-Classification Partition: Every track categorized into exactly one of `AUTO_MATCH`, `REVIEW_REQUIRED`, `UNMATCHED`, `DUPLICATE`, `FAILED`, `EXCLUDED`.
+    - Credential Sanitization: Diagnostic error messages sanitized against `TOKEN_PATTERN`.
+- **Phase 9C.2 (API Request & Response DTOs & Mappers)**:
+  - `MigrationPlanPreviewRequest`: Request payload supporting `spotifyPlaylistId`, `@JsonAlias({"sourcePlaylistId", "playlistId"})`, optional `userId`, and `deduplicate` flag.
+  - `MigrationPlanResponse`: Top-level response exposing `planId`, `sourcePlaylistId`, `sourcePlaylistTitle`, `createdAt`, `totalTracks`, `tracks`, and `summary`.
+  - `MigrationPlanTrackResponse`: Itemized track outcome exposing position, source track ID, normalized title/artist, classification, candidate details, matching decision, score, calibrated probability, reasons, and sanitized error message.
+  - `MigrationPlanSummaryResponse`: Reconciled aggregate counts across all 6 classifications and calculated rates.
+  - `DestinationCandidateResponse`: Candidate details exposing ID, title, channelOrArtist, description, thumbnailUrl, publishedAt, and duration.
+  - `MigrationPlanMapper`: Clean mapper transforming domain contracts to API response DTOs.
+- **Phase 9C.3 (Migration Plan Application Service)**:
+  - `MigrationPlanService` / `DefaultMigrationPlanService`: Service coordinating preview generation through `PlaylistMigrationPlanGenerator` and mapping to API DTOs.
+- **Phase 9C.4 (Comprehensive Test Suites — 25 Tests)**:
+  - `MigrationPlanControllerTest`: 14 WebMvc tests covering success with explicit userId, principal-based identity resolution, anti-impersonation invariant (rejecting requests with mismatched user IDs), unknown principal identity (404), unresolvable null user (404), unauthenticated request rejection (403), unauthenticated request with userId rejection (403), missing request body (400), malformed JSON (400), blank/whitespace playlist IDs, not found, rate limiting (429 with Retry-After), token expiration (401), unexpected internal errors (500).
+  - `MigrationPlanServiceTest`: 7 application-service tests covering delegation, ordering preservation, classification preservation, empty playlist handling, deduplication flag propagation, argument validation, and exception propagation.
+  - `MigrationPlanSerializationTest`: 2 serialization tests covering full Jackson serialization of `MigrationPlanResponse`, null candidate handling, and alias deserialization for `MigrationPlanPreviewRequest`.
+  - `MigrationPlanDestinationSafetyTest`: 2 safety invariant tests verifying zero `MusicDestination.createPlaylist` and `addTrackToPlaylist` calls, and reflection checks proving no destination mutation dependencies.
+
 ### Phase 9B (Migration Plan Generation Service & Pipeline)
 - **Phase 9B.1 (Plan Generator Application Service)**:
   - Contract: `PlaylistMigrationPlanGenerator` defining `MigrationPlan generatePlan(UUID userId, String sourcePlaylistId, boolean deduplicate)` with default overload.
@@ -644,7 +668,7 @@ Current Subphase: Phase 9B Complete (Migration Plan Generation Service & Unit Te
 
 ### Phase 1D / 1E / 1F
 - Application Service Boundaries conceptualized and implemented using explicit Service/Implementation pairings mapping across `Identity`, `Playlist`, and `Migration` features.
-- Dedicated DTO records (`UserResponse`, `PlaylistResponse`, `TrackResponse`, `CreateMigrationRequest`, `MigrationJobResponse`, `MigrationTaskResponse`) mapped to strictly divorce Controller models from Domain realities. 
+- Dedicated DTO records (`UserResponse`, `PlaylistResponse`, `TrackResponse`, `CreateMigrationRequest`, `MigrationJobResponse`, `MigrationTaskResponse`) mapped to strictly divorce Controller models from Domain realities.
 - Validation bounds handled via Jakarta validation limits inside DTOs (`@NotNull`, `@NotBlank`) resolving explicitly to `400 Bad Request` wrapped seamlessly by an augmented `GlobalExceptionHandler`. State constraints (`ResourceNotFound`, `InvalidState`, `Conflict`) seamlessly structured to render `404` or `409` HTTP responses ensuring stable API conventions.
 - Explicit Mappers manually configured (no MapStruct) tracking strict one-to-one Domain-to-DTO conventions.
 
