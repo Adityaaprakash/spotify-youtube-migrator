@@ -587,4 +587,157 @@ class DefaultPlaylistMigrationPlanGeneratorTest {
         assertThat(s.getFailureRate()).isEqualTo((double) s.failedCount() / s.totalTracks());
         assertThat(s.getExcludedRate()).isEqualTo((double) s.excludedCount() / s.totalTracks());
     }
+
+    @Test
+    @DisplayName("Review-required candidate must not claim destination slot for subsequent auto match")
+    void reviewRequiredCandidateShouldNotClaimDestinationSlotForSubsequentAutoMatch() {
+        when(spotifyPlaylistService.getPlaylistMetadata(userId, playlistId))
+                .thenReturn(createPlaylistResponse(playlistId, "Review Slot Safety"));
+
+        TrackResponse t0 = createTrackResponse("sp-1", "Song A", "Artist A", 200000L);
+        TrackResponse t1 = createTrackResponse("sp-2", "Song A (Remaster)", "Artist A", 200000L);
+        when(spotifyPlaylistService.getPlaylistTracks(userId, playlistId)).thenReturn(List.of(t0, t1));
+
+        NormalizedTrackMetadata n0 = createNormalizedMetadata("Song A", "Artist A");
+        NormalizedTrackMetadata n1 = createNormalizedMetadata("Song A (Remaster)", "Artist A");
+        when(normalizationOrchestrator.normalize(any(RawTrackMetadata.class))).thenReturn(n0, n1);
+
+        DestinationTrackCandidate candShared = createCandidate("yt-shared", "Song A", "Artist A");
+
+        when(candidateDiscoveryService.discoverCandidates(any(CandidateDiscoveryRequest.class)))
+                .thenReturn(createDiscoveryResult(n0, List.of(candShared)))
+                .thenReturn(createDiscoveryResult(n1, List.of(candShared)));
+
+        // Track 0 is REVIEW_REQUIRED with candShared
+        TrackMatchResult r0 = new TrackMatchResult(
+                "sp-1", n0, MatchDecision.REVIEW_REQUIRED, candShared, 0.70, 0.65,
+                MatchConfidence.POOR, null, List.of(), List.of("Moderate confidence")
+        );
+        // Track 1 is high confidence MATCH with candShared
+        TrackMatchResult r1 = new TrackMatchResult(
+                "sp-2", n1, MatchDecision.MATCH, candShared, 0.98, 0.99,
+                MatchConfidence.EXCELLENT, null, List.of(), List.of("Exact match")
+        );
+        when(matchingEngine.matchTrack(any(TrackMatchRequest.class))).thenReturn(r0, r1);
+
+        MigrationPlan plan = planGenerator.generatePlan(userId, playlistId, true);
+
+        assertThat(plan.tracks()).hasSize(2);
+
+        // Track 0 is REVIEW_REQUIRED
+        MigrationPlanTrack pt0 = plan.tracks().get(0);
+        assertThat(pt0.classification()).isEqualTo(PlanTrackClassification.REVIEW_REQUIRED);
+        assertThat(pt0.selectedCandidate()).isEqualTo(candShared);
+
+        // Track 1 must be AUTO_MATCH (NOT DUPLICATE because candShared was not claimed by an AUTO_MATCH)
+        MigrationPlanTrack pt1 = plan.tracks().get(1);
+        assertThat(pt1.classification()).isEqualTo(PlanTrackClassification.AUTO_MATCH);
+        assertThat(pt1.selectedCandidate()).isEqualTo(candShared);
+
+        MigrationPlanSummary summary = plan.summary();
+        assertThat(summary.totalTracks()).isEqualTo(2);
+        assertThat(summary.autoMatchCount()).isEqualTo(1);
+        assertThat(summary.reviewRequiredCount()).isEqualTo(1);
+        assertThat(summary.duplicateCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("Plan generation should be deterministic and repeatable for equivalent inputs")
+    void planGenerationShouldBeDeterministicAndRepeatableForEquivalentInputs() {
+        when(spotifyPlaylistService.getPlaylistMetadata(userId, playlistId))
+                .thenReturn(createPlaylistResponse(playlistId, "Repeatable Playlist"));
+
+        TrackResponse t0 = createTrackResponse("sp-1", "Song 1", "Artist 1", 200000L);
+        TrackResponse t1 = createTrackResponse("sp-2", "Song 2", "Artist 2", 210000L);
+        when(spotifyPlaylistService.getPlaylistTracks(userId, playlistId)).thenReturn(List.of(t0, t1));
+
+        NormalizedTrackMetadata n0 = createNormalizedMetadata("Song 1", "Artist 1");
+        NormalizedTrackMetadata n1 = createNormalizedMetadata("Song 2", "Artist 2");
+        when(normalizationOrchestrator.normalize(any(RawTrackMetadata.class))).thenReturn(n0, n1, n0, n1);
+
+        DestinationTrackCandidate c0 = createCandidate("yt-1", "Song 1", "Artist 1");
+        DestinationTrackCandidate c1 = createCandidate("yt-2", "Song 2", "Artist 2");
+
+        when(candidateDiscoveryService.discoverCandidates(any(CandidateDiscoveryRequest.class)))
+                .thenReturn(createDiscoveryResult(n0, List.of(c0)))
+                .thenReturn(createDiscoveryResult(n1, List.of(c1)))
+                .thenReturn(createDiscoveryResult(n0, List.of(c0)))
+                .thenReturn(createDiscoveryResult(n1, List.of(c1)));
+
+        TrackMatchResult r0 = new TrackMatchResult(
+                "sp-1", n0, MatchDecision.MATCH, c0, 0.95, 0.98,
+                MatchConfidence.EXCELLENT, null, List.of(), List.of("Auto match")
+        );
+        TrackMatchResult r1 = new TrackMatchResult(
+                "sp-2", n1, MatchDecision.REVIEW_REQUIRED, c1, 0.70, 0.65,
+                MatchConfidence.POOR, null, List.of(), List.of("Review required")
+        );
+        when(matchingEngine.matchTrack(any(TrackMatchRequest.class))).thenReturn(r0, r1, r0, r1);
+
+        MigrationPlan planA = planGenerator.generatePlan(userId, playlistId, true);
+        MigrationPlan planB = planGenerator.generatePlan(userId, playlistId, true);
+
+        // Plan metadata (IDs and timestamps are point-in-time generated)
+        assertThat(planA.sourcePlaylistId()).isEqualTo(planB.sourcePlaylistId());
+        assertThat(planA.sourcePlaylistTitle()).isEqualTo(planB.sourcePlaylistTitle());
+
+        // Tracks matching
+        assertThat(planA.tracks()).hasSameSizeAs(planB.tracks());
+        for (int i = 0; i < planA.tracks().size(); i++) {
+            MigrationPlanTrack trackA = planA.tracks().get(i);
+            MigrationPlanTrack trackB = planB.tracks().get(i);
+
+            assertThat(trackA.position()).isEqualTo(trackB.position());
+            assertThat(trackA.sourceTrackId()).isEqualTo(trackB.sourceTrackId());
+            assertThat(trackA.sourceTitle()).isEqualTo(trackB.sourceTitle());
+            assertThat(trackA.sourceArtist()).isEqualTo(trackB.sourceArtist());
+            assertThat(trackA.classification()).isEqualTo(trackB.classification());
+            assertThat(trackA.matchScore()).isEqualTo(trackB.matchScore());
+            assertThat(trackA.calibratedProbability()).isEqualTo(trackB.calibratedProbability());
+            assertThat(trackA.selectedCandidate()).isEqualTo(trackB.selectedCandidate());
+            assertThat(trackA.matchReasons()).isEqualTo(trackB.matchReasons());
+            assertThat(trackA.errorMessage()).isEqualTo(trackB.errorMessage());
+        }
+
+        // Summary matching
+        assertThat(planA.summary()).isEqualTo(planB.summary());
+    }
+
+    @Test
+    @DisplayName("Tracks with null or blank metadata should fallback safely without pipeline failure")
+    void tracksWithNullOrBlankMetadataShouldFallbackSafelyWithoutPipelineFailure() {
+        when(spotifyPlaylistService.getPlaylistMetadata(userId, playlistId))
+                .thenReturn(createPlaylistResponse(playlistId, "Fallback Playlist"));
+
+        // Track with null externalId, null name, null artist
+        TrackResponse rawTrack = new TrackResponse(null, null, null, null, null, null);
+        when(spotifyPlaylistService.getPlaylistTracks(userId, playlistId)).thenReturn(List.of(rawTrack));
+
+        NormalizedTrackMetadata normalized = createNormalizedMetadata("Unknown Title", "Unknown Artist");
+        when(normalizationOrchestrator.normalize(any(RawTrackMetadata.class))).thenReturn(normalized);
+
+        DestinationTrackCandidate candidate = createCandidate("yt-fb", "Unknown Title", "Unknown Artist");
+        when(candidateDiscoveryService.discoverCandidates(any(CandidateDiscoveryRequest.class)))
+                .thenReturn(createDiscoveryResult(normalized, List.of(candidate)));
+
+        TrackMatchResult matchResult = new TrackMatchResult(
+                "track-0", normalized, MatchDecision.MATCH, candidate, 0.90, 0.92,
+                MatchConfidence.EXCELLENT, null, List.of(), List.of("Fallback match")
+        );
+        when(matchingEngine.matchTrack(any(TrackMatchRequest.class))).thenReturn(matchResult);
+
+        MigrationPlan plan = planGenerator.generatePlan(userId, playlistId, true);
+
+        assertThat(plan.tracks()).hasSize(1);
+        MigrationPlanTrack track = plan.tracks().get(0);
+        assertThat(track.position()).isZero();
+        assertThat(track.sourceTrackId()).isEqualTo("track-0");
+        assertThat(track.sourceTitle()).isEqualTo("Unknown Title");
+        assertThat(track.sourceArtist()).isEqualTo("Unknown Artist");
+        assertThat(track.classification()).isEqualTo(PlanTrackClassification.AUTO_MATCH);
+        assertThat(track.selectedCandidate()).isEqualTo(candidate);
+
+        assertThat(plan.summary().totalTracks()).isEqualTo(1);
+        assertThat(plan.summary().autoMatchCount()).isEqualTo(1);
+    }
 }
