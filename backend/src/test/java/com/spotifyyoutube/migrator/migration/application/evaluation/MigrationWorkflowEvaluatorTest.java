@@ -260,4 +260,42 @@ class MigrationWorkflowEvaluatorTest {
         assertThat(report.reviewRequiredTracks()).isEqualTo(0);
         assertThat(report.duplicateTracksPrevented()).isEqualTo(0);
     }
+
+    @Test
+    @DisplayName("Should reconcile detailed track outcomes and summary duplicate counts without double-counting")
+    void shouldReconcileDetailedAndSummaryDuplicatesWithoutDoubleCounting() {
+        // Playlist A: Detailed duplicate outcome AND summary duplicate count both present (2 duplicates)
+        TrackMigrationOutcome a0 = TrackMigrationOutcome.success(
+                0, "sp-a0", "yt-a0", MatchDecision.MATCH, 0.95, OptionalDouble.of(0.98));
+        TrackMigrationOutcome a1 = new TrackMigrationOutcome(
+                1, "sp-a1", "Title A1", "Artist", "yt-dup-1", "Video",
+                MatchDecision.MATCH, 0.90, 0.92, MigrationStatus.FAILED, "Duplicate: already added"
+        );
+        TrackMigrationOutcome a2 = new TrackMigrationOutcome(
+                2, "sp-a2", "Title A2", "Artist", "yt-dup-2", "Video",
+                MatchDecision.MATCH, 0.88, 0.90, MigrationStatus.FAILED, "Duplicate: already added"
+        );
+        MigrationExecutionSummary summaryA = new MigrationExecutionSummary(
+                "pl-a", "ext-yt-a", 3, 1, 2, 2, 0, 300L, List.of(a0, a1, a2));
+
+        // Playlist B: Detailed outcomes without duplicate flags, but summary records 1 duplicate
+        TrackMigrationOutcome b0 = TrackMigrationOutcome.success(
+                0, "sp-b0", "yt-b0", MatchDecision.MATCH, 0.95, OptionalDouble.of(0.98));
+        MigrationExecutionSummary summaryB = new MigrationExecutionSummary(
+                "pl-b", "ext-yt-b", 2, 1, 1, 1, 0, 200L, List.of(b0));
+
+        // Playlist C: Summary-only representation with empty outcomes list and 1 duplicate
+        MigrationExecutionSummary summaryC = new MigrationExecutionSummary(
+                "pl-c", "ext-yt-c", 2, 1, 1, 1, 0, 100L, List.of());
+
+        MigrationWorkflowEvaluationReport report = evaluator.evaluateSummaries(
+                List.of(summaryA, summaryB, summaryC), "Mixed Duplicate Representation Check");
+
+        // Total duplicate tracks prevented = 2 (pl-a) + 1 (pl-b) + 1 (pl-c) = 4 (no double counting)
+        assertThat(report.duplicateTracksPrevented()).isEqualTo(4);
+        assertThat(report.totalPlaylistsEvaluated()).isEqualTo(3);
+        assertThat(report.totalTracksEvaluated()).isEqualTo(7);
+        assertThat(report.successfullyMigratedTracks()).isEqualTo(3);
+    }
 }
+

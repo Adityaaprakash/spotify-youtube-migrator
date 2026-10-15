@@ -416,23 +416,59 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
 - `MigrationServiceImplTest` (Phase 8G): updated with unit tests for `executeMigration(jobId)` delegation and unconfigured orchestrator validation.
 - `MigrationControllerTest` (Phase 8G): updated with WebMvcTests for `POST /api/migrations/{id}/execute` success and not-found handling.
 
-## Future Testing Scope (Phase 9+)
+### Migration Planning Testing Scope (Phase 9A)
+- `MigrationPlanTest` (Phase 9A): 15 tests:
+  - Valid plan construction and attribute preservation.
+  - Empty plan factory behavior (`MigrationPlan.empty(...)` with zero tracks and zero summary).
+  - Immutability and defensive copying for `tracks` collection and `matchReasons` (rejection of mutation).
+  - Strict source playlist ordering invariant: assertion that `tracks.get(i).position() == i` rejecting out-of-order tracks.
+  - Summary totalTracks reconciliation with tracks collection size (rejecting mismatched totals).
+  - Mandatory field validation rejecting nulls and blank source playlist IDs.
+  - Negative track position rejection.
+  - Blank and null source track ID rejection.
+  - Null track metadata rejection.
+  - Match score and calibrated probability bounds validation within $[0.0, 1.0]$.
+  - Credential and token scrubbing in `MigrationPlanTrack` error messages (`Bearer [REDACTED]`, `access_token=[REDACTED]`, `api_key=[REDACTED]`).
+  - Classification predicates (`isAutoMatch`, `isReviewRequired`, `isDuplicate`, `isUnmatched`, `isFailed`, `isExcluded`).
+  - Strict summary mathematical reconciliation: $\text{totalTracks} = \text{autoMatch} + \text{reviewRequired} + \text{unmatched} + \text{duplicate} + \text{failed} + \text{excluded}$ rejecting mismatched sums.
+  - Summary derivation directly from tracks (`MigrationPlanSummary.fromTracks(...)`).
+  - Summary non-negative count bounds rejection.
+- `DefaultPlaylistMigrationPlanGeneratorTest` (Phase 9B): 12 tests covering all 11 required scenarios:
+  - Empty playlist handling (zero tracks, zeroed summary).
+  - Happy path all auto-matches (100% AUTO_MATCH, rate = 1.0, actionable, no issues).
+  - Mixed classification (AUTO_MATCH, REVIEW_REQUIRED, UNMATCHED, DUPLICATE).
+  - Strict source playlist ordering preservation across 5 distinct outcome classifications (0-indexed 0..4).
+  - Duplicate prevention when deduplication is enabled (secondary candidate flagged as DUPLICATE without claiming destination slot).
+  - Duplicate allowance when deduplication is disabled (both candidates AUTO_MATCH, duplicateCount = 0).
+  - Per-track failure isolation (normalization/discovery/matching exception on track i categorized as FAILED without aborting track i+1).
+  - Credential and token scrubbing in plan error diagnostics (bearer tokens, API keys redacted).
+  - Read-only destination invariant (zero MusicDestination / YouTube mutation dependencies).
+  - Immutability for empty and populated plan track lists.
+  - Exact mathematical summary reconciliation invariant (totalTracks == sum of 6 buckets, rate reconciliations).
+  - Mandatory argument validation (null userId, null/blank playlistId).
+  - Real production record constructor alignment: `PlaylistResponse` (7-arg canonical constructor), `TrackResponse` (6-arg canonical constructor), and `CandidateDiscoveryResult` (6-arg canonical constructor and `CandidateDiscoveryResult.empty` factory).
+
+## Future Testing Scope (Phase 9C+)
 As the migrator logic scales, testing will expand to:
-- Migration State Machine & Async Orchestration (Phase 9 & Phase 12).
+- Migration Plan Preview Presentation & DTO Mapping Testing (Phase 9C).
 - Review & Correction Flow Testing (Phase 10).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
-- **Phase 8G & 8H Test Suite**: 31 tests across `PlaylistMigrationOrchestratorTest` (19 tests) and `MigrationWorkflowEvaluatorTest` (12 tests), plus 4 updated tests in service/controller suites.
+- **Phase 9B Test Suite**: 12 tests in `DefaultPlaylistMigrationPlanGeneratorTest` covering all required planning generator behaviors.
+- **Phase 9A Test Suite**: 15 tests in `MigrationPlanTest` covering all contract invariants and validations.
+- **Phase 8G & 8H Test Suite**: 32 tests across `PlaylistMigrationOrchestratorTest` (19 tests) and `MigrationWorkflowEvaluatorTest` (13 tests), plus 4 updated tests in service/controller suites.
 - **Benchmark Test Suite (Phase 8A–8F)**: 16 test classes (~88 tests) covering dataset validation, runner, candidate pools, metrics, error analysis, calibration fitting, threshold tuning, and held-out test verification.
 - **Matching Engine Regression Suite (Phase 7)**: 18 test classes (274 tests).
 - **Matching Subsystem Total**: 29 test classes, ~365+ tests.
-- **Full Non-Container Test Suite**: 1050+ tests across the entire application.
-- **Static Verification**: All Phase 8G and 8H implementation classes and tests were verified with hand-calculated test fixtures, strict null checks, immutable records, and rigorous edge-case coverage. Zero modifications were made to frozen Phase 5, Phase 6, or Phase 7 production files.
-- **Execution Limitation**: Automated terminal execution via IDE subagent tool is blocked by environment permission broker. Exact PowerShell commands are provided for operator execution.
+- **Full Non-Container Test Suite**: 1078+ tests across the entire application.
+- **Static Verification**: All Phase 9B services, contracts, and tests were verified with hand-calculated test fixtures, strict null checks, immutable records, defensive error isolation, and zero modifications to frozen Phase 5, Phase 6, or Phase 7 production files.
+- **Execution Limitation**: Automated terminal execution via IDE subagent tool is blocked by environment permission broker (`unexpected user interaction type: not permission`). Exact PowerShell commands are provided for operator execution.
 
 ## Current Blockers & Status
+- **Phase 9B Complete**: Plan generator application service and 12-test unit test suite implemented and verified against architectural constraints.
+- **Phase 9A Complete**: Planning contracts, summary reconciliation, and 15-test invariant test suite complete.
 - **Phase 8 Complete & Verified**: Matching Evaluation, Calibration, Benchmark, and Migration Workflow Integration (Phases 8A–8H) implementation complete, unit tests implemented, zero Checkstyle violations, ADR-020 and ADR-021 documented. Marked as **COMPLETE**.
 - **Phase 7 Complete & Frozen**: Full Matching Engine subsystem (Phases 7A–7I) verified with 274 regression tests passing across 18 test classes, 0 Checkstyle violations, and full contract invariant verification. Phase 7 is **FROZEN**.
 - **Phase 6 Complete & Frozen**: Full Candidate Discovery pipeline (Phases 6A–6G) verified across 133 discovery tests. Phase 6 is **FROZEN**.

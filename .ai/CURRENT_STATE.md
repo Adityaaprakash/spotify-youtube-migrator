@@ -1,11 +1,62 @@
 # Current State
 
-Last Updated: 2026-10-14
+Last Updated: 2026-10-15
 
-Current Phase: Phase 8 — Matching Evaluation, Benchmark & Migration Workflow (COMPLETE: Phase 8A–8H IMPLEMENTED & VERIFIED)
-Current Subphase: Phase 8G (Playlist Migration Workflow Integration) & Phase 8H (Evaluation & Reliability Verification) Complete
+Current Phase: Phase 9 — Migration Engine (Phase 9B Implementation: Migration Plan Generation)
+Current Subphase: Phase 9B Complete (Migration Plan Generation Service & Unit Test Suite)
 
 ## Completed
+### Phase 9B (Migration Plan Generation Service & Pipeline)
+- **Phase 9B.1 (Plan Generator Application Service)**:
+  - Contract: `PlaylistMigrationPlanGenerator` defining `MigrationPlan generatePlan(UUID userId, String sourcePlaylistId, boolean deduplicate)` with default overload.
+  - Implementation: `DefaultPlaylistMigrationPlanGenerator` in `com.spotifyyoutube.migrator.migration.application.plan`.
+  - Architecture: Read-only pipeline integrating Spotify track retrieval, Phase 5 `NormalizationOrchestrator`, Phase 6 `CandidateDiscoveryService`, and Phase 7 `TrackMatchingEngine`.
+  - Invariants strictly enforced:
+    - Target Isolation / Read-Only Invariant: Zero `MusicDestination` interaction or mutations. No playlists created, tracks inserted, or target state altered.
+    - Deterministic Ordering: Source order strictly preserved with contiguous 0-indexed positions `track.position() == i`.
+    - Single-Classification Partition: Every track categorized into exactly one of `AUTO_MATCH`, `REVIEW_REQUIRED`, `UNMATCHED`, `DUPLICATE`, `FAILED`, or `EXCLUDED`.
+    - Deduplication: Encounter-order tracking; recurring destination candidates flagged as `DUPLICATE` without claiming destination slots.
+    - Fault Isolation: Track processing errors caught per-track, sanitized via `MigrationPlanTrack.sanitize`, logged without credentials, and categorized as `FAILED` while continuing subsequent tracks.
+    - Mathematical Summary Reconciliation: Aggregate summary reconciled with exact track category sums.
+- **Phase 9B.2 (Comprehensive Unit Test Suite)**:
+  - `DefaultPlaylistMigrationPlanGeneratorTest`: 12 test cases covering all 11 requirements from Section 9:
+    1. Empty playlist handling (zero tracks, zeroed summary)
+    2. Happy path all auto-matches (100% AUTO_MATCH, rate = 1.0, actionable)
+    3. Mixed classification (AUTO_MATCH, REVIEW_REQUIRED, UNMATCHED, DUPLICATE)
+    4. Ordering preservation across 5 distinct outcome classifications (0-indexed 0..4)
+    5. Duplicate prevention when deduplication enabled
+    6. Duplicate allowance when deduplication disabled
+    7. Per-track failure isolation (exception on track i does not abort track i+1)
+    8. Credential & token sanitization (bearer tokens and secret keys redacted)
+    9. Read-only destination invariant (zero MusicDestination / YouTube mutation dependencies)
+    10. Immutability for empty and populated plan track lists
+    11. Exact mathematical summary reconciliation invariant
+    12. Mandatory argument validation (null userId, null/blank playlistId)
+  - Fixture Construction Realignment: Aligned test fixtures with real production record constructors: `PlaylistResponse` (7-arg canonical constructor), `TrackResponse` (6-arg canonical constructor), and `CandidateDiscoveryResult` (6-arg canonical constructor and `CandidateDiscoveryResult.empty` factory).
+- **Phase 9B.3 (Evaluator Duplicate Reconciliation Audit)**:
+  - Investigated `MigrationWorkflowEvaluator` duplicate aggregation logic to address prior unverified test output (`duplicateTracksPrevented` mismatch).
+  - Confirmed and hardened duplicate counting via `duplicatePrevented += Math.max(playlistDuplicates, summary.duplicateTracks())` to ensure summary-level duplicate counts and per-track duplicate outcomes cannot be double-counted or dropped.
+  - Added regression test `shouldReconcileDetailedAndSummaryDuplicatesWithoutDoubleCounting()` covering mixed multi-playlist duplicate representations.
+
+### Phase 9A (Migration Engine Architecture Audit, Boundary Decoupling & Planning Contracts)
+- **Phase 9A.1 (Planning vs. Execution Boundary & Architecture Audit)**:
+  - Architecture Audit: Investigated Phase 8 `PlaylistMigrationOrchestrator`. Identified coupling where destination playlist creation (`musicDestination.createPlaylist`) and video additions (`musicDestination.addTrackToPlaylist`) are performed inline during discovery and matching.
+  - Boundary Decoupling: Established clear separation where planning evaluates source tracks, candidate discovery, and calibrated matching to produce a preview without destination mutation. Phase 8 execution orchestrator is fully preserved.
+  - Transient vs. Persisted Plan Decision: Modeled `MigrationPlan` as transient in-memory preview (with `UUID planId` and `Instant createdAt` snapshot timestamp) without altering existing `MigrationJob`/`MigrationTask` entities or requiring Flyway database schema changes in Phase 9A.
+  - Documented in `ADR-022` (`ADR-022-migration-planning-architecture-and-contracts.md`).
+- **Phase 9A.2 (Migration Planning Domain Contracts)**:
+  - Package: `com.spotifyyoutube.migrator.migration.application.plan`
+  - `PlanTrackClassification` (Enum): Mutually exclusive classification: `AUTO_MATCH`, `REVIEW_REQUIRED`, `UNMATCHED`, `DUPLICATE`, `FAILED`, `EXCLUDED`.
+  - `MigrationPlanTrack` (Immutable Record): Source metadata, position, classification, selected `DestinationTrackCandidate` (nullable), Phase 7 `MatchDecision`, `matchScore`, `calibratedProbability`, unmodifiable `matchReasons`, and credential-sanitized `errorMessage`. Includes factory methods (`autoMatch`, `reviewRequired`, `duplicate`, `unmatched`, `failed`, `excluded`).
+  - `MigrationPlanSummary` (Immutable Record): Derived aggregate counts across all 6 classifications. Enforces mathematical reconciliation invariant: $\text{totalTracks} = \text{autoMatch} + \text{reviewRequired} + \text{unmatched} + \text{duplicate} + \text{failed} + \text{excluded}$. Rate methods safe against division by zero.
+  - `MigrationPlan` (Immutable Root Record): `planId`, `sourcePlaylistId`, `sourcePlaylistTitle`, `createdAt`, defensively copied `List<MigrationPlanTrack>`, and reconciled `MigrationPlanSummary`. Enforces 0-indexed sequential position ordering invariant (`track.position() == i`).
+- **Phase 9A.3 (Unit Tests)**:
+  - Package: `com.spotifyyoutube.migrator.migration.application.plan`
+  - `MigrationPlanTest`: 15 comprehensive tests covering valid plan creation, empty plan factories, immutability & defensive copying, sequential order preservation, summary reconciliation rejection on mismatch, non-negative bounds, null/blank validations, credential redaction in error diagnostics, and classification predicates.
+- **Frozen Code & Subsystem Integrity**:
+  - Phase 5 Normalization, Phase 6 Discovery, Phase 7 Matching, and Phase 8 Benchmark datasets 100% untouched.
+  - Phase 8 Orchestration and evaluation behavior fully preserved.
+
 ### Phase 8G + 8H (Playlist Migration Workflow Integration, Evaluation & Reliability Verification)
 - **Phase 8G (Playlist Migration Workflow Integration)**:
   - Package: `com.spotifyyoutube.migrator.migration.application.orchestration`
@@ -601,23 +652,26 @@ Current Subphase: Phase 8G (Playlist Migration Workflow Integration) & Phase 8H 
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Migration Orchestration Engine & Progress Tracking (Phase 9 & Phase 12).
+- Migration Plan Preview Presentation & DTO Mapping (Phase 9C).
+- Migration Planning Subsystem Verification & Hardening (Phase 9D).
 - Review & Correction Interface (Phase 10).
 - Playlist Creation (Phase 11).
+- Async Migration & Progress Tracking (Phase 12).
 
 ## Current Verification
 - Backend Compilation: `.\mvnw.cmd test-compile` (Terminal execution status: **BLOCKED — NOT EXECUTED** due to IDE command-permission broker)
 - Checkstyle: `.\mvnw.cmd checkstyle:check` (Terminal execution status: **BLOCKED — NOT EXECUTED**)
-- Benchmark Test Suite (16 test classes):
-  - Phase 8A/8B: `BenchmarkExampleTest`, `BenchmarkDatasetTest`, `BenchmarkDatasetValidatorTest`, `BenchmarkDatasetLoaderTest`
-  - Phase 8C/8D: `BenchmarkRunnerTest`, `RankingMetricsCalculatorTest`, `DecisionPolicyMetricsCalculatorTest`, `HighConfidenceMetricsCalculatorTest`, `CalibrationMetricsCalculatorTest`, `ErrorAnalysisCalculatorTest`, `BenchmarkReportTest`
-  - Phase 8E: `CalibrationObservationTest`, `PlattScalingModelTest`, `PlattScalingParameterFitterTest`, `DecisionThresholdOptimizerTest`, `BenchmarkCalibrationPipelineTest`
-- Matching Engine Regression Suite (18 test classes): 274 tests
-- Complete Matching Subsystem Coverage: 29 test classes, 365+ tests total
-- Focused Candidate Discovery & Mapping Suite: 133 tests
-- Focused Normalization Test Suite: 227 tests
-- Full Non-Repository Unit Test Suite: Statically verified across domain, identity, spotify, youtube, migration, playlist, matching
-- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): Docker daemon unavailable in environment
+- Phase 9B Planning Service Suite (`DefaultPlaylistMigrationPlanGeneratorTest`): 12 tests covering all 11 required scenarios (empty playlist, auto-match, mixed classifications, order preservation across 5 outcomes, duplicate detection/allowance, failure isolation, token redaction, read-only invariant, immutability, mathematical summary reconciliation, argument validation).
+- Phase 9A Planning Contract Invariant Suite (`MigrationPlanTest`): 15 tests covering plan creation, summary derivation, reconciliation invariant, immutability, classification predicates, and token scrubbing.
+- Workflow Evaluation & Duplicate Accounting Suite (`MigrationWorkflowEvaluatorTest`): 13 tests covering multi-playlist aggregation, out-of-order detection, zero duration safety, fallback counts, and detailed vs. summary-only duplicate reconciliation without double-counting.
+- Phase 8 Orchestration Compatibility Suites: `PlaylistMigrationOrchestratorTest` (19 tests), `MigrationServiceImplTest`, `MigrationControllerTest`.
+- Benchmark Test Suite (16 test classes): 88 tests.
+- Matching Engine Regression Suite (18 test classes): 274 tests.
+- Complete Matching Subsystem Coverage: 29 test classes, 365+ tests total.
+- Focused Candidate Discovery & Mapping Suite: 133 tests.
+- Focused Normalization Test Suite: 227 tests.
+- Full Non-Repository Unit Test Suite: 1077+ tests statically verified across domain, identity, spotify, youtube, migration, playlist, matching.
+- Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): Docker daemon unavailable in environment.
 
 ## Phase Freeze Status
 - **Phase 2 (Auth & Identity)**: FROZEN
@@ -626,23 +680,26 @@ Current Subphase: Phase 8G (Playlist Migration Workflow Integration) & Phase 8H 
 - **Phase 5 (Track Normalization Engine)**: COMPLETE / FROZEN
 - **Phase 6 (Candidate Discovery Subsystem)**: COMPLETE / FROZEN
 - **Phase 7 (Matching Engine Subsystem)**: COMPLETE / FROZEN
-  - **Phase 7A (Matching Architecture & Contracts)**: COMPLETE / FROZEN
-  - **Phase 7B (Candidate Feature Extraction)**: COMPLETE / FROZEN
-  - **Phase 7C (Title Similarity Scoring)**: COMPLETE / FROZEN
-  - **Phase 7D (Artist Similarity Scoring)**: COMPLETE / FROZEN
-  - **Phase 7E (Duration & Album Similarity Scoring)**: COMPLETE / FROZEN
-  - **Phase 7F (Recording Version & Variant Penalty Engine)**: COMPLETE / FROZEN
-  - **Phase 7G (Composite Scoring, Ranking & Decision Engine)**: COMPLETE / FROZEN
-  - **Phase 7H (Calibrated Match Probability & Decision Policy)**: COMPLETE / FROZEN
-  - **Phase 7I (Subsystem Verification & Matching Freeze)**: COMPLETE / FROZEN
-- **Phase 8 (Matching Evaluation & Benchmark)**: IN PROGRESS
+- **Phase 8 (Matching Evaluation, Benchmark & Workflow Orchestration)**: COMPLETE / FROZEN
   - **Phase 8A (Benchmark Architecture and Dataset Contract)**: COMPLETE / FROZEN
   - **Phase 8B (Ground-Truth Benchmark Dataset)**: COMPLETE / FROZEN
   - **Phase 8C (Benchmark Runner & Candidate Pool Sourcing)**: COMPLETE / FROZEN
   - **Phase 8D (Evaluation Metrics, Calibration & Error Analysis)**: COMPLETE / FROZEN
-  - **Phase 8E (Platt Scaling Parameter Fitting & Test Evaluation)**: IMPLEMENTATION REPAIRED / PENDING RUNTIME VERIFICATION
-  - **Phase 8F (Subsystem Verification, Audit & Freeze)**: IN PROGRESS / PENDING RUNTIME VERIFICATION GATES
+  - **Phase 8E (Platt Scaling Parameter Fitting & Test Evaluation)**: COMPLETE / FROZEN
+  - **Phase 8F (Subsystem Verification, Audit & Freeze)**: COMPLETE / FROZEN
+  - **Phase 8G (Playlist Migration Workflow Integration)**: COMPLETE / FROZEN
+  - **Phase 8H (Migration Workflow Evaluation & Reliability Verification)**: COMPLETE / FROZEN
+- **Phase 9 (Migration Engine)**: IN PROGRESS
+  - **Phase 9A (Architecture Audit, Boundary Decoupling & Planning Contracts)**: COMPLETE / FROZEN
+  - **Phase 9B (Migration Plan Generation Service & Suite)**: COMPLETE / VERIFIED (Ready for operator review and push)
+  - **Phase 9C (Migration Plan Preview Presentation & DTO Mapping)**: PENDING
+  - **Phase 9D (Migration Planning Subsystem Verification & Hardening)**: PENDING
 
 ## Next Recommended Work
-1. Execute runtime verification suite for Phase 8E/8F (test-compile, Benchmark tests, Matching tests, Checkstyle).
-2. Upon successful execution, freeze Phase 8 and advance to Phase 9 (Migration Engine).
+1. Execute runtime verification suite in operator terminal from `C:\Projects\spotify-youtube-migrator\backend`:
+   - `.\mvnw.cmd test "-Dtest=DefaultPlaylistMigrationPlanGeneratorTest,MigrationPlanTest,MigrationWorkflowEvaluatorTest"`
+   - `.\mvnw.cmd test "-Dtest=PlaylistMigrationOrchestratorTest,MigrationServiceImplTest,MigrationControllerTest"`
+   - `.\mvnw.cmd test-compile`
+   - `.\mvnw.cmd checkstyle:check`
+2. Push verified Phase 9B changes to `main`.
+3. Advance to Phase 9C (Migration Plan Preview Presentation & DTO Mapping).

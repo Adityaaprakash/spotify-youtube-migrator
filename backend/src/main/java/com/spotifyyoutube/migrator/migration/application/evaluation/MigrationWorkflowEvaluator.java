@@ -77,7 +77,7 @@ public class MigrationWorkflowEvaluator {
                 successfulTracks += playlistSuccess;
                 unmatchedTracks += playlistUnmatched;
                 reviewTracks += playlistReview;
-                duplicatePrevented += playlistDuplicates;
+                duplicatePrevented += Math.max(playlistDuplicates, summary.duplicateTracks());
                 failedTracks += playlistFailures;
             }
         }

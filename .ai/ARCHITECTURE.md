@@ -147,3 +147,20 @@ Controllers MUST NOT:
   - **Credential & Secret Protection**: All log messages, diagnostic strings, and `MigrationTask.errorMessage` records are sanitized with regex scrubbing of `Bearer` tokens, `access_token=`, `refresh_token=`, `token=`, `api_key=`, `apikey=`, `key=`, `client_secret=`, `secret=`, and `password=` values. Raw exception objects and stack traces are excluded from log statements.
   - **Provider Isolation**: Provider-specific Spotify and YouTube DTOs remain strictly encapsulated in their respective packages; orchestration communicates via domain models and provider-neutral interfaces (`MusicDestination`, `SpotifyPlaylistService`).
   - **Disjoint Metric Partition**: `MigrationWorkflowEvaluator` enforces a mutually exclusive partition where $\text{totalTracks} = \text{successfullyMigrated} + \text{unmatched} + \text{reviewRequired} + \text{duplicatePrevented} + \text{failedTracks}$, distinguishing between aggregate unmigrated database counts in `MigrationExecutionSummary.failedTracks` and genuine processing/API errors in `MigrationWorkflowEvaluationReport.failedTracks`.
+
+## Migration Planning Subsystem (Phase 9A, 9B)
+
+- Package: `com.spotifyyoutube.migrator.migration.application.plan`
+- Architecture Decisions: ADR-022 (Migration Planning Architecture, Contracts, and Execution Boundary)
+- Purpose: Provider-neutral, immutable domain contracts and application-layer generation service representing pre-flight playlist migration plans, per-track planning classifications, and mathematically reconciled aggregate summaries prior to destination mutation.
+- Architecture Rules:
+  - **Planning vs. Mutation Boundary**: Migration planning evaluates source tracks, candidate discovery, and calibrated matching to produce a preview without calling `MusicDestination.createPlaylist(...)` or `MusicDestination.addTrackToPlaylist(...)`. Planning is strictly read-only with respect to destination services.
+  - **Transient In-Memory Preview Model**: `MigrationPlan` instances are transient in-memory domain models with unique `UUID planId` and `Instant createdAt` snapshot timestamps. Database entities (`MigrationJob`, `MigrationTask`) remain dedicated to active/completed execution jobs, avoiding schema pollution and premature Flyway migrations.
+  - **Immutable Contracts**: All planning contracts (`MigrationPlan`, `MigrationPlanTrack`, `MigrationPlanSummary`, `PlanTrackClassification`) MUST be immutable records with defensive collection copying (`List.copyOf`).
+  - **Deterministic Source Ordering**: Source playlist order is strictly preserved. `MigrationPlan` validates that `tracks.get(i).position() == i` for all indices $0 \le i < \text{tracks.size()}$.
+  - **Mutually Exclusive Classifications**: Every source track maps to exactly one of: `AUTO_MATCH`, `REVIEW_REQUIRED`, `UNMATCHED`, `DUPLICATE`, `FAILED`, `EXCLUDED`. Review-required tracks are held out and can never silently become `AUTO_MATCH`.
+  - **Exact Reconciliation Invariant**: `MigrationPlanSummary` strictly validates that $\text{totalTracks} = \text{autoMatch} + \text{reviewRequired} + \text{unmatched} + \text{duplicate} + \text{failed} + \text{excluded}$. All counts must be non-negative.
+  - **Credential Redaction**: Diagnostics and error messages are sanitized against `TOKEN_PATTERN` to prevent OAuth bearer tokens, API keys, or passwords from appearing in plan previews or logs.
+  - **Plan Generation Service (`DefaultPlaylistMigrationPlanGenerator`)**: Coordinates `SpotifyPlaylistService` (source playlist metadata and track retrieval), Phase 5 `NormalizationOrchestrator`, Phase 6 `CandidateDiscoveryService`, and Phase 7 `TrackMatchingEngine`.
+  - **Encounter-Order Deduplication**: Tracks candidate IDs assigned to prior tracks in the same plan. When deduplication is active, duplicate candidates are marked `DUPLICATE` without claiming additional destination slots.
+  - **Per-Track Fault Isolation**: Exceptions thrown during individual track normalization, candidate discovery, or matching are isolated; error details are redacted, and the track is classified as `FAILED` while remaining tracks in the playlist continue processing.

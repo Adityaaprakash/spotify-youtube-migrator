@@ -75,6 +75,10 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 8H**: [COMPLETE] Migration Workflow Evaluation, Calibration & Reliability Verification (ADR-021, `MigrationWorkflowEvaluator`, `MigrationWorkflowEvaluationReport`, telemetry calculations for migration success, unmatched, review, failure rates, throughput, duplicate prevention, order preservation validation, markdown and plain text reporting with denominator disclosures).
 
 ### **Phase 9 — Migration Engine**
+- **Phase 9A**: [COMPLETE] Migration Engine Architecture Audit & Planning Contracts (ADR-022, architecture audit, planning vs. destination mutation separation, transient in-memory preview design, immutable planning contracts MigrationPlan, MigrationPlanTrack, MigrationPlanSummary, PlanTrackClassification, exact mathematical summary reconciliation, strict source order preservation, credential sanitization).
+- **Phase 9B**: [COMPLETE] Migration Plan Generation (Application service `DefaultPlaylistMigrationPlanGenerator` implementing `PlaylistMigrationPlanGenerator`, connecting Spotify retrieval, Phase 5 normalization, Phase 6 candidate discovery, and Phase 7 calibrated matching into immutable `MigrationPlan`, strictly read-only with respect to destination, preserving source order, enforcing single-classification partition, tracking duplicate candidates, isolating per-track failures, redacting credentials, and verifying 12 unit tests across all 11 required scenarios).
+- **Phase 9C**: [PENDING] Migration Plan Preview Presentation & DTO Mapping.
+- **Phase 9D**: [PENDING] Migration Planning Subsystem Verification & Hardening.
 ### **Phase 10 — Review & Correction**
 ### **Phase 11 — Playlist Creation**
 ### **Phase 12 — Async Migration & Progress**
