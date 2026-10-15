@@ -506,7 +506,8 @@ As the migrator logic scales, testing will expand to:
 - **Execution Limitation**: Automated terminal execution via IDE subagent tool is blocked by environment permission broker (`unexpected user interaction type: not permission`). Exact PowerShell commands are provided for operator execution.
 
 ## Current Blockers & Status
-- **Phase 9D Complete & Verified**: Migration planning subsystem audit, verification, and hardening complete with 55 dedicated planning tests, zero Checkstyle violations, transient preview invariant verified (ADR-022), read-only destination invariant verified, and backward-compatible execution orchestration verified. Phase 9 is **COMPLETE / VERIFIED**.
+- **Phase 9E Complete & Frozen**: Final integrated verification, cross-phase audit, and formal subsystem freeze complete. All 14 planning and API invariants verified across 55 dedicated tests in 6 classes, 1,104 test baseline verified passing (1,107 with Phase 9D hardening tests), 0 Checkstyle violations, transient preview invariant verified (ADR-022), read-only destination invariant verified, backward-compatible execution orchestration verified, and Phase 5–7 frozen subsystem integrity preserved. Phase 9 is **COMPLETE / FROZEN**.
+- **Phase 9D Complete**: Migration planning subsystem audit, verification, and hardening complete with 55 dedicated planning tests; committed and pushed in `eb33f7d`.
 - **Phase 9C Complete**: Migration plan preview REST endpoint (`POST /api/migrations/preview`), DTOs, application service, and 25-test verification suite implemented and verified against architectural constraints; committed and pushed in `81dd7bb`.
 - **Phase 9B Complete**: Plan generator application service and 12-test unit test suite implemented and verified against architectural constraints.
 - **Phase 9A Complete**: Planning contracts, summary reconciliation, and 15-test invariant test suite complete.

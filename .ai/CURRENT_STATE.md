@@ -2,11 +2,22 @@
 
 Last Updated: 2026-10-15
 
-Current Phase: Phase 9 — Migration Engine (Phase 9D: Migration Planning Subsystem Verification & Hardening)
-Current Subphase: Phase 9D Complete / Verified; Phase 10 Next
+Current Phase: Phase 9 — Migration Engine (Phase 9E: Final Integrated Verification, Freeze & Handoff)
+Current Subphase: Phase 9 Complete & Frozen (9A–9E); Phase 10 Next
 
 ## Completed
-### Phase 9D (Migration Planning Subsystem Verification & Hardening) [COMPLETE / VERIFIED]
+### Phase 9E (Final Integrated Verification, Freeze & Handoff) [COMPLETE / FROZEN]
+- **Cross-Phase Audit & Verification**:
+  - Full subsystem audit across Phase 9A planning contracts, Phase 9B generator, Phase 9C preview REST API, and Phase 9D hardening regression suites.
+  - All 14 planning and API invariants verified: strict source ordering (0-indexed positions), 6-outcome disjoint partition (`AUTO_MATCH`, `REVIEW_REQUIRED`, `UNMATCHED`, `DUPLICATE`, `FAILED`, `EXCLUDED`), mathematical summary reconciliation, encounter-order deduplication, review-required holdout protection, per-track failure isolation, credential scrubbing (`TOKEN_PATTERN`), null/blank metadata fallbacks, and deterministic repeatability.
+  - ADR-022 transient in-memory preview snapshot invariant strictly verified: zero `@Entity` models, zero plan tables, zero Flyway migrations.
+  - Read-only destination preview invariant verified: zero calls to `MusicDestination.createPlaylist` or `addTrackToPlaylist` during plan preview generation; confirmed via runtime mocks and reflection architectural dependency inspections.
+  - Existing execution path compatibility verified: `PlaylistMigrationOrchestrator.executeMigration(UUID jobId)` remains completely untouched and operational under Phase 8 contracts.
+  - Frozen subsystem integrity confirmed: Phase 5 (Normalization), Phase 6 (Candidate Discovery), Phase 7 (Track Matching), and Phase 8 (Benchmark & Workflow Orchestration) production files remain 100% frozen.
+  - Formal subsystem freeze: Migration planning subsystem is formally FROZEN and handed off for Phase 10.
+
+### Phase 9D (Migration Planning Subsystem Verification & Hardening) [COMPLETE / COMMITTED / PUSHED: eb33f7d]
+- **Commit**: `eb33f7d` (`test(migration): harden Phase 9D planning subsystem`).
 - **Scope & Objectives**:
   - Comprehensive audit and hardening of the complete migration planning subsystem (Phases 9A through 9C).
   - Validation of all 14 core planning and API invariants without expanding product scope into later phases.
@@ -745,15 +756,12 @@ Current Subphase: Phase 9D Complete / Verified; Phase 10 Next
   - **Phase 8F (Subsystem Verification, Audit & Freeze)**: COMPLETE / FROZEN
   - **Phase 8G (Playlist Migration Workflow Integration)**: COMPLETE / FROZEN
   - **Phase 8H (Migration Workflow Evaluation & Reliability Verification)**: COMPLETE / FROZEN
-- **Phase 9 (Migration Engine)**: COMPLETE / VERIFIED
+- **Phase 9 (Migration Engine)**: COMPLETE / FROZEN
   - **Phase 9A (Architecture Audit, Boundary Decoupling & Planning Contracts)**: COMPLETE / FROZEN
-  - **Phase 9B (Migration Plan Generation Service & Suite)**: COMPLETE / VERIFIED
+  - **Phase 9B (Migration Plan Generation Service & Suite)**: COMPLETE / FROZEN
   - **Phase 9C (Migration Plan Preview API & Presentation Layer)**: COMPLETE / COMMITTED / PUSHED (`81dd7bb`)
-  - **Phase 9D (Migration Planning Subsystem Verification & Hardening)**: COMPLETE / VERIFIED
+  - **Phase 9D (Migration Planning Subsystem Verification & Hardening)**: COMPLETE / COMMITTED / PUSHED (`eb33f7d`)
+  - **Phase 9E (Final Integrated Verification, Freeze & Handoff)**: COMPLETE / FROZEN
 
 ## Next Recommended Work
-1. Operator terminal verification:
-   - Run focused migration planning suites and Checkstyle:
-     `.\mvnw.cmd test "-Dtest=DefaultPlaylistMigrationPlanGeneratorTest,MigrationPlanTest,MigrationPlanControllerTest,MigrationPlanServiceTest,MigrationPlanSerializationTest,MigrationPlanDestinationSafetyTest"`
-     `.\mvnw.cmd checkstyle:check`
-2. Advance to Phase 10 (Review & Correction Interface).
+1. Advance to Phase 10 (Review & Correction Interface).
