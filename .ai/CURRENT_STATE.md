@@ -1,11 +1,50 @@
 # Current State
 
-Last Updated: 2026-10-15
+Last Updated: 2026-10-16
 
-Current Phase: Phase 9 — Migration Engine (Phase 9E: Final Integrated Verification, Freeze & Handoff)
-Current Subphase: Phase 9 Complete & Frozen (9A–9E); Phase 10 Next
+Current Phase: Phase 10 — Review & Correction (Phase 10A & 10B Complete; Phase 10C Next)
+Current Subphase: Phase 10A (Audit & Contracts) & Phase 10B (Review Domain & State Management) Complete
 
 ## Completed
+### Phase 10B (Review Domain & State Management) [COMPLETE]
+- **Domain State Machine & Lifecycle**:
+  - `ReviewSession` JPA entity tracking review lifecycle (`IN_PROGRESS`, `COMPLETED`, `CANCELLED`), association with `User`, source playlist, and Phase 9 `planId`.
+  - `ReviewTrack` JPA entity representing independent review decision state while immutably preserving automatic matching evidence (`originalClassification`, `originalCandidateId`, `originalMatchScore`, `originalCalibratedProbability`, `originalMatchDecision`, `originalMatchReasons`).
+  - Strict separation of provenance: `ReviewDecisionSource.AUTOMATIC` vs `ReviewDecisionSource.USER_SELECTED`. No confidence score fabrication for manual human selections.
+  - Invariant enforcement:
+    1. Decisions belong to the correct session and track.
+    2. Selected candidates must be valid (non-null, non-blank ID/title, non-negative duration).
+    3. Excluded tracks are never treated as approved for migration (`isApprovedForMigration() == false`).
+    4. Unresolved duplicate conflicts prevent review completion (`eligibleForCompletion == false`).
+    5. Review session cannot complete while required decisions remain unresolved.
+    6. Repeated identical decisions are idempotent.
+    7. Invalid transitions on closed sessions fail fast with `InvalidStateException`.
+    8. Source track order and identity remain unchanged.
+    9. Review decisions perform zero YouTube Music mutations (zero `MusicDestination` calls).
+    10. Review state mutations never alter Phase 9's read-only preview snapshots.
+- **Summary Derivation & Dynamic Reconciliation**:
+  - `ReviewProgressSummary` derived dynamically from `ReviewTrack` collection without redundant counters, enforcing exact mathematical reconciliation:
+    $\text{totalTracks} = \text{awaitingReviewCount} + \text{acceptedCount} + \text{manuallyCorrectedCount} + \text{excludedCount}$
+    $\text{remainingRequiredDecisions} = \text{awaitingReviewCount} + \text{unresolvedConflictCount}$
+    $\text{eligibleForCompletion} = (\text{remainingRequiredDecisions} == 0)$.
+- **Repositories & Application Service**:
+  - `ReviewSessionRepository` and `ReviewTrackRepository` with indexed queries.
+  - `ReviewSessionService` and `DefaultReviewSessionService` coordinating session creation from plan, candidate selection, auto-accept, exclusion, duplicate conflict detection/reconciliation, session completion, and cancellation.
+- **Comprehensive Automated Test Coverage**:
+  - `ReviewSessionDomainTest` (12 tests): Domain state transitions, provenance preservation, candidate validation, idempotence, session completion invariants, summary reconciliation.
+  - `ReviewSessionServiceTest` (11 tests): Application service orchestration, initial classification mapping, ownership validation, candidate selection, duplicate conflict detection/resolution lifecycle, session completion and cancellation.
+  - `ReviewStatePersistenceSafetyTest` (4 tests): Phase 9 preview read-only guarantee, zero `MusicDestination` dependency/mutation guarantee, original matching evidence immutability across multi-decision workflows, backward compatibility of `PlaylistMigrationOrchestrator.executeMigration(UUID jobId)`.
+
+### Phase 10A (Architecture Audit, Review Contracts & Persistence Strategy) [COMPLETE]
+- **Architecture Audit & Findings**:
+  - Audited Phase 9 pre-flight planning pipeline vs existing execution engine vs review requirements.
+  - Investigated and documented codebase discrepancy: `MigrationTrack` and `match_source` did not previously exist; `migration_tasks` tracks execution, not review. Resolved via decoupled `review_sessions` and `review_tracks` persistence model with `ReviewDecisionSource`.
+  - Audited persistence strategy: Preserved ADR-022 transient read-only plan preview guarantee while providing robust persistence across requests for human review decisions.
+- **Contracts & ADR Documentation**:
+  - Published `ADR-023-review-domain-contracts-and-state-management.md`.
+  - Updated `ARCHITECTURE.md` with Review Subsystem architecture rules and layer boundaries.
+  - Authored Flyway migration `V5__phase10_review_session_schema.sql` creating indexed tables for review sessions and review tracks.
+
 ### Phase 9E (Final Integrated Verification, Freeze & Handoff) [COMPLETE / FROZEN]
 - **Cross-Phase Audit & Verification**:
   - Full subsystem audit across Phase 9A planning contracts, Phase 9B generator, Phase 9C preview REST API, and Phase 9D hardening regression suites.

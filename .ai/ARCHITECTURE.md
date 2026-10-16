@@ -169,3 +169,30 @@ Controllers MUST NOT:
   - **Plan Generation Service (`DefaultPlaylistMigrationPlanGenerator`)**: Coordinates `SpotifyPlaylistService` (source playlist metadata and track retrieval), Phase 5 `NormalizationOrchestrator`, Phase 6 `CandidateDiscoveryService`, and Phase 7 `TrackMatchingEngine`.
   - **Encounter-Order Deduplication**: Tracks candidate IDs assigned to prior tracks in the same plan. When deduplication is active, duplicate candidates are marked `DUPLICATE` without claiming additional destination slots.
   - **Per-Track Fault Isolation**: Exceptions thrown during individual track normalization, candidate discovery, or matching are isolated; error details are redacted, and the track is classified as `FAILED` while remaining tracks in the playlist continue processing.
+
+## Review Subsystem (Phase 10A, 10B)
+
+- Packages:
+  - Domain & State Machine: `com.spotifyyoutube.migrator.migration.review.domain`
+  - Repositories: `com.spotifyyoutube.migrator.migration.review.repository`
+  - Application Service: `com.spotifyyoutube.migrator.migration.review.application`
+- Database Migration: `V5__phase10_review_session_schema.sql` (`review_sessions`, `review_tracks`)
+- Architecture Decisions: ADR-023 (Review Domain Architecture, State Management, and Review Contracts)
+- Purpose: Persistent state management for asynchronous, multi-step human review of migration plans prior to destination playlist creation. Tracks human corrections, candidate replacements, track exclusions, duplicate conflict resolution, and completion eligibility.
+- Architecture Rules:
+  - **Decoupled Persistence vs Transient Preview**: While Phase 9 `MigrationPlan` instances remain transient, read-only preview snapshots under ADR-022, human review decisions are persisted across requests in dedicated `review_sessions` and `review_tracks` tables.
+  - **Zero Execution Subsystem Pollution**: Operational `migration_jobs` and `migration_tasks` remain dedicated to Phase 8 and future Phase 11/12 execution jobs, preventing corruption of operational job logs with pre-execution review states.
+  - **Preservation of Automatic Matching Evidence**: `ReviewTrack` strictly separates immutable automatic matching provenance (`originalClassification`, `originalCandidateId`, `originalMatchScore`, `originalCalibratedProbability`, `originalMatchDecision`, `originalMatchReasons`) from mutable review decision states (`reviewStatus`, `decisionSource`, `selectedCandidateId`, `excluded`, `hasConflict`). Original evidence is never overwritten.
+  - **No Fabricated Confidence**: User-selected candidates are flagged with `decisionSource = USER_SELECTED`. No synthetic confidence scores or probabilities are generated for manual human choices.
+  - **Centralized Invariants**:
+    1. Decisions belong to the correct session and track.
+    2. Selected candidates must be valid (non-null, non-blank ID/title, non-negative duration).
+    3. Excluded tracks are never treated as approved for migration (`isApprovedForMigration() == false`).
+    4. Unresolved duplicate conflicts prevent review completion (`eligibleForCompletion == false`).
+    5. Review session cannot complete while required decisions remain unresolved.
+    6. Repeated identical decisions are idempotent.
+    7. Invalid transitions on closed sessions fail fast with `InvalidStateException`.
+    8. Source track order and identity remain unchanged.
+    9. Review decisions perform zero YouTube Music mutations (zero `MusicDestination` calls).
+    10. Review state mutations never alter Phase 9's read-only preview snapshots.
+  - **Reconciled Progress Derivation**: `ReviewProgressSummary` derives counts dynamically from `ReviewTrack` entities with exact mathematical reconciliation, guaranteeing zero counter drift.
