@@ -299,6 +299,54 @@ class ReviewSessionDomainTest {
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("Cannot cancel review session in status: CANCELLED");
         }
+
+        @Test
+        @DisplayName("ReviewSession constructor rejects null user or blank sourcePlaylistId")
+        void constructorValidatesArguments() {
+            assertThatThrownBy(() -> new ReviewSession(null, "pl-1", "Title", UUID.randomUUID()))
+                    .isInstanceOf(NullPointerException.class)
+                    .hasMessageContaining("User must not be null");
+
+            assertThatThrownBy(() -> new ReviewSession(testUser, "   ", "Title", UUID.randomUUID()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("sourcePlaylistId must not be blank");
+        }
+
+        @Test
+        @DisplayName("complete rejects summary whose totalTracks does not match session tracks count")
+        void completeRejectsMismatchedSummaryTrackCount() {
+            createSampleTrack(0, "sp-0", PlanTrackClassification.AUTO_MATCH, "yt-0", 0.95, 0.98);
+            // Session has 1 track, but pass summary with 0 tracks
+            ReviewProgressSummary mismatchedSummary = new ReviewProgressSummary(0, 0, 0, 0, 0, 0, 0, true);
+            assertThatThrownBy(() -> session.complete(mismatchedSummary))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Summary totalTracks (0) does not match session tracks count (1)");
+        }
+
+        @Test
+        @DisplayName("complete rejects when tracks collection size does not match session totalTracks")
+        void completeRejectsMismatchedTotalTracks() {
+            createSampleTrack(0, "sp-0", PlanTrackClassification.AUTO_MATCH, "yt-0", 0.95, 0.98);
+            session.setTotalTracks(3);
+            ReviewProgressSummary summary = new ReviewProgressSummary(1, 0, 1, 0, 0, 0, 0, true);
+            assertThatThrownBy(() -> session.complete(summary))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Session tracks count (1) does not match totalTracks (3)");
+        }
+
+        @Test
+        @DisplayName("setTracks correctly restores bidirectional session reference on all tracks")
+        void setTracksRestoresBidirectionalRelationship() {
+            ReviewTrack track = new ReviewTrack();
+            track.setPosition(0);
+            track.setSourceTrackId("sp-0");
+            track.setSourceTitle("Title");
+            assertThat(track.getSession()).isNull();
+
+            session.setTracks(List.of(track));
+            assertThat(track.getSession()).isEqualTo(session);
+            assertThat(session.getTotalTracks()).isEqualTo(1);
+        }
     }
 
     @Nested

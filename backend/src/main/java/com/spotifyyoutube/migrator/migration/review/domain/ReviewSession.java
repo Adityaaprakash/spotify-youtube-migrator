@@ -65,6 +65,9 @@ public class ReviewSession extends BaseEntity {
     public ReviewSession(User user, String sourcePlaylistId, String sourcePlaylistTitle, UUID planId) {
         this.user = Objects.requireNonNull(user, "User must not be null");
         this.sourcePlaylistId = Objects.requireNonNull(sourcePlaylistId, "sourcePlaylistId must not be null");
+        if (sourcePlaylistId.isBlank()) {
+            throw new IllegalArgumentException("sourcePlaylistId must not be blank");
+        }
         this.sourcePlaylistTitle = sourcePlaylistTitle != null && !sourcePlaylistTitle.isBlank()
                 ? sourcePlaylistTitle
                 : "Migrated Playlist";
@@ -84,6 +87,20 @@ public class ReviewSession extends BaseEntity {
 
         if (!isInProgress()) {
             throw new InvalidStateException("Cannot complete review session in status: " + status);
+        }
+
+        if (summary.totalTracks() != tracks.size()) {
+            throw new IllegalArgumentException(String.format(
+                    "Summary totalTracks (%d) does not match session tracks count (%d)",
+                    summary.totalTracks(), tracks.size()
+            ));
+        }
+
+        if (totalTracks != null && tracks.size() != totalTracks) {
+            throw new IllegalArgumentException(String.format(
+                    "Session tracks count (%d) does not match totalTracks (%d)",
+                    tracks.size(), totalTracks
+            ));
         }
 
         if (!summary.eligibleForCompletion()) {
@@ -200,6 +217,9 @@ public class ReviewSession extends BaseEntity {
 
     public void setTracks(List<ReviewTrack> tracks) {
         this.tracks = tracks != null ? tracks : new ArrayList<>();
+        for (ReviewTrack t : this.tracks) {
+            t.setSession(this);
+        }
         this.totalTracks = this.tracks.size();
     }
 }

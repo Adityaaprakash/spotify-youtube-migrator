@@ -185,6 +185,7 @@ public class DefaultReviewSessionService implements ReviewSessionService {
     @Transactional(readOnly = true)
     public ReviewProgressSummary getReviewProgress(UUID sessionId) {
         ReviewSession session = getSession(sessionId);
+        ensureTracksLoaded(session);
         return session.deriveSummary();
     }
 
@@ -195,17 +196,22 @@ public class DefaultReviewSessionService implements ReviewSessionService {
             throw new InvalidStateException("Cannot modify track: review session is in status " + session.getStatus());
         }
 
-        ReviewTrack track = reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
-                .orElseThrow(() -> new ResourceNotFoundException(String.format(
-                        "Track not found at position %d in review session %s", position, sessionId
-                )));
+        ensureTracksLoaded(session);
+
+        ReviewTrack track = session.getTracks().stream()
+                .filter(t -> t.getPosition() == position)
+                .findFirst()
+                .orElseGet(() -> reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
+                        .orElseThrow(() -> new ResourceNotFoundException(String.format(
+                                "Track not found at position %d in review session %s", position, sessionId
+                        ))));
 
         track.selectCandidate(candidate, notes);
         reconcileConflicts(session);
-        ReviewTrack savedTrack = reviewTrackRepository.save(track);
+        reviewTrackRepository.saveAll(session.getTracks());
         log.debug("Track at position {} in session {} manually matched to candidate {}",
                 position, sessionId, candidate.id());
-        return savedTrack;
+        return track;
     }
 
     @Override
@@ -215,17 +221,22 @@ public class DefaultReviewSessionService implements ReviewSessionService {
             throw new InvalidStateException("Cannot modify track: review session is in status " + session.getStatus());
         }
 
-        ReviewTrack track = reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
-                .orElseThrow(() -> new ResourceNotFoundException(String.format(
-                        "Track not found at position %d in review session %s", position, sessionId
-                )));
+        ensureTracksLoaded(session);
+
+        ReviewTrack track = session.getTracks().stream()
+                .filter(t -> t.getPosition() == position)
+                .findFirst()
+                .orElseGet(() -> reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
+                        .orElseThrow(() -> new ResourceNotFoundException(String.format(
+                                "Track not found at position %d in review session %s", position, sessionId
+                        ))));
 
         track.acceptOriginalMatch();
         reconcileConflicts(session);
-        ReviewTrack savedTrack = reviewTrackRepository.save(track);
+        reviewTrackRepository.saveAll(session.getTracks());
         log.debug("Track at position {} in session {} accepted automatic candidate {}",
                 position, sessionId, track.getSelectedCandidateId());
-        return savedTrack;
+        return track;
     }
 
     @Override
@@ -235,16 +246,21 @@ public class DefaultReviewSessionService implements ReviewSessionService {
             throw new InvalidStateException("Cannot modify track: review session is in status " + session.getStatus());
         }
 
-        ReviewTrack track = reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
-                .orElseThrow(() -> new ResourceNotFoundException(String.format(
-                        "Track not found at position %d in review session %s", position, sessionId
-                )));
+        ensureTracksLoaded(session);
+
+        ReviewTrack track = session.getTracks().stream()
+                .filter(t -> t.getPosition() == position)
+                .findFirst()
+                .orElseGet(() -> reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
+                        .orElseThrow(() -> new ResourceNotFoundException(String.format(
+                                "Track not found at position %d in review session %s", position, sessionId
+                        ))));
 
         track.exclude(reason);
         reconcileConflicts(session);
-        ReviewTrack savedTrack = reviewTrackRepository.save(track);
+        reviewTrackRepository.saveAll(session.getTracks());
         log.debug("Track at position {} in session {} excluded from migration", position, sessionId);
-        return savedTrack;
+        return track;
     }
 
     @Override
@@ -254,12 +270,14 @@ public class DefaultReviewSessionService implements ReviewSessionService {
             throw new InvalidStateException("Review session is not in progress: " + session.getStatus());
         }
 
+        ensureTracksLoaded(session);
         reconcileConflicts(session);
         ReviewProgressSummary summary = session.deriveSummary();
 
         // Enforces Invariant 4 & Invariant 5
         session.complete(summary);
 
+        reviewTrackRepository.saveAll(session.getTracks());
         ReviewSession savedSession = reviewSessionRepository.save(session);
         log.info("Review session {} completed successfully with {} total tracks",
                 sessionId, savedSession.getTotalTracks());
@@ -276,8 +294,24 @@ public class DefaultReviewSessionService implements ReviewSessionService {
     }
 
     /**
+     * Ensures that the session's track list is loaded from repository if not already in memory.
+     */
+    private List<ReviewTrack> ensureTracksLoaded(ReviewSession session) {
+        List<ReviewTrack> tracks = session.getTracks();
+        if (tracks == null || tracks.isEmpty()
+                || (session.getTotalTracks() != null && session.getTotalTracks() > 0 && tracks.size() != session.getTotalTracks())) {
+            if (session.getId() != null) {
+                tracks = reviewTrackRepository.findBySessionIdOrderByPositionAsc(session.getId());
+                session.setTracks(tracks);
+            }
+        }
+        return tracks != null ? tracks : List.of();
+    }
+
+    /**
      * Reconciles destination video candidate conflicts across active, approved tracks in the session.
-     * Prevents duplicate destination additions from going unnoticed.
+     * Prevents duplicate destination additions from going unnoticed, and automatically resolves conflicts
+     * when earlier claiming tracks are excluded or reassigned.
      */
     private void reconcileConflicts(ReviewSession session) {
         List<ReviewTrack> tracks = session.getTracks();

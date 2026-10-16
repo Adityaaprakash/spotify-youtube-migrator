@@ -11,7 +11,6 @@ import com.spotifyyoutube.migrator.migration.application.plan.MigrationPlanSumma
 import com.spotifyyoutube.migrator.migration.application.plan.MigrationPlanTrack;
 import com.spotifyyoutube.migrator.migration.application.plan.PlanTrackClassification;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
-import com.spotifyyoutube.migrator.migration.review.domain.ReviewProgressSummary;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrack;
@@ -145,6 +144,8 @@ class ReviewSessionServiceTest {
         assertThat(t3.getReviewStatus()).isEqualTo(ReviewTrackStatus.AWAITING_REVIEW);
         assertThat(t3.hasConflict()).isTrue();
         assertThat(t3.getConflictReason()).contains("Duplicate destination candidate");
+        assertThat(t3.isApprovedForMigration()).isFalse();
+        assertThat(t3.getSelectedCandidateId()).isNull();
 
         // Track 4: FAILED -> AWAITING_REVIEW
         ReviewTrack t4 = tracks.get(4);
@@ -157,6 +158,31 @@ class ReviewSessionServiceTest {
         assertThat(t5.getReviewStatus()).isEqualTo(ReviewTrackStatus.EXCLUDED);
         assertThat(t5.isExcluded()).isTrue();
         assertThat(t5.isApprovedForMigration()).isFalse();
+    }
+
+    @Test
+    @DisplayName("createSessionFromPlan detects automatic duplicate conflicts when plan has multiple AUTO_MATCH with same candidate")
+    void createSessionFromPlanDetectsAutomaticDuplicateConflicts() {
+        DestinationTrackCandidate sharedCand = createCandidate("yt-shared-dup", "Shared Song");
+
+        List<MigrationPlanTrack> planTracks = List.of(
+                MigrationPlanTrack.autoMatch(0, "sp-0", "Song A", "Artist A", sharedCand, 0.95, 0.99, List.of("Auto")),
+                MigrationPlanTrack.autoMatch(1, "sp-1", "Song B", "Artist B", sharedCand, 0.90, 0.92, List.of("Auto"))
+        );
+        MigrationPlanSummary summary = new MigrationPlanSummary(2, 2, 0, 0, 0, 0, 0);
+        MigrationPlan plan = new MigrationPlan(UUID.randomUUID(), "spotify-pl-dup", "Dup Tunes", Instant.now(), planTracks, summary);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(reviewSessionRepository.save(any(ReviewSession.class))).thenAnswer(i -> i.getArgument(0));
+
+        ReviewSession session = reviewSessionService.createSessionFromPlan(userId, plan);
+
+        ReviewTrack t0 = session.getTracks().get(0);
+        ReviewTrack t1 = session.getTracks().get(1);
+
+        assertThat(t0.hasConflict()).isFalse();
+        assertThat(t1.hasConflict()).isTrue();
+        assertThat(t1.getConflictReason()).contains("Duplicate destination candidate: 'yt-shared-dup' already claimed by earlier track at position 0");
     }
 
     @Test
@@ -206,8 +232,7 @@ class ReviewSessionServiceTest {
         testSession.addTrack(track);
 
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
-        when(reviewTrackRepository.findBySessionIdAndPosition(sessionId, 0)).thenReturn(Optional.of(track));
-        when(reviewTrackRepository.save(any(ReviewTrack.class))).thenAnswer(i -> i.getArgument(0));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
 
         DestinationTrackCandidate manualCandidate = createCandidate("yt-manual-42", "Manual Selected Video");
         ReviewTrack updated = reviewSessionService.selectCandidate(sessionId, 0, manualCandidate, "Picked by user");
@@ -225,7 +250,7 @@ class ReviewSessionServiceTest {
         assertThat(updated.getOriginalCalibratedProbability()).isEqualTo(0.55);
         assertThat(updated.getOriginalMatchDecision()).isEqualTo(MatchDecision.REVIEW_REQUIRED);
 
-        verify(reviewTrackRepository).save(track);
+        verify(reviewTrackRepository).saveAll(any());
     }
 
     @Test
@@ -243,8 +268,7 @@ class ReviewSessionServiceTest {
         testSession.addTrack(track);
 
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
-        when(reviewTrackRepository.findBySessionIdAndPosition(sessionId, 0)).thenReturn(Optional.of(track));
-        when(reviewTrackRepository.save(any(ReviewTrack.class))).thenAnswer(i -> i.getArgument(0));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
 
         ReviewTrack accepted = reviewSessionService.acceptAutomaticMatch(sessionId, 0);
 
@@ -252,7 +276,7 @@ class ReviewSessionServiceTest {
         assertThat(accepted.getSelectedCandidateId()).isEqualTo("yt-auto-0");
         assertThat(accepted.isApprovedForMigration()).isTrue();
 
-        verify(reviewTrackRepository).save(track);
+        verify(reviewTrackRepository).saveAll(any());
     }
 
     @Test
@@ -270,8 +294,7 @@ class ReviewSessionServiceTest {
         testSession.addTrack(track);
 
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
-        when(reviewTrackRepository.findBySessionIdAndPosition(sessionId, 0)).thenReturn(Optional.of(track));
-        when(reviewTrackRepository.save(any(ReviewTrack.class))).thenAnswer(i -> i.getArgument(0));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
 
         ReviewTrack excluded = reviewSessionService.excludeTrack(sessionId, 0, "Do not want this song");
 
@@ -280,7 +303,7 @@ class ReviewSessionServiceTest {
         assertThat(excluded.getSelectedCandidateId()).isNull();
         assertThat(excluded.isApprovedForMigration()).isFalse();
 
-        verify(reviewTrackRepository).save(track);
+        verify(reviewTrackRepository).saveAll(any());
     }
 
     @Test
@@ -308,6 +331,7 @@ class ReviewSessionServiceTest {
         testSession.addTrack(track1);
 
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
         when(reviewSessionRepository.save(any(ReviewSession.class))).thenAnswer(i -> i.getArgument(0));
 
         ReviewSession completed = reviewSessionService.completeSession(sessionId);
@@ -363,8 +387,7 @@ class ReviewSessionServiceTest {
         testSession.addTrack(track1);
 
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
-        when(reviewTrackRepository.findBySessionIdAndPosition(sessionId, 1)).thenReturn(Optional.of(track1));
-        when(reviewTrackRepository.save(any(ReviewTrack.class))).thenAnswer(i -> i.getArgument(0));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
 
         // 1. User accepts auto-match on track 1 (which has identical candidate 'yt-shared' as track 0)
         reviewSessionService.acceptAutomaticMatch(sessionId, 1);
@@ -394,6 +417,92 @@ class ReviewSessionServiceTest {
     }
 
     @Test
+    @DisplayName("Duplicate conflict automatically cleared when earlier claiming track is excluded")
+    void duplicateConflictClearedWhenEarlierTrackExcluded() {
+        ReviewTrack track0 = new ReviewTrack();
+        track0.setPosition(0);
+        track0.setSourceTrackId("sp-0");
+        track0.setSourceTitle("Title 0");
+        track0.setSourceArtist("Artist 0");
+        track0.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        track0.setOriginalCandidateId("yt-shared");
+        track0.setSelectedCandidateId("yt-shared");
+        track0.setReviewStatus(ReviewTrackStatus.ACCEPTED);
+        testSession.addTrack(track0);
+
+        ReviewTrack track1 = new ReviewTrack();
+        track1.setPosition(1);
+        track1.setSourceTrackId("sp-1");
+        track1.setSourceTitle("Title 1");
+        track1.setSourceArtist("Artist 1");
+        track1.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        track1.setOriginalCandidateId("yt-shared");
+        track1.setSelectedCandidateId("yt-shared");
+        track1.setReviewStatus(ReviewTrackStatus.ACCEPTED);
+        track1.setConflict("Duplicate destination candidate: 'yt-shared' already claimed by earlier track at position 0");
+        testSession.addTrack(track1);
+
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
+
+        // Prior to exclusion, track 1 has conflict
+        assertThat(track1.hasConflict()).isTrue();
+
+        // User excludes track 0
+        reviewSessionService.excludeTrack(sessionId, 0, "Not needed");
+
+        // Track 0 is excluded
+        assertThat(track0.isExcluded()).isTrue();
+        // Track 1's conflict is automatically cleared!
+        assertThat(track1.hasConflict()).isFalse();
+        assertThat(track1.getConflictReason()).isNull();
+
+        verify(reviewTrackRepository).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("Duplicate conflict automatically cleared when earlier claiming track changes candidate")
+    void duplicateConflictClearedWhenEarlierTrackChangesCandidate() {
+        ReviewTrack track0 = new ReviewTrack();
+        track0.setPosition(0);
+        track0.setSourceTrackId("sp-0");
+        track0.setSourceTitle("Title 0");
+        track0.setSourceArtist("Artist 0");
+        track0.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        track0.setOriginalCandidateId("yt-shared");
+        track0.setSelectedCandidateId("yt-shared");
+        track0.setReviewStatus(ReviewTrackStatus.ACCEPTED);
+        testSession.addTrack(track0);
+
+        ReviewTrack track1 = new ReviewTrack();
+        track1.setPosition(1);
+        track1.setSourceTrackId("sp-1");
+        track1.setSourceTitle("Title 1");
+        track1.setSourceArtist("Artist 1");
+        track1.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        track1.setOriginalCandidateId("yt-shared");
+        track1.setSelectedCandidateId("yt-shared");
+        track1.setReviewStatus(ReviewTrackStatus.ACCEPTED);
+        track1.setConflict("Duplicate destination candidate: 'yt-shared' already claimed by earlier track at position 0");
+        testSession.addTrack(track1);
+
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
+
+        // Track 0 changes to a new unique candidate
+        DestinationTrackCandidate newFor0 = createCandidate("yt-unique-for-0", "Unique for 0");
+        reviewSessionService.selectCandidate(sessionId, 0, newFor0, "Changed 0");
+
+        // Track 0 has new candidate
+        assertThat(track0.getSelectedCandidateId()).isEqualTo("yt-unique-for-0");
+        // Track 1's conflict on 'yt-shared' is cleared!
+        assertThat(track1.hasConflict()).isFalse();
+        assertThat(track1.getConflictReason()).isNull();
+
+        verify(reviewTrackRepository).saveAll(any());
+    }
+
+    @Test
     @DisplayName("cancelSession transitions session to CANCELLED")
     void cancelSessionTransitionsToCancelled() {
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
@@ -402,5 +511,92 @@ class ReviewSessionServiceTest {
         ReviewSession cancelled = reviewSessionService.cancelSession(sessionId);
         assertThat(cancelled.getStatus()).isEqualTo(ReviewSessionStatus.CANCELLED);
         assertThat(cancelled.isCancelled()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Initial DUPLICATE track retains conflict until explicitly resolved by user")
+    void initialDuplicateTrackRetainsConflictUntilExplicitlyResolvedByUser() {
+        DestinationTrackCandidate cand0 = createCandidate("yt-cand-0", "Song 0");
+        DestinationTrackCandidate cand1 = createCandidate("yt-cand-0", "Song 0 Duplicate");
+
+        List<MigrationPlanTrack> planTracks = List.of(
+                MigrationPlanTrack.autoMatch(0, "sp-0", "Song 0", "Artist 0", cand0, 0.95, 0.99, List.of("Exact match")),
+                MigrationPlanTrack.duplicate(1, "sp-1", "Song 1", "Artist 1", cand1, 0.90, 0.92, "Duplicate candidate yt-cand-0")
+        );
+        MigrationPlanSummary summary = new MigrationPlanSummary(2, 1, 0, 0, 1, 0, 0);
+        MigrationPlan plan = new MigrationPlan(UUID.randomUUID(), "spotify-pl-dup2", "Dup2 Tunes", Instant.now(), planTracks, summary);
+
+        when(userRepository.findById(userId)).thenReturn(Optional.of(testUser));
+        when(reviewSessionRepository.save(any(ReviewSession.class))).thenAnswer(i -> {
+            ReviewSession s = i.getArgument(0);
+            s.setId(sessionId);
+            return s;
+        });
+        when(reviewSessionRepository.findById(sessionId)).thenAnswer(i -> Optional.of(testSession));
+        when(reviewTrackRepository.saveAll(any())).thenAnswer(i -> i.getArgument(0));
+
+        ReviewSession session = reviewSessionService.createSessionFromPlan(userId, plan);
+        ReviewTrack t1 = session.getTracks().get(1);
+
+        // 1. Initial state: track 1 has active duplicate conflict and is awaiting review
+        assertThat(t1.hasConflict()).isTrue();
+        assertThat(t1.getConflictReason()).contains("Duplicate destination candidate");
+        assertThat(t1.isApprovedForMigration()).isFalse();
+
+        // 2. Setting testSession tracks to match created session for subsequent service calls
+        testSession.setTracks(session.getTracks());
+
+        // 3. Completing session fails because track 1 has unresolved conflict and is awaiting review
+        assertThatThrownBy(() -> reviewSessionService.completeSession(sessionId))
+                .isInstanceOf(InvalidStateException.class)
+                .hasMessageContaining("required decisions remain unresolved");
+
+        // 4. User resolves conflict by selecting an alternate unique candidate
+        DestinationTrackCandidate alternate = createCandidate("yt-unique-alt", "Alternate Track");
+        reviewSessionService.selectCandidate(sessionId, 1, alternate, "Resolved duplicate");
+
+        assertThat(t1.hasConflict()).isFalse();
+        assertThat(t1.getConflictReason()).isNull();
+        assertThat(t1.isApprovedForMigration()).isTrue();
+        assertThat(t1.getReviewStatus()).isEqualTo(ReviewTrackStatus.USER_SELECTED);
+
+        // 5. Now completing session succeeds
+        ReviewSession completed = reviewSessionService.completeSession(sessionId);
+        assertThat(completed.isCompleted()).isTrue();
+    }
+
+    @Test
+    @DisplayName("ensureTracksLoaded loads tracks from repository when session collection is empty or detached")
+    void ensureTracksLoadedReloadsWhenCollectionEmptyOrIncomplete() {
+        ReviewTrack track0 = new ReviewTrack();
+        track0.setPosition(0);
+        track0.setSourceTrackId("sp-0");
+        track0.setSourceTitle("Title 0");
+        track0.setReviewStatus(ReviewTrackStatus.ACCEPTED);
+        track0.setSelectedCandidateId("yt-0");
+
+        ReviewTrack track1 = new ReviewTrack();
+        track1.setPosition(1);
+        track1.setSourceTrackId("sp-1");
+        track1.setSourceTitle("Title 1");
+        track1.setReviewStatus(ReviewTrackStatus.AWAITING_REVIEW);
+
+        // testSession has totalTracks = 2, but its in-memory collection is empty (simulating lazy/unloaded)
+        testSession.setTotalTracks(2);
+        testSession.getTracks().clear();
+
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+        when(reviewTrackRepository.findBySessionIdOrderByPositionAsc(sessionId)).thenReturn(List.of(track0, track1));
+
+        ReviewProgressSummary progress = reviewSessionService.getReviewProgress(sessionId);
+
+        assertThat(progress.totalTracks()).isEqualTo(2);
+        assertThat(progress.acceptedCount()).isEqualTo(1);
+        assertThat(progress.awaitingReviewCount()).isEqualTo(1);
+        assertThat(testSession.getTracks()).hasSize(2);
+        assertThat(track0.getSession()).isEqualTo(testSession);
+        assertThat(track1.getSession()).isEqualTo(testSession);
+
+        verify(reviewTrackRepository).findBySessionIdOrderByPositionAsc(sessionId);
     }
 }
