@@ -51,6 +51,9 @@ class ReviewSessionServiceTest {
     @Mock
     private UserRepository userRepository;
 
+    @Mock
+    private ReviewCandidateSearchService reviewCandidateSearchService;
+
     @InjectMocks
     private DefaultReviewSessionService reviewSessionService;
 
@@ -598,5 +601,48 @@ class ReviewSessionServiceTest {
         assertThat(track1.getSession()).isEqualTo(testSession);
 
         verify(reviewTrackRepository).findBySessionIdOrderByPositionAsc(sessionId);
+    }
+
+    @Test
+    @DisplayName("searchCandidates(sessionId, position) delegates to ReviewCandidateSearchService")
+    void searchCandidatesDelegatesToSearchService() {
+        ReviewCandidateSearchResult expected = new ReviewCandidateSearchResult(
+                sessionId, 0, "sp-0", "Title 0", "Artist 0", "query", List.of(), false, 0
+        );
+        when(reviewCandidateSearchService.searchCandidates(sessionId, 0, ReviewCandidateSearchRequest.defaultSearch(), null))
+                .thenReturn(expected);
+
+        ReviewCandidateSearchResult actual = reviewSessionService.searchCandidates(sessionId, 0);
+
+        assertThat(actual).isEqualTo(expected);
+        verify(reviewCandidateSearchService).searchCandidates(sessionId, 0, ReviewCandidateSearchRequest.defaultSearch(), null);
+    }
+
+    @Test
+    @DisplayName("searchCandidates with request and userId delegates to ReviewCandidateSearchService")
+    void searchCandidatesWithUserDelegatesToSearchService() {
+        ReviewCandidateSearchRequest request = ReviewCandidateSearchRequest.of("custom query", 5);
+        ReviewCandidateSearchResult expected = new ReviewCandidateSearchResult(
+                sessionId, 1, "sp-1", "Title 1", "Artist 1", "custom query", List.of(), true, 0
+        );
+        when(reviewCandidateSearchService.searchCandidates(sessionId, 1, request, userId))
+                .thenReturn(expected);
+
+        ReviewCandidateSearchResult actual = reviewSessionService.searchCandidates(sessionId, 1, request, userId);
+
+        assertThat(actual).isEqualTo(expected);
+        verify(reviewCandidateSearchService).searchCandidates(sessionId, 1, request, userId);
+    }
+
+    @Test
+    @DisplayName("searchCandidates throws IllegalStateException when ReviewCandidateSearchService is not configured")
+    void searchCandidatesThrowsWhenServiceNotConfigured() {
+        DefaultReviewSessionService serviceWithoutSearch = new DefaultReviewSessionService(
+                reviewSessionRepository, reviewTrackRepository, userRepository
+        );
+
+        assertThatThrownBy(() -> serviceWithoutSearch.searchCandidates(sessionId, 0))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ReviewCandidateSearchService is not configured");
     }
 }

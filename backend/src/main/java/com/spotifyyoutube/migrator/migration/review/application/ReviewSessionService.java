@@ -102,4 +102,38 @@ public interface ReviewSessionService {
      * @return cancelled ReviewSession in CANCELLED status
      */
     ReviewSession cancelSession(UUID sessionId);
+
+    /**
+     * Searches for alternative destination candidates for a track in an in-progress review session
+     * using the track's normalized metadata and deterministic query formulation.
+     *
+     * @param sessionId review session ID
+     * @param position 0-indexed track position in the playlist
+     * @return bounded, deduplicated search result
+     */
+    ReviewCandidateSearchResult searchCandidates(UUID sessionId, int position);
+
+    /**
+     * Searches for alternative destination candidates for a track in an in-progress review session
+     * with custom search parameters.
+     *
+     * @param sessionId review session ID
+     * @param position 0-indexed track position in the playlist
+     * @param request search parameters
+     * @return bounded, deduplicated search result
+     */
+    ReviewCandidateSearchResult searchCandidates(UUID sessionId, int position, ReviewCandidateSearchRequest request);
+
+    /**
+     * Searches for alternative destination candidates for a track in an in-progress review session
+     * with custom search parameters and user ownership validation.
+     *
+     * @param sessionId review session ID
+     * @param position 0-indexed track position in the playlist
+     * @param request search parameters
+     * @param userId user ID owning the review session
+     * @return bounded, deduplicated search result
+     */
+    ReviewCandidateSearchResult searchCandidates(UUID sessionId, int position, ReviewCandidateSearchRequest request, UUID userId);
 }
+

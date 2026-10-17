@@ -1,11 +1,39 @@
 # Current State
 
-Last Updated: 2026-10-16
+Last Updated: 2026-10-17
 
-Current Phase: Phase 10 — Review & Correction (Phase 10A & 10B Complete; Phase 10C Next)
-Current Subphase: Phase 10A (Audit & Contracts) & Phase 10B (Review Domain & State Management) Complete
+Current Phase: Phase 10 — Review & Correction (Phase 10A, 10B & 10C Complete; Phase 10D Next)
+Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & State Management) & Phase 10C (Manual Candidate Search & Candidate Pool Enrichment) Complete
 
 ## Completed
+### Phase 10C (Manual Candidate Search & Candidate Pool Enrichment) [COMPLETE]
+- **Application Services & Contracts**:
+  - `ReviewCandidateSearchService` interface and `DefaultReviewCandidateSearchService` implementation in `com.spotifyyoutube.migrator.migration.review.application`.
+  - Application request and result models: `ReviewCandidateSearchRequest` and `ReviewCandidateSearchResult`.
+  - Configurable quota properties: `ReviewSearchProperties` bound to `review.search` in `application.yml`.
+  - Extended `ReviewSessionService` and `DefaultReviewSessionService` with delegating `searchCandidates` methods while preserving 100% backward compatibility via overloaded constructor.
+- **Search Capabilities & Query Strategies**:
+  - Automated query formulation: Reuses Phase 5 `NormalizationOrchestrator` to generate `NormalizedTrackMetadata` from source track title and artist credit, and dispatches via Phase 6 `CandidateDiscoveryService` with bounded `DiscoveryOptions`.
+  - Explicit reviewer queries: Direct dispatch to provider-neutral `MusicDestination.searchTracks(...)`, validating query length (1–500 chars) and rejecting blank inputs with `IllegalArgumentException`.
+  - Encounter-order deduplication: Stable deduplication by trimmed candidate ID using `LinkedHashMap`.
+  - Defensive sanitization: Filtering null records, blank candidate IDs, and negative durations without throwing exceptions.
+  - Duration preservation: Missing durations from YouTube search are preserved honestly as `null` without zero coercion.
+- **Quota & Safety Safeguards**:
+  - Maximum results strictly bounded between 1 and 50 (default 10).
+  - Provider queries strictly bounded (1 query for explicit reviewer query, max 2 queries for automated formulation).
+  - Pagination bounded to single-page retrieval per search operation.
+  - Multi-format token scrubbing (`sanitizeErrorMessage`) redacting secrets (`api_key=`, `token=`, `Bearer`, `Basic`, `Authorization`) from error diagnostics.
+  - Quota exhaustion (HTTP 403) and rate limits (HTTP 429) propagate with `ExternalProviderException` and `Retry-After` headers, strictly distinct from legitimate empty search results.
+- **Review Integrity & Boundary Isolation**:
+  - Strictly read-only: Search does not alter track status (`reviewStatus`), provenance (`decisionSource`), selected candidate (`selectedCandidateId`), duplicate conflicts, or exclusions.
+  - Session status preserved: Search cannot be performed on closed (`COMPLETED` or `CANCELLED`) sessions (fails fast with `InvalidStateException`).
+  - Strict ownership and association validation: Enforces track-to-session association and anti-impersonation session user ownership checks (`ResourceNotFoundException`).
+  - Read-only destination guarantee: Zero calls to `MusicDestination.createPlaylist` or `addTrackToPlaylist`.
+  - Reflection safety verified: `DefaultReviewSessionService` maintains zero fields of type `MusicDestination`.
+- **Test Coverage (22 Dedicated Tests across 2 Suites)**:
+  - `ReviewCandidateSearchServiceTest` (19 tests): Search behavior, query formulation, custom reviewer query dispatch, empty provider results, encounter-order deduplication, defensive malformed item filtering, limit truncation, limit bounds validation, blank/oversized query rejection, quota exhaustion error propagation, rate limit preservation, credential redaction, discovery failure handling, track state immutability, zero playlist mutations, closed session guard, missing session/track/user error handling.
+  - `ReviewSessionServiceTest` (3 new tests added; 14 tests total): `searchCandidates` delegation, custom request and user ID delegation, unconfigured service error handling.
+
 ### Phase 10B (Review Domain & State Management) [COMPLETE]
 - **Domain State Machine & Lifecycle**:
   - `ReviewSession` JPA entity tracking review lifecycle (`IN_PROGRESS`, `COMPLETED`, `CANCELLED`), association with `User`, source playlist, and Phase 9 `planId`.
@@ -755,12 +783,18 @@ Current Subphase: Phase 10A (Audit & Contracts) & Phase 10B (Review Domain & Sta
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Review & Correction Interface (Phase 10).
-- Playlist Creation (Phase 11).
+- Review REST Controllers & API Presentation Layer (Phase 10D).
+- Review Subsystem Verification & Freeze (Phase 10E).
+- Destination Playlist Creation (Phase 11).
 - Async Migration & Progress Tracking (Phase 12).
 
 ## Current Verification
 - Full Test Suite Execution: Maven `clean verify` passed with **1,104 tests run, 0 failures, 0 errors, 0 skipped** (prior to Phase 9D hardening tests; 1,107 tests total).
+- Review Subsystem Test Suites (49 tests across 4 suites):
+  - `ReviewCandidateSearchServiceTest`: 19 tests (search behavior, query formulation, custom reviewer query dispatch, empty provider results, encounter-order deduplication, defensive malformed item filtering, limit truncation, limit bounds validation, blank/oversized query rejection, quota exhaustion error propagation, rate limit preservation, credential redaction, discovery failure handling, track state immutability, zero playlist mutations, closed session guard, missing session/track/user error handling).
+  - `ReviewSessionServiceTest`: 14 tests (application service orchestration, initial classification mapping, ownership validation, candidate selection, duplicate conflict detection/resolution lifecycle, session completion and cancellation, candidate search delegation).
+  - `ReviewSessionDomainTest`: 12 tests (domain state transitions, provenance preservation, candidate validation, idempotence, session completion invariants, summary reconciliation).
+  - `ReviewStatePersistenceSafetyTest`: 4 tests (Phase 9 preview read-only guarantee, zero `MusicDestination` dependency on `DefaultReviewSessionService`, original matching evidence immutability across multi-decision workflows, backward compatibility).
 - Migration Planning Subsystem Test Suites: 55 tests pass across all 6 suites:
   - `DefaultPlaylistMigrationPlanGeneratorTest`: 15 tests (generator logic, duplicate detection, failure isolation, determinism, review slot safety, metadata fallback handling).
   - `MigrationPlanTest`: 15 tests (domain contracts, immutability, mathematical summary reconciliation, bounds, sanitization).
@@ -775,7 +809,7 @@ Current Subphase: Phase 10A (Audit & Contracts) & Phase 10B (Review Domain & Sta
 - Complete Matching Subsystem Coverage: 29 test classes, 365+ tests total.
 - Focused Candidate Discovery & Mapping Suite: 133 tests.
 - Focused Normalization Test Suite: 227 tests.
-- Full Non-Repository Unit Test Suite: 1,107 tests across domain, identity, spotify, youtube, migration, playlist, matching.
+- Full Non-Repository Unit Test Suite: 1,107 tests across domain, identity, spotify, youtube, migration, playlist, matching (prior to Phase 10; 49 review tests added).
 - Git Whitespace & Checkstyle Hygiene: `git diff --check` exits with code 0; zero whitespace violations.
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): Docker daemon unavailable in this execution environment.
 
@@ -801,6 +835,12 @@ Current Subphase: Phase 10A (Audit & Contracts) & Phase 10B (Review Domain & Sta
   - **Phase 9C (Migration Plan Preview API & Presentation Layer)**: COMPLETE / COMMITTED / PUSHED (`81dd7bb`)
   - **Phase 9D (Migration Planning Subsystem Verification & Hardening)**: COMPLETE / COMMITTED / PUSHED (`eb33f7d`)
   - **Phase 9E (Final Integrated Verification, Freeze & Handoff)**: COMPLETE / FROZEN
+- **Phase 10 (Review & Correction)**: IN PROGRESS
+  - **Phase 10A (Architecture Audit, Contracts & Schema V5)**: COMPLETE
+  - **Phase 10B (Review Domain & State Management)**: COMPLETE
+  - **Phase 10C (Manual Candidate Search & Candidate Pool Enrichment)**: COMPLETE
+  - **Phase 10D (Review REST Controllers & Presentation Layer)**: PENDING
+  - **Phase 10E (Subsystem Verification & Freeze)**: PENDING
 
 ## Next Recommended Work
-1. Advance to Phase 10 (Review & Correction Interface).
+1. Advance to Phase 10D (Review REST Controllers & Presentation Layer).

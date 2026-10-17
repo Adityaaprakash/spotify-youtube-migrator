@@ -49,15 +49,26 @@ public class DefaultReviewSessionService implements ReviewSessionService {
     private final ReviewSessionRepository reviewSessionRepository;
     private final ReviewTrackRepository reviewTrackRepository;
     private final UserRepository userRepository;
+    private final ReviewCandidateSearchService reviewCandidateSearchService;
+
+    public DefaultReviewSessionService(
+            ReviewSessionRepository reviewSessionRepository,
+            ReviewTrackRepository reviewTrackRepository,
+            UserRepository userRepository,
+            ReviewCandidateSearchService reviewCandidateSearchService
+    ) {
+        this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
+        this.reviewTrackRepository = Objects.requireNonNull(reviewTrackRepository, "ReviewTrackRepository must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null");
+        this.reviewCandidateSearchService = reviewCandidateSearchService;
+    }
 
     public DefaultReviewSessionService(
             ReviewSessionRepository reviewSessionRepository,
             ReviewTrackRepository reviewTrackRepository,
             UserRepository userRepository
     ) {
-        this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
-        this.reviewTrackRepository = Objects.requireNonNull(reviewTrackRepository, "ReviewTrackRepository must not be null");
-        this.userRepository = Objects.requireNonNull(userRepository, "UserRepository must not be null");
+        this(reviewSessionRepository, reviewTrackRepository, userRepository, null);
     }
 
     @Override
@@ -345,5 +356,26 @@ public class DefaultReviewSessionService implements ReviewSessionService {
                 }
             }
         }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReviewCandidateSearchResult searchCandidates(UUID sessionId, int position) {
+        return searchCandidates(sessionId, position, ReviewCandidateSearchRequest.defaultSearch(), null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReviewCandidateSearchResult searchCandidates(UUID sessionId, int position, ReviewCandidateSearchRequest request) {
+        return searchCandidates(sessionId, position, request, null);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReviewCandidateSearchResult searchCandidates(UUID sessionId, int position, ReviewCandidateSearchRequest request, UUID userId) {
+        if (reviewCandidateSearchService == null) {
+            throw new IllegalStateException("ReviewCandidateSearchService is not configured");
+        }
+        return reviewCandidateSearchService.searchCandidates(sessionId, position, request, userId);
     }
 }

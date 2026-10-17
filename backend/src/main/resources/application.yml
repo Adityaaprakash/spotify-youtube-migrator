@@ -59,3 +59,12 @@ youtube:
   max-results-limit: ${YOUTUBE_MAX_RESULTS_LIMIT:50}
   default-max-results: ${YOUTUBE_DEFAULT_MAX_RESULTS:25}
 
+review:
+  search:
+    default-max-results: ${REVIEW_SEARCH_DEFAULT_MAX_RESULTS:10}
+    max-results-limit: ${REVIEW_SEARCH_MAX_RESULTS_LIMIT:50}
+    min-results-limit: ${REVIEW_SEARCH_MIN_RESULTS_LIMIT:1}
+    max-queries-per-track: ${REVIEW_SEARCH_MAX_QUERIES_PER_TRACK:2}
+    max-query-length: ${REVIEW_SEARCH_MAX_QUERY_LENGTH:500}
+
+
