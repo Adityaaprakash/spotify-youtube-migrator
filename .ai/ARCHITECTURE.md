@@ -170,7 +170,7 @@ Controllers MUST NOT:
   - **Encounter-Order Deduplication**: Tracks candidate IDs assigned to prior tracks in the same plan. When deduplication is active, duplicate candidates are marked `DUPLICATE` without claiming additional destination slots.
   - **Per-Track Fault Isolation**: Exceptions thrown during individual track normalization, candidate discovery, or matching are isolated; error details are redacted, and the track is classified as `FAILED` while remaining tracks in the playlist continue processing.
 
-## Review Subsystem (Phase 10A, 10B, 10C, 10D)
+## Review Subsystem (Phase 10 — Complete & Frozen)
 
 - Packages:
   - Domain & State Machine: `com.spotifyyoutube.migrator.migration.review.domain`

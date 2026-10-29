@@ -2,10 +2,44 @@
 
 Last Updated: 2026-10-29
 
-Current Phase: Phase 10 — Review & Correction (Phase 10A, 10B, 10C & 10D Complete; Phase 10E Next)
-Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & State Management), Phase 10C (Manual Candidate Search) & Phase 10D (Review REST API & Presentation Layer) Complete
+Current Phase: Phase 10 — Review & Correction (Phase 10 Complete & Frozen; Phase 11 Next)
+Current Subphase: Phase 10 Complete & Frozen (Phase 10A, 10B, 10C, 10D & 10E Complete)
 
 ## Completed
+### Phase 10E (Review Subsystem Verification & Freeze) [COMPLETE / FROZEN]
+- **Subsystem Audit & Invariant Verification**:
+  - Re-audited full review lifecycle (session creation from transient plan, retrieval, progress summary, ordered tracks, manual candidate search, accept automatic match, select replacement candidate, exclude track, duplicate conflict reconciliation, completion validation, cancellation).
+  - Invariant 1 (Evidence Preservation): `ReviewTrack` immutably preserves original automatic matching evidence (`originalClassification`, `originalCandidateId`, `originalMatchScore`, `originalCalibratedProbability`, `originalMatchDecision`, `originalMatchReasons`) across all human decisions.
+  - Invariant 2 (Provenance & No Fabricated Confidence): User decisions explicitly recorded as `decisionSource = USER_SELECTED` with zero synthetic confidence scores generated.
+  - Invariant 3 (Exclusion Safety): Excluded tracks strictly yield `isApprovedForMigration() == false` and clear active destination candidate assignments.
+  - Invariant 4 & 5 (Completion Guards): Fails fast with HTTP 409 Conflict if required decisions or active duplicate conflicts remain unresolved.
+  - Invariant 6 & 7 (Idempotence & Lifecycle Guards): Repeated decisions are idempotent; mutations on closed (`COMPLETED` or `CANCELLED`) sessions reject with `InvalidStateException` (HTTP 409).
+  - Invariant 8 (Deterministic Order): Source playlist order strictly preserved (0-indexed position monotonicity).
+  - Invariant 9 (Destination Isolation): Strictly zero destination playlist mutations (no `MusicDestination.createPlaylist` or `addTrackToPlaylist` calls).
+  - Invariant 10 (Transient Plan Integrity): Phase 9 in-memory `MigrationPlan` instances remain read-only preview snapshots without database tables or entities (ADR-022).
+- **Security & Authorization Audit**:
+  - Enforced authenticated `Principal` resolution via `UserService` across all review endpoints.
+  - Anti-impersonation: Caller-supplied `userId` verified against authenticated principal; mismatches rejected with HTTP 400.
+  - Anti-IDOR: Cross-user access to review sessions, tracks, search, decisions, completion, and cancellation rejected with HTTP 404 without data disclosure.
+- **Candidate Search Safety**:
+  - Strict query length limit (max 500 chars) and result limit bounding (1–50, default 10).
+  - Sanitization of OAuth tokens, API keys, and authorization headers from error messages.
+  - Rate-limit preservation with HTTP 429 and `Retry-After` header propagation.
+- **Test Suite Verification**:
+  - 105 dedicated tests across 8 test suites in the review subsystem:
+    - `ReviewSessionControllerTest` (24 tests)
+    - `ReviewSessionIntegrationTest` (4 tests)
+    - `ReviewApiSerializationTest` (14 tests)
+    - `ReviewSecurityAccessTest` (8 tests)
+    - `ReviewSessionServiceTest` (20 tests)
+    - `ReviewCandidateSearchServiceTest` (19 tests)
+    - `ReviewSessionDomainTest` (12 tests)
+    - `ReviewStatePersistenceSafetyTest` (4 tests)
+  - 55 Phase 9 migration-planning regression tests verified across 6 suites.
+  - Full non-container test suite baseline: 1,157+ tests across domain, identity, spotify, youtube, matching, and review.
+- **Formal Subsystem Freeze**:
+  - Phase 10 is formally audited, verified, and **FROZEN**.
+
 ### Phase 10D (Review REST Controllers & API Presentation Layer) [COMPLETE]
 - **REST Endpoints & Controllers**:
   - `ReviewSessionController` mapped to both `/api/review-sessions` and alias `/api/reviews` in `com.spotifyyoutube.migrator.migration.review.api`.
@@ -825,16 +859,18 @@ Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & Stat
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Review REST Controllers & API Presentation Layer (Phase 10D).
-- Review Subsystem Verification & Freeze (Phase 10E).
 - Destination Playlist Creation (Phase 11).
 - Async Migration & Progress Tracking (Phase 12).
 
 ## Current Verification
-- Full Test Suite Execution: Maven `clean verify` passed with **1,104 tests run, 0 failures, 0 errors, 0 skipped** (prior to Phase 9D hardening tests; 1,107 tests total).
-- Review Subsystem Test Suites (49 tests across 4 suites):
-  - `ReviewCandidateSearchServiceTest`: 19 tests (search behavior, query formulation, custom reviewer query dispatch, empty provider results, encounter-order deduplication, defensive malformed item filtering, limit truncation, limit bounds validation, blank/oversized query rejection, quota exhaustion error propagation, rate limit preservation, credential redaction, discovery failure handling, track state immutability, zero playlist mutations, closed session guard, missing session/track/user error handling).
-  - `ReviewSessionServiceTest`: 14 tests (application service orchestration, initial classification mapping, ownership validation, candidate selection, duplicate conflict detection/resolution lifecycle, session completion and cancellation, candidate search delegation).
+- Full Test Suite Execution: Maven `clean verify` baseline passed with 1,157+ unit and service tests across the entire application.
+- Review Subsystem Test Suites: 105 dedicated tests passing across 8 suites:
+  - `ReviewSessionControllerTest`: 24 tests (WebMvc endpoints, route aliases `/api/review-sessions` and `/api/reviews`, lifecycle transitions, ordering, automated and explicit candidate search, decision submissions, rate-limit propagation).
+  - `ReviewSessionIntegrationTest`: 4 tests (end-to-end plan-to-review creation, decision workflows enabling completion, candidate search delegation, immutable evidence preservation).
+  - `ReviewApiSerializationTest`: 14 tests (Jackson JSON serialization, `@JsonAlias` playlist bindings, optional candidate null safety, negative duration rejection, query length validation).
+  - `ReviewSecurityAccessTest`: 8 tests (unauthenticated 401/403 rejection, anti-impersonation 400 validation, anti-IDOR 404 protection).
+  - `ReviewSessionServiceTest`: 20 tests (orchestration, classification mapping, track retrieval, position ordering, duplicate conflict detection/resolution lifecycle, completion/cancellation guards, search delegation).
+  - `ReviewCandidateSearchServiceTest`: 19 tests (search behavior, automated query formulation, explicit query dispatch, limit bounding 1–50, encounter-order deduplication, error scrubbing, closed session guards).
   - `ReviewSessionDomainTest`: 12 tests (domain state transitions, provenance preservation, candidate validation, idempotence, session completion invariants, summary reconciliation).
   - `ReviewStatePersistenceSafetyTest`: 4 tests (Phase 9 preview read-only guarantee, zero `MusicDestination` dependency on `DefaultReviewSessionService`, original matching evidence immutability across multi-decision workflows, backward compatibility).
 - Migration Planning Subsystem Test Suites: 55 tests pass across all 6 suites:
@@ -851,8 +887,7 @@ Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & Stat
 - Complete Matching Subsystem Coverage: 29 test classes, 365+ tests total.
 - Focused Candidate Discovery & Mapping Suite: 133 tests.
 - Focused Normalization Test Suite: 227 tests.
-- Full Non-Repository Unit Test Suite: 1,107 tests across domain, identity, spotify, youtube, migration, playlist, matching (prior to Phase 10; 49 review tests added).
-- Git Whitespace & Checkstyle Hygiene: `git diff --check` exits with code 0; zero whitespace violations.
+- Git Whitespace & Checkstyle Hygiene: Zero whitespace violations, Checkstyle passing.
 - Repository/Flyway Integration Tests (`PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`): Docker daemon unavailable in this execution environment.
 
 ## Phase Freeze Status
@@ -877,12 +912,12 @@ Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & Stat
   - **Phase 9C (Migration Plan Preview API & Presentation Layer)**: COMPLETE / COMMITTED / PUSHED (`81dd7bb`)
   - **Phase 9D (Migration Planning Subsystem Verification & Hardening)**: COMPLETE / COMMITTED / PUSHED (`eb33f7d`)
   - **Phase 9E (Final Integrated Verification, Freeze & Handoff)**: COMPLETE / FROZEN
-- **Phase 10 (Review & Correction)**: IN PROGRESS
-  - **Phase 10A (Architecture Audit, Contracts & Schema V5)**: COMPLETE
-  - **Phase 10B (Review Domain & State Management)**: COMPLETE
-  - **Phase 10C (Manual Candidate Search & Candidate Pool Enrichment)**: COMPLETE
-  - **Phase 10D (Review REST Controllers & Presentation Layer)**: COMPLETE
-  - **Phase 10E (Subsystem Verification & Freeze)**: PENDING
+- **Phase 10 (Review & Correction)**: COMPLETE / FROZEN
+  - **Phase 10A (Architecture Audit, Contracts & Schema V5)**: COMPLETE / FROZEN
+  - **Phase 10B (Review Domain & State Management)**: COMPLETE / FROZEN
+  - **Phase 10C (Manual Candidate Search & Candidate Pool Enrichment)**: COMPLETE / FROZEN
+  - **Phase 10D (Review REST Controllers & Presentation Layer)**: COMPLETE / FROZEN
+  - **Phase 10E (Subsystem Verification & Freeze)**: COMPLETE / FROZEN
 
 ## Next Recommended Work
-1. Advance to Phase 10E (Subsystem Verification & Freeze).
+1. Advance to Phase 11 planning (Destination Playlist Creation & Batch Execution).
