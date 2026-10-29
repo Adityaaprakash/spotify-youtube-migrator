@@ -378,4 +378,93 @@ public class DefaultReviewSessionService implements ReviewSessionService {
         }
         return reviewCandidateSearchService.searchCandidates(sessionId, position, request, userId);
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReviewTrack> getTracks(UUID sessionId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        ReviewSession session = getSession(sessionId);
+        return ensureTracksLoaded(session);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ReviewTrack> getTracksForUser(UUID sessionId, UUID userId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(userId, "userId must not be null");
+        ReviewSession session = getSessionForUser(sessionId, userId);
+        return ensureTracksLoaded(session);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReviewTrack getTrack(UUID sessionId, int position) {
+        if (position < 0) {
+            throw new IllegalArgumentException("Track position must be non-negative: " + position);
+        }
+        ReviewSession session = getSession(sessionId);
+        ensureTracksLoaded(session);
+        return session.getTracks().stream()
+                .filter(t -> t.getPosition() == position)
+                .findFirst()
+                .orElseGet(() -> reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
+                        .orElseThrow(() -> new ResourceNotFoundException(String.format(
+                                "Track not found at position %d in review session %s", position, sessionId
+                        ))));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReviewTrack getTrackForUser(UUID sessionId, int position, UUID userId) {
+        if (position < 0) {
+            throw new IllegalArgumentException("Track position must be non-negative: " + position);
+        }
+        ReviewSession session = getSessionForUser(sessionId, userId);
+        ensureTracksLoaded(session);
+        return session.getTracks().stream()
+                .filter(t -> t.getPosition() == position)
+                .findFirst()
+                .orElseGet(() -> reviewTrackRepository.findBySessionIdAndPosition(sessionId, position)
+                        .orElseThrow(() -> new ResourceNotFoundException(String.format(
+                                "Track not found at position %d in review session %s", position, sessionId
+                        ))));
+    }
+
+    @Override
+    public ReviewTrack selectCandidate(UUID sessionId, int position, DestinationTrackCandidate candidate, String notes, UUID userId) {
+        getSessionForUser(sessionId, userId);
+        return selectCandidate(sessionId, position, candidate, notes);
+    }
+
+    @Override
+    public ReviewTrack acceptAutomaticMatch(UUID sessionId, int position, UUID userId) {
+        getSessionForUser(sessionId, userId);
+        return acceptAutomaticMatch(sessionId, position);
+    }
+
+    @Override
+    public ReviewTrack excludeTrack(UUID sessionId, int position, String reason, UUID userId) {
+        getSessionForUser(sessionId, userId);
+        return excludeTrack(sessionId, position, reason);
+    }
+
+    @Override
+    public ReviewSession completeSession(UUID sessionId, UUID userId) {
+        getSessionForUser(sessionId, userId);
+        return completeSession(sessionId);
+    }
+
+    @Override
+    public ReviewSession cancelSession(UUID sessionId, UUID userId) {
+        getSessionForUser(sessionId, userId);
+        return cancelSession(sessionId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ReviewProgressSummary getReviewProgressForUser(UUID sessionId, UUID userId) {
+        ReviewSession session = getSessionForUser(sessionId, userId);
+        ensureTracksLoaded(session);
+        return session.deriveSummary();
+    }
 }

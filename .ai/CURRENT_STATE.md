@@ -1,11 +1,53 @@
 # Current State
 
-Last Updated: 2026-10-17
+Last Updated: 2026-10-29
 
-Current Phase: Phase 10 — Review & Correction (Phase 10A, 10B & 10C Complete; Phase 10D Next)
-Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & State Management) & Phase 10C (Manual Candidate Search & Candidate Pool Enrichment) Complete
+Current Phase: Phase 10 — Review & Correction (Phase 10A, 10B, 10C & 10D Complete; Phase 10E Next)
+Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & State Management), Phase 10C (Manual Candidate Search) & Phase 10D (Review REST API & Presentation Layer) Complete
 
 ## Completed
+### Phase 10D (Review REST Controllers & API Presentation Layer) [COMPLETE]
+- **REST Endpoints & Controllers**:
+  - `ReviewSessionController` mapped to both `/api/review-sessions` and alias `/api/reviews` in `com.spotifyyoutube.migrator.migration.review.api`.
+  - Session lifecycle endpoints:
+    - `POST /api/review-sessions` (and `/api/reviews`): Creates a new review session from a source playlist's migration plan snapshot. Returns HTTP 201 Created with initial review status and reconciled summary.
+    - `GET /api/review-sessions`: Retrieves all review sessions owned by the authenticated user, ordered newest first.
+    - `GET /api/review-sessions/{id}`: Retrieves a single review session and its real-time progress summary.
+    - `GET /api/review-sessions/{id}/progress`: Retrieves real-time reconciled `ReviewProgressSummaryResponse`.
+    - `POST /api/review-sessions/{id}/complete`: Finalizes and completes review session; enforces Invariants 4 & 5 (fails fast with 409 Conflict if required decisions or active conflicts remain unresolved).
+    - `POST /api/review-sessions/{id}/cancel`: Cancels an in-progress review session (fails fast with 409 Conflict if already closed).
+  - Track retrieval & ordering endpoints:
+    - `GET /api/review-sessions/{id}/tracks`: Returns itemized tracks in strict 0-indexed playlist order.
+    - `GET /api/review-sessions/{id}/tracks/{position}`: Returns a single track by position.
+  - Candidate discovery & search endpoint:
+    - `POST /api/review-sessions/{id}/tracks/{position}/candidates/search`: Delegates to `ReviewCandidateSearchService`. Supports automated query formulation from normalized metadata (null/blank query) and explicit reviewer queries. Strictly enforces search limits (1–50) and propagates provider quota/rate limits (HTTP 429 with `Retry-After`, HTTP 502).
+  - Human review decision endpoints:
+    - `PUT` & `POST /api/review-sessions/{id}/tracks/{position}/decision`: Unified review decision submission supporting `ACCEPT`, `SELECT_CANDIDATE`, and `EXCLUDE`.
+    - `POST /api/review-sessions/{id}/tracks/{position}/accept`: Accepts automatic matching candidate.
+    - `POST /api/review-sessions/{id}/tracks/{position}/select`: Selects a user-chosen destination candidate with `CandidateSelectionDto`.
+    - `POST /api/review-sessions/{id}/tracks/{position}/exclude`: Explicitly excludes track with optional reason.
+- **Request & Response DTOs & Mapping**:
+  - Request DTOs: `CreateReviewSessionRequest` (with `@JsonAlias({"spotifyPlaylistId", "playlistId"})`), `SubmitReviewDecisionRequest`, `SelectCandidateRequest`, `ExcludeTrackRequest`, `ReviewCandidateSearchApiRequest`, `CandidateSelectionDto`.
+  - Response DTOs: `ReviewSessionResponse`, `ReviewTrackResponse`, `ReviewProgressSummaryResponse`, `ReviewCandidateResponse`, `ReviewCandidateSearchResultResponse`.
+  - Domain isolation: Zero JPA entities exposed directly over HTTP; internal identifiers, user passwords, and Hibernate proxies never leaked.
+  - Dedicated mapper: `ReviewApiMapper` in `com.spotifyyoutube.migrator.migration.review.api.mapper`.
+- **Security & Ownership Hardening**:
+  - Authentication required across all endpoints (`.anyRequest().authenticated()`).
+  - Principal identity resolution via `UserService.getUserByEmail` and `getUserById`.
+  - Anti-impersonation validation: caller-supplied `userId` verified against authenticated principal (rejects mismatches with HTTP 400).
+  - Insecure Direct Object Reference (IDOR) protection: session ownership checked across all read, search, and mutation operations (returns HTTP 404 for inaccessible sessions).
+- **Domain Invariants & Phase Boundaries Preserved**:
+  - Phase 9 transient plan guarantee: Zero plan entities, zero plan tables; `MigrationPlan` instances remain point-in-time in-memory snapshots.
+  - Frozen subsystem integrity: Phase 5 (Normalization), Phase 6 (Candidate Discovery), Phase 7 (Track Matching), and Phase 8 (Benchmark & Workflow Orchestration) production files remain 100% frozen.
+  - Destination safety: Strictly zero calls to `MusicDestination.createPlaylist` or `addTrackToPlaylist`.
+  - Provenance separation: Original matching evidence (`originalClassification`, `originalCandidateId`, `originalMatchScore`, `originalCalibratedProbability`, `originalMatchDecision`, `originalMatchReasons`) preserved immutably when a user records a decision. No synthetic confidence scores fabricated for manual human selections (`decisionSource = USER_SELECTED`).
+- **Comprehensive Test Coverage**:
+  - `ReviewSessionControllerTest`: 24 WebMvc tests covering session creation, session retrieval, progress summary, track ordering, candidate search (automated, explicit, zero results, limit validation, closed session conflict, rate limits), review decisions (accept, select, exclude, missing candidate validation, closed session conflict, no automatic match conflict), lifecycle completion & cancellation.
+  - `ReviewSessionIntegrationTest`: 4 application integration tests verifying end-to-end plan-to-review creation, decision workflows enabling completion, candidate search delegation, and immutable evidence preservation.
+  - `ReviewApiSerializationTest`: 12 serialization and validation tests covering aliases, Jackson JSON serialization, optional fields, non-negative duration constraints, query limit validations.
+  - `ReviewSecurityAccessTest`: 8 security tests covering unauthenticated access rejection (401/403), IDOR protection (404), and anti-impersonation rejection (400).
+  - `ReviewSessionServiceTest`: 6 new unit tests added covering track retrieval and user-secured decision overloads.
+
 ### Phase 10C (Manual Candidate Search & Candidate Pool Enrichment) [COMPLETE]
 - **Application Services & Contracts**:
   - `ReviewCandidateSearchService` interface and `DefaultReviewCandidateSearchService` implementation in `com.spotifyyoutube.migrator.migration.review.application`.
@@ -839,8 +881,8 @@ Current Subphase: Phase 10A (Audit & Contracts), Phase 10B (Review Domain & Stat
   - **Phase 10A (Architecture Audit, Contracts & Schema V5)**: COMPLETE
   - **Phase 10B (Review Domain & State Management)**: COMPLETE
   - **Phase 10C (Manual Candidate Search & Candidate Pool Enrichment)**: COMPLETE
-  - **Phase 10D (Review REST Controllers & Presentation Layer)**: PENDING
+  - **Phase 10D (Review REST Controllers & Presentation Layer)**: COMPLETE
   - **Phase 10E (Subsystem Verification & Freeze)**: PENDING
 
 ## Next Recommended Work
-1. Advance to Phase 10D (Review REST Controllers & Presentation Layer).
+1. Advance to Phase 10E (Subsystem Verification & Freeze).

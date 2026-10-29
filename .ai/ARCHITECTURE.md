@@ -170,20 +170,26 @@ Controllers MUST NOT:
   - **Encounter-Order Deduplication**: Tracks candidate IDs assigned to prior tracks in the same plan. When deduplication is active, duplicate candidates are marked `DUPLICATE` without claiming additional destination slots.
   - **Per-Track Fault Isolation**: Exceptions thrown during individual track normalization, candidate discovery, or matching are isolated; error details are redacted, and the track is classified as `FAILED` while remaining tracks in the playlist continue processing.
 
-## Review Subsystem (Phase 10A, 10B)
+## Review Subsystem (Phase 10A, 10B, 10C, 10D)
 
 - Packages:
   - Domain & State Machine: `com.spotifyyoutube.migrator.migration.review.domain`
   - Repositories: `com.spotifyyoutube.migrator.migration.review.repository`
   - Application Service: `com.spotifyyoutube.migrator.migration.review.application`
+  - Presentation & REST Controllers: `com.spotifyyoutube.migrator.migration.review.api`
+  - API Request/Response DTOs: `com.spotifyyoutube.migrator.migration.review.api.dto`
+  - API Mappers: `com.spotifyyoutube.migrator.migration.review.api.mapper`
 - Database Migration: `V5__phase10_review_session_schema.sql` (`review_sessions`, `review_tracks`)
 - Architecture Decisions: ADR-023 (Review Domain Architecture, State Management, and Review Contracts)
-- Purpose: Persistent state management for asynchronous, multi-step human review of migration plans prior to destination playlist creation. Tracks human corrections, candidate replacements, track exclusions, duplicate conflict resolution, and completion eligibility.
+- Purpose: Persistent state management and REST API for asynchronous, multi-step human review of migration plans prior to destination playlist creation. Tracks human corrections, candidate replacements, track exclusions, duplicate conflict resolution, and completion eligibility.
 - Architecture Rules:
   - **Decoupled Persistence vs Transient Preview**: While Phase 9 `MigrationPlan` instances remain transient, read-only preview snapshots under ADR-022, human review decisions are persisted across requests in dedicated `review_sessions` and `review_tracks` tables.
   - **Zero Execution Subsystem Pollution**: Operational `migration_jobs` and `migration_tasks` remain dedicated to Phase 8 and future Phase 11/12 execution jobs, preventing corruption of operational job logs with pre-execution review states.
   - **Preservation of Automatic Matching Evidence**: `ReviewTrack` strictly separates immutable automatic matching provenance (`originalClassification`, `originalCandidateId`, `originalMatchScore`, `originalCalibratedProbability`, `originalMatchDecision`, `originalMatchReasons`) from mutable review decision states (`reviewStatus`, `decisionSource`, `selectedCandidateId`, `excluded`, `hasConflict`). Original evidence is never overwritten.
   - **No Fabricated Confidence**: User-selected candidates are flagged with `decisionSource = USER_SELECTED`. No synthetic confidence scores or probabilities are generated for manual human choices.
+  - **Thin REST Presentation Boundary**: Controllers delegate exclusively to application services (`ReviewSessionService`, `MigrationPlanService`, `UserService`). No domain business logic, no repository interactions, and no direct JPA entity exposure in controllers.
+  - **Anti-Impersonation & Access Boundaries**: Authenticated principal verified against requested identifiers, returning HTTP 400 on mismatch and HTTP 404 for unauthorized session access to prevent information disclosure (IDOR).
+  - **Safe Sanitization & Quota Transparency**: Error responses are safely sanitized, stripping upstream provider tokens and secrets, while passing HTTP 429 and Retry-After headers transparently.
   - **Centralized Invariants**:
     1. Decisions belong to the correct session and track.
     2. Selected candidates must be valid (non-null, non-blank ID/title, non-negative duration).

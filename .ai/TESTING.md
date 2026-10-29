@@ -482,30 +482,73 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
   - Plan repeatability and determinism across equivalent inputs (`planGenerationShouldBeDeterministicAndRepeatableForEquivalentInputs`).
   - Safe fallback for source tracks with null/blank metadata (`tracksWithNullOrBlankMetadataShouldFallbackSafelyWithoutPipelineFailure`).
 
-## Future Testing Scope (Phase 10+)
-As the migrator logic scales, testing will expand to:
-- Review & Correction Flow Testing (Phase 10).
+## Review Subsystem Testing (Phase 10)
+
+### Phase 10D: Review REST API, DTOs & Presentation Tests (50 Tests)
+- `ReviewSessionControllerTest` (24 WebMvc tests):
+  - Session creation: valid request with explicit/principal userId (`POST /api/review-sessions` and `/api/reviews`), blank playlist ID (400), missing body (400), anti-impersonation userId mismatch (400), unauthenticated request rejection (401/403).
+  - Session retrieval: list sessions (`GET /api/review-sessions`), single session with progress (`GET /api/review-sessions/{id}`), non-existent session (404), real-time progress summary (`GET /api/review-sessions/{id}/progress`).
+  - Track retrieval: ordered track list (`GET /api/review-sessions/{id}/tracks`), single track by position (`GET /api/review-sessions/{id}/tracks/{position}`), non-existent position (404).
+  - Candidate search: automated query formulation from normalized metadata, explicit custom query with limit truncation, zero candidate result array, limit exceeding max bounds (400), search on closed session (409 Conflict), upstream provider rate-limit error (429 with `Retry-After`).
+  - Review decisions: unified decision endpoint (`PUT` & `POST .../decision`) for `ACCEPT`, `SELECT_CANDIDATE`, `EXCLUDE`; dedicated action endpoints (`.../accept`, `.../select`, `.../exclude`); accepting without automatic candidate (409 Conflict); blank candidate ID/title validation (400).
+  - Session lifecycle: completion success (200), completion blocked with unresolved decisions (409 Conflict), cancellation success (200), cancellation on completed session (409 Conflict).
+- `ReviewSessionIntegrationTest` (4 integration tests):
+  - Session creation from Phase 9 migration plan snapshot: maps initial track classifications (`AUTO_MATCH` $\to$ `ACCEPTED`, `REVIEW_REQUIRED` $\to$ `AWAITING_REVIEW`), derives reconciled summary, verifies transient plan immutability.
+  - End-to-end decision workflow: unresolved decisions block completion; accepting automatic candidate satisfies requirement and enables completion.
+  - Candidate search delegation: preserves query parameters, custom flag, and deduplicated candidate models through `ReviewCandidateSearchService`.
+  - Manual candidate selection: records `USER_SELECTED` decision source without synthetic confidence scores, while immutably preserving original automatic matching evidence.
+- `ReviewApiSerializationTest` (14 serialization & validation tests):
+  - `CreateReviewSessionRequest`: Jackson deserialization with `@JsonAlias` (`spotifyPlaylistId`, `sourcePlaylistId`, `playlistId`), blank playlist validation.
+  - `ReviewSessionResponse`: Jackson serialization with nested progress, verifying zero entity leaks or Hibernate proxy fields.
+  - `ReviewTrackResponse`: full serialization with dual candidates (original suggestion vs human selection), safe null representation for missing candidates and probabilities.
+  - `CandidateSelectionDto`: valid conversion to domain `DestinationTrackCandidate`, rejection of negative durations, validation of blank identifiers.
+  - `SubmitReviewDecisionRequest`: validation requiring candidate for `SELECT_CANDIDATE`, rejection of null decisionType.
+  - `SelectCandidateRequest` & `ExcludeTrackRequest`: clean Jackson serialization and deserialization.
+  - `ReviewCandidateSearchApiRequest`: validation for query exceeding 500 chars, limit below 1, limit above 50, and valid null defaults.
+  - `ReviewCandidateSearchResultResponse`: serialization with candidate lists.
+- `ReviewSecurityAccessTest` (8 security tests):
+  - Unauthenticated request rejection (401/403) across all endpoints.
+  - Insecure Direct Object Reference (IDOR) protection: User A cannot read, mutate, search candidates, complete, or cancel User B's review session (returns HTTP 404).
+  - Anti-impersonation: caller supplying a mismatched `userId` in request body is rejected with HTTP 400.
+  - Missing principal record: unresolvable principal identity returns HTTP 404.
+- `ReviewSessionServiceTest` (Phase 10D additions: 6 tests; 20 tests total):
+  - `getTracks(sessionId)` and `getTracksForUser(sessionId, userId)`.
+  - `getTrack(sessionId, position)` and `getTrackForUser(sessionId, position, userId)` with negative position validation.
+  - User-secured decision overloads (`selectCandidate`, `acceptAutomaticMatch`, `excludeTrack`, `completeSession`, `cancelSession`, `getReviewProgressForUser`) enforcing session ownership and throwing `ResourceNotFoundException` on mismatch.
+
+### Phase 10C: Manual Candidate Search Tests (19 Tests)
+- `ReviewCandidateSearchServiceTest`: 19 tests in `com.spotifyyoutube.migrator.migration.review.application`.
+
+### Phase 10B: Review Domain & State Tests (26 Tests)
+- `ReviewSessionDomainTest` (12 tests).
+- `ReviewSessionServiceTest` (14 tests).
+- `ReviewStatePersistenceSafetyTest` (4 tests).
+
+## Future Testing Scope (Phase 10E+)
+- Review Subsystem Verification & Freeze (Phase 10E).
 - Playlist Creation Testing (Phase 11).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
-- **Migration Planning Subsystem Total**: 55 tests across 6 dedicated test suites:
-  - `DefaultPlaylistMigrationPlanGeneratorTest`: 15 tests.
-  - `MigrationPlanTest`: 15 tests.
-  - `MigrationPlanControllerTest`: 14 tests.
-  - `MigrationPlanServiceTest`: 7 tests.
-  - `MigrationPlanSerializationTest`: 2 tests.
-  - `MigrationPlanDestinationSafetyTest`: 2 tests.
-- **Phase 8G & 8H Test Suite**: 32 tests across `PlaylistMigrationOrchestratorTest` (19 tests) and `MigrationWorkflowEvaluatorTest` (13 tests), plus 4 updated tests in service/controller suites.
-- **Benchmark Test Suite (Phase 8A–8F)**: 16 test classes (~88 tests) covering dataset validation, runner, candidate pools, metrics, error analysis, calibration fitting, threshold tuning, and held-out test verification.
+- **Review Subsystem Total (Phase 10)**: 99 tests across 7 test suites (49 from Phase 10B/C + 50 from Phase 10D):
+  - `ReviewSessionControllerTest`: 24 tests.
+  - `ReviewSessionIntegrationTest`: 4 tests.
+  - `ReviewApiSerializationTest`: 14 tests.
+  - `ReviewSecurityAccessTest`: 8 tests.
+  - `ReviewSessionServiceTest`: 20 tests.
+  - `ReviewCandidateSearchServiceTest`: 19 tests.
+  - `ReviewSessionDomainTest`: 12 tests.
+  - `ReviewStatePersistenceSafetyTest`: 4 tests.
+- **Migration Planning Subsystem Total**: 55 tests across 6 dedicated test suites.
 - **Matching Engine Regression Suite (Phase 7)**: 18 test classes (274 tests).
 - **Matching Subsystem Total**: 29 test classes, ~365+ tests.
-- **Full Non-Container Test Suite**: 1,107 tests across the entire application (verified 1,104 via clean verify; 1,107 with Phase 9D hardening tests).
-- **Static Verification**: All Phase 9 controllers, services, generators, DTOs, mappers, and tests were verified with hand-calculated test fixtures, strict null checks, immutable records, defensive error isolation, and zero modifications to frozen Phase 5, Phase 6, or Phase 7 production files.
+- **Full Non-Container Test Suite Baseline**: 1,157+ unit and service tests across the entire application.
+- **Static Verification**: All Phase 10D controllers, services, DTOs, mappers, and tests adhere to Clean Architecture, strict null safety, validated DTO boundaries, anti-impersonation and anti-IDOR checks, zero entity leakage, and zero modifications to frozen Phase 5–9 production code.
 - **Execution Limitation**: Automated terminal execution via IDE subagent tool is blocked by environment permission broker (`unexpected user interaction type: not permission`). Exact PowerShell commands are provided for operator execution.
 
 ## Current Blockers & Status
+- **Phase 10D Complete**: Review REST controllers, DTOs, mappers, application integration, WebMvc test suite, integration test suite, serialization test suite, and security access test suite implemented and fully aligned with project architecture. Ready for Phase 10E verification.
 - **Phase 9E Complete & Frozen**: Final integrated verification, cross-phase audit, and formal subsystem freeze complete. All 14 planning and API invariants verified across 55 dedicated tests in 6 classes, 1,104 test baseline verified passing (1,107 with Phase 9D hardening tests), 0 Checkstyle violations, transient preview invariant verified (ADR-022), read-only destination invariant verified, backward-compatible execution orchestration verified, and Phase 5–7 frozen subsystem integrity preserved. Phase 9 is **COMPLETE / FROZEN**.
 - **Phase 9D Complete**: Migration planning subsystem audit, verification, and hardening complete with 55 dedicated planning tests; committed and pushed in `eb33f7d`.
 - **Phase 9C Complete**: Migration plan preview REST endpoint (`POST /api/migrations/preview`), DTOs, application service, and 25-test verification suite implemented and verified against architectural constraints; committed and pushed in `81dd7bb`.

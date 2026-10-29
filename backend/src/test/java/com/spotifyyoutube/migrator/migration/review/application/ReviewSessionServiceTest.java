@@ -645,4 +645,91 @@ class ReviewSessionServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("ReviewCandidateSearchService is not configured");
     }
+
+    @Test
+    @DisplayName("getTracks returns ordered tracks for session")
+    void getTracksReturnsOrderedTracks() {
+        ReviewTrack t0 = new ReviewTrack();
+        t0.setPosition(0);
+        testSession.addTrack(t0);
+
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+
+        List<ReviewTrack> tracks = reviewSessionService.getTracks(sessionId);
+        assertThat(tracks).hasSize(1);
+        assertThat(tracks.get(0).getPosition()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("getTracksForUser returns ordered tracks when user owns session")
+    void getTracksForUserSuccess() {
+        ReviewTrack t0 = new ReviewTrack();
+        t0.setPosition(0);
+        testSession.addTrack(t0);
+
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+
+        List<ReviewTrack> tracks = reviewSessionService.getTracksForUser(sessionId, userId);
+        assertThat(tracks).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("getTracksForUser throws ResourceNotFoundException when user does not own session")
+    void getTracksForUserWrongOwner() {
+        UUID wrongUser = UUID.randomUUID();
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+
+        assertThatThrownBy(() -> reviewSessionService.getTracksForUser(sessionId, wrongUser))
+                .isInstanceOf(ResourceNotFoundException.class)
+                .hasMessageContaining("Review session not found");
+    }
+
+    @Test
+    @DisplayName("getTrack returns single track at position")
+    void getTrackSuccess() {
+        ReviewTrack t0 = new ReviewTrack();
+        t0.setPosition(0);
+        t0.setSourceTrackId("sp-0");
+        testSession.addTrack(t0);
+
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+
+        ReviewTrack track = reviewSessionService.getTrack(sessionId, 0);
+        assertThat(track.getSourceTrackId()).isEqualTo("sp-0");
+    }
+
+    @Test
+    @DisplayName("getTrack with negative position throws IllegalArgumentException")
+    void getTrackNegativePositionThrows() {
+        assertThatThrownBy(() -> reviewSessionService.getTrack(sessionId, -1))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("non-negative");
+    }
+
+    @Test
+    @DisplayName("User-secured operations verify session ownership")
+    void userSecuredOperationsVerifyOwnership() {
+        UUID wrongUser = UUID.randomUUID();
+        when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(testSession));
+
+        DestinationTrackCandidate cand = createCandidate("yt-cand", "Title");
+
+        assertThatThrownBy(() -> reviewSessionService.selectCandidate(sessionId, 0, cand, "notes", wrongUser))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        assertThatThrownBy(() -> reviewSessionService.acceptAutomaticMatch(sessionId, 0, wrongUser))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        assertThatThrownBy(() -> reviewSessionService.excludeTrack(sessionId, 0, "reason", wrongUser))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        assertThatThrownBy(() -> reviewSessionService.completeSession(sessionId, wrongUser))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        assertThatThrownBy(() -> reviewSessionService.cancelSession(sessionId, wrongUser))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        assertThatThrownBy(() -> reviewSessionService.getReviewProgressForUser(sessionId, wrongUser))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
 }
