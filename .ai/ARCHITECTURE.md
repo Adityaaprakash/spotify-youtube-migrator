@@ -202,3 +202,21 @@ Controllers MUST NOT:
     9. Review decisions perform zero YouTube Music mutations (zero `MusicDestination` calls).
     10. Review state mutations never alter Phase 9's read-only preview snapshots.
   - **Reconciled Progress Derivation**: `ReviewProgressSummary` derives counts dynamically from `ReviewTrack` entities with exact mathematical reconciliation, guaranteeing zero counter drift.
+
+## Approved Plan Execution & Validation Layer (Phase 11A, 11B)
+
+- Packages:
+  - Contracts: `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Validation: `com.spotifyyoutube.migrator.migration.application.execution.validation`
+  - Application Service: `com.spotifyyoutube.migrator.migration.application.execution`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.api.mapper`
+- Architecture Decisions: ADR-024 (Approved Plan Execution Architecture, Contracts, and Validation Boundary)
+- Purpose: Application-level contracts, approved migration context derivation, and pure validation boundary establishing execution eligibility prior to any destination playlist creation or track insertion.
+- Architecture Rules:
+  - **Strict Mutation Boundary**: Phase 11A and Phase 11B perform ZERO destination-side mutations (no `MusicDestination.createPlaylist` or `addTrackToPlaylist` calls). Validation is strictly non-mutating and read-only.
+  - **Zero Database Schema Intrusion**: Preserves the ADR-022 transient plan guarantee without creating new database tables or entities. Decisions are derived directly from the persisted `ReviewSession` in PostgreSQL.
+  - **Terminal COMPLETED Guard**: Only review sessions in `ReviewSessionStatus.COMPLETED` status are eligible for execution. In-progress sessions reject with `INCOMPLETE_REVIEW` and cancelled sessions reject with `INVALID_STATE`.
+  - **Deterministic Gapless Target Ordering**: Assigns strictly sequential, 0-indexed destination positions ($0 \le \text{targetPosition} < M$) matching destination playlist size, while strictly preserving relative source playlist encounter order.
+  - **All-or-Nothing Safety**: Ineligibility on even one track (awaiting review, unresolved conflict, missing destination identity, duplicate destination ID) causes the entire validation to fail. Partially approved selections are never returned as executable.
+  - **Server-Side Security & IDOR Protection**: The authenticated user must own the review session; cross-user session execution access throws `ResourceNotFoundException` (HTTP 404) to prevent information disclosure. Caller-supplied `userId` mismatches reject with HTTP 400.
+  - **Evidence & Provenance Preservation**: Immutably preserves original matching evidence and human decision provenance (`AUTOMATIC` vs `USER_SELECTED`) without generating synthetic confidence scores.

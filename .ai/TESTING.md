@@ -524,8 +524,36 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
 - `ReviewSessionServiceTest` (14 tests).
 - `ReviewStatePersistenceSafetyTest` (4 tests).
 
-## Future Testing Scope (Phase 11+)
-- Playlist Creation Testing (Phase 11).
+## Approved Plan Execution & Validation Testing Scope (Phase 11A & 11B)
+51 dedicated tests across 5 test suites covering execution contracts, domain invariants, validation rules, mutation safety, and REST controllers:
+- `ApprovedMigrationContractTest` (12 tests in `com.spotifyyoutube.migrator.migration.application.execution.contract`):
+  - `ApprovedTrack`: valid construction, metadata preservation, `USER_SELECTED` vs `AUTOMATIC` provenance, negative source position rejection, blank source track ID rejection, blank destination track ID rejection, negative duration rejection, negative target position rejection.
+  - `ApprovedMigrationContext`: immutability, defensive copying (`List.copyOf`), non-gapless target position rejection, non-monotonic source position rejection, count mismatch rejection, lookup helpers by source/target position.
+  - `ApprovedMigrationExecutionRequest`: convenience factories, defaults (`isPrivate = true`), transient `MigrationPlan` binding.
+  - `ExecutionValidationResult` & `MigrationExecutionValidationException`: valid result invariants, invalid result error accumulation, error formatting across single and multi-error conditions.
+- `ApprovedPlanValidatorTest` (19 tests in `com.spotifyyoutube.migrator.migration.application.execution.validation`):
+  - Validation success: all accepted tracks succeed, user-selected manual candidate respected, intentionally excluded tracks omitted from approved selection, empty source playlist succeeds with 0 tracks, custom request metadata overrides, consistent transient `MigrationPlan` cross-validation.
+  - Validation rejection: null session (`MISSING_CONTEXT`), null user (`UNAUTHORIZED`), session owned by another user (`UNAUTHORIZED`), anti-impersonation request `userId` mismatch (`UNAUTHORIZED`), in-progress session (`INCOMPLETE_REVIEW`), cancelled session (`INVALID_STATE`), track awaiting review (`UNRESOLVED_TRACK`), track with duplicate conflict (`UNRESOLVED_CONFLICT`), blank destination ID (`INVALID_DESTINATION_ID`), user-selected candidate with blank title (`INVALID_CANDIDATE`), user-selected candidate with negative duration (`INVALID_CANDIDATE`), duplicate destination video ID across approved tracks (`DUPLICATE_DESTINATION_TRACK`), non-contiguous or out-of-order track positions (`ORDERING_MISMATCH`), source playlist ID mismatch (`INCONSISTENT_CONTEXT`), candidate association mismatch against `MigrationPlan` (`CANDIDATE_ASSOCIATION_MISMATCH`), `validateAndApprove` throwing `MigrationExecutionValidationException`.
+- `ApprovedMigrationExecutionServiceTest` (8 tests in `com.spotifyyoutube.migrator.migration.application.execution`):
+  - `validateExecution`: success delegation to validator, non-existent session failure (`MISSING_CONTEXT`), session owned by another user (`UNAUTHORIZED` anti-IDOR), overload by ID.
+  - `prepareExecution`: success returning `ApprovedMigrationContext`, non-existent session (`ResourceNotFoundException`), session owned by another user (`ResourceNotFoundException` anti-IDOR), ineligibility propagating `MigrationExecutionValidationException`, repository lazy-loading of review tracks in position order.
+- `ApprovedPlanExecutionSafetyTest` (4 tests in `com.spotifyyoutube.migrator.migration.application.execution`):
+  - Reflection verification: `DefaultApprovedPlanValidator` holds zero fields of type `MusicDestination` or `YouTubePlaylistService`.
+  - Reflection verification: `DefaultApprovedMigrationExecutionService` holds zero fields of type `MusicDestination` or `YouTubePlaylistService`.
+  - Zero destination mutation: Mockito verification that execution validation and preparation perform zero calls to `MusicDestination.createPlaylist` or `addTrackToPlaylist`.
+  - Transient plan and review evidence immutability: verifies `MigrationPlan` preview snapshot and `ReviewTrack` original matching evidence remain 100% untouched.
+- `MigrationExecutionControllerTest` (8 WebMvc tests in `com.spotifyyoutube.migrator.migration.api`):
+  - `POST /api/migrations/execution/validate`: valid request returns 200 OK with `valid: true`, populated `approvedContext`.
+  - Route alias `POST /api/migrations/approved/validate`: returns 200 OK.
+  - Ineligible execution: returns 200 OK with `valid: false` and itemized errors array.
+  - Validation: missing body returns 400 (`INVALID_REQUEST`), malformed JSON returns 400 (`INVALID_REQUEST`), missing `reviewSessionId` returns 400.
+  - Anti-impersonation: mismatched `userId` returns 400 (`INVALID_REQUEST`).
+  - Eligibility endpoint `GET /api/migrations/execution/eligibility/{sessionId}`: returns 200 OK with validation result; missing principal user record returns 404.
+  - Security: unauthenticated POST and GET rejected with 401/403 under Spring Security.
+
+## Future Testing Scope (Phase 11C+)
+- Destination Playlist Creation Testing (Phase 11C).
+- Ordered Track Insertion Testing (Phase 11D).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.
 

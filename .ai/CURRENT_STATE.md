@@ -1,11 +1,55 @@
 # Current State
 
-Last Updated: 2026-10-29
+Last Updated: 2026-10-30
 
-Current Phase: Phase 10 — Review & Correction (Phase 10 Complete & Frozen; Phase 11 Next)
-Current Subphase: Phase 10 Complete & Frozen (Phase 10A, 10B, 10C, 10D & 10E Complete)
+Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A & 11B Complete; Phase 11C Next)
+Current Subphase: Phase 11A & Phase 11B Complete (Phase 11C Next)
 
 ## Completed
+### Phase 11B (Approved Plan Validation) [COMPLETE]
+- **Validation Boundary & Invariant Engine**:
+  - `ApprovedPlanValidator` interface and `DefaultApprovedPlanValidator` stateless component in `com.spotifyyoutube.migrator.migration.application.execution.validation`.
+  - Enforces all 12 validation rules across request validity, session completion status, ownership authorization, track eligibility, candidate validity, destination identity, duplicate prevention, and monotonic source ordering.
+  - Invariant 1 (Request Validity): Verifies non-null inputs, non-null user context, and existent review session.
+  - Invariant 2 (Ownership & Anti-IDOR): Enforces that authenticated principal owns the review session (`session.getUser().getId().equals(authenticatedUserId)`).
+  - Invariant 3 (Anti-Impersonation): Rejects requests where caller-supplied `userId` does not match the authenticated principal with HTTP 400 (`INVALID_REQUEST`).
+  - Invariant 4 (Terminal State Guard): Enforces that only sessions in `ReviewSessionStatus.COMPLETED` are eligible for execution. Rejects in-progress sessions (`INCOMPLETE_REVIEW`) and cancelled sessions (`INVALID_STATE`).
+  - Invariant 5 (Source & Plan Context Consistency): Validates that requested source playlist and plan ID match the review session context.
+  - Invariant 6 (Monotonic Source Ordering): Enforces that source tracks are contiguously 0-indexed (`track.position == i`) and verifies relative source encounter order.
+  - Invariant 7 (Unresolved Decision Rejection): Rejects any track with `AWAITING_REVIEW` or `isUnresolved() == true` with `UNRESOLVED_TRACK`.
+  - Invariant 8 (Duplicate Conflict Rejection): Rejects any track with `hasConflict() == true` with `UNRESOLVED_CONFLICT`.
+  - Invariant 9 (Exclusion Filtering): Excluded tracks (`excluded == true` or `reviewStatus == EXCLUDED`) are strictly excluded from `approvedTracks` and accounted in `excludedTrackCount`.
+  - Invariant 10 (Destination Identity Validity): Approved tracks must possess a non-null, non-blank destination identity (`selectedCandidateId`) and `isApprovedForMigration() == true`.
+  - Invariant 11 (User Candidate Validity): For `USER_SELECTED` decisions, validates non-blank candidate title and non-negative duration.
+  - Invariant 12 (Duplicate Destination Track Prevention): Rejects duplicate destination video IDs across the approved track selection.
+  - All-or-Nothing Guarantee: Ineligibility on even one track fails the entire validation. Partial approved selections are never marked executable.
+- **Application Execution Service**:
+  - `ApprovedMigrationExecutionService` and `DefaultApprovedMigrationExecutionService` in `com.spotifyyoutube.migrator.migration.application.execution`.
+  - Coordinates validation, anti-IDOR checks (throwing `ResourceNotFoundException` on cross-user access to prevent existence disclosure), lazy-loading of review tracks in position order, and derives immutable `ApprovedMigrationContext`.
+- **REST Presentation API & Endpoints**:
+  - `MigrationExecutionController` mapped to `/api/migrations/execution` and alias `/api/migrations/approved`.
+  - `POST /api/migrations/execution/validate`: Validates execution request, returns HTTP 200 OK with `ExecutionValidationResponse`.
+  - `GET /api/migrations/execution/eligibility/{sessionId}`: Inspects session execution eligibility by ID, returns HTTP 200 OK with `ExecutionValidationResponse`.
+  - DTOs: `ValidateExecutionRequest`, `ExecutionValidationResponse`, `ApprovedMigrationContextResponse`, `ApprovedTrackResponse`, `ExecutionValidationErrorResponse`.
+  - Mapper: `MigrationExecutionApiMapper`.
+
+### Phase 11A (Execution Architecture & Contracts) [COMPLETE]
+- **Architectural Design & Contracts**:
+  - Published `ADR-024-approved-plan-execution-architecture-and-validation.md`.
+  - Reconciled transient Phase 9 `MigrationPlan` (ADR-022) with persistent Phase 10 `ReviewSession` (ADR-023). Established that the completed `ReviewSession` in PostgreSQL encapsulates the required source playlist identity, track ordering, original matching evidence, and final human review decisions without creating new database tables or entities.
+  - Domain contracts in `com.spotifyyoutube.migrator.migration.application.execution.contract`:
+    - `ApprovedTrack`: Immutable record capturing source ordering (`sourcePosition`), source identity, destination identity (`destinationTrackId`), destination metadata, provenance (`decisionSource`), and gapless destination position (`targetPosition` $0..M-1$).
+    - `ApprovedMigrationContext`: Immutable record capturing session ID, plan ID, user ID, source/target playlist metadata, privacy, unmodifiable `approvedTracks`, counts, and `validatedAt` snapshot timestamp.
+    - `ApprovedMigrationExecutionRequest`: Immutable record capturing request parameters, overrides, and optional transient plan.
+    - `ExecutionValidationResult`: Typed outcome exposing `isValid()`, `Optional<ApprovedMigrationContext>`, and unmodifiable `List<ExecutionValidationError>`.
+    - `ExecutionValidationError`: Structured validation error with `ValidationFailureCode`, optional track position, sourceTrackId, and message.
+    - `ValidationFailureCode`: Structured error classification enum.
+    - `MigrationExecutionValidationException`: Domain exception extending `InvalidStateException` (maps to HTTP 409 Conflict).
+- **Mutation Safety & Isolation**:
+  - Strictly ZERO destination playlist mutations (no `MusicDestination.createPlaylist` or `addTrackToPlaylist` calls).
+  - Reflection verification confirms `DefaultApprovedPlanValidator` and `DefaultApprovedMigrationExecutionService` hold zero fields of type `MusicDestination` or `YouTubePlaylistService`.
+  - Phase 9 preview remains 100% read-only; Phase 8 orchestrator files remain 100% frozen.
+
 ### Phase 10E (Review Subsystem Verification & Freeze) [COMPLETE / FROZEN]
 - **Subsystem Audit & Invariant Verification**:
   - Re-audited full review lifecycle (session creation from transient plan, retrieval, progress summary, ordered tracks, manual candidate search, accept automatic match, select replacement candidate, exclude track, duplicate conflict reconciliation, completion validation, cancellation).
@@ -918,6 +962,11 @@ Current Subphase: Phase 10 Complete & Frozen (Phase 10A, 10B, 10C, 10D & 10E Com
   - **Phase 10C (Manual Candidate Search & Candidate Pool Enrichment)**: COMPLETE / FROZEN
   - **Phase 10D (Review REST Controllers & Presentation Layer)**: COMPLETE / FROZEN
   - **Phase 10E (Subsystem Verification & Freeze)**: COMPLETE / FROZEN
+- **Phase 11 (Playlist Creation & Execution)**:
+  - **Phase 11A (Execution Architecture & Contracts)**: COMPLETE
+  - **Phase 11B (Approved Plan Validation)**: COMPLETE
+  - **Phase 11C (Destination Playlist Creation)**: NOT YET IMPLEMENTED
+  - **Phase 11D (Ordered Track Insertion)**: NOT YET IMPLEMENTED
 
 ## Next Recommended Work
-1. Advance to Phase 11 planning (Destination Playlist Creation & Batch Execution).
+1. Advance to Phase 11C (Destination Playlist Creation via `MusicDestination.createPlaylist`).
