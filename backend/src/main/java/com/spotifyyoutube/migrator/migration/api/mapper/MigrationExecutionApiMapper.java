@@ -2,12 +2,15 @@ package com.spotifyyoutube.migrator.migration.api.mapper;
 
 import com.spotifyyoutube.migrator.migration.api.dto.ApprovedMigrationContextResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ApprovedTrackResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.DestinationPlaylistResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationErrorResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationError;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 
@@ -23,6 +26,22 @@ public final class MigrationExecutionApiMapper {
     }
 
     public static ApprovedMigrationExecutionRequest toDomainRequest(ValidateExecutionRequest dto, UUID authenticatedUserId) {
+        if (dto == null) {
+            return null;
+        }
+        return new ApprovedMigrationExecutionRequest(
+                dto.reviewSessionId(),
+                dto.userId() != null ? dto.userId() : authenticatedUserId,
+                dto.sourcePlaylistId(),
+                null,
+                dto.targetPlaylistTitle(),
+                dto.targetPlaylistDescription(),
+                dto.isPrivate(),
+                null
+        );
+    }
+
+    public static ApprovedMigrationExecutionRequest toDomainRequest(CreateDestinationPlaylistRequest dto, UUID authenticatedUserId) {
         if (dto == null) {
             return null;
         }
@@ -112,6 +131,25 @@ public final class MigrationExecutionApiMapper {
                 error.position(),
                 error.sourceTrackId(),
                 error.message()
+        );
+    }
+
+    public static DestinationPlaylistResponse toPlaylistResponse(DestinationPlaylistCreationResult result) {
+        if (result == null) {
+            return null;
+        }
+        return new DestinationPlaylistResponse(
+                result.reviewSessionId(),
+                result.planId(),
+                result.destinationPlatform(),
+                result.destinationPlaylistId(),
+                result.destinationPlaylistUrl(),
+                result.playlistTitle(),
+                result.playlistDescription(),
+                result.isPrivate(),
+                result.approvedTrackCount(),
+                "CREATED",
+                result.createdAt()
         );
     }
 }

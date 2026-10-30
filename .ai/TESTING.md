@@ -524,8 +524,8 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
 - `ReviewSessionServiceTest` (14 tests).
 - `ReviewStatePersistenceSafetyTest` (4 tests).
 
-## Approved Plan Execution & Validation Testing Scope (Phase 11A & 11B)
-51 dedicated tests across 5 test suites covering execution contracts, domain invariants, validation rules, mutation safety, and REST controllers:
+## Approved Plan Execution, Validation & Playlist Creation Testing Scope (Phase 11A, 11B & 11C)
+89 dedicated tests across 8 test suites covering execution contracts, domain invariants, validation rules, playlist creation, mutation safety, and REST controllers:
 - `ApprovedMigrationContractTest` (12 tests in `com.spotifyyoutube.migrator.migration.application.execution.contract`):
   - `ApprovedTrack`: valid construction, metadata preservation, `USER_SELECTED` vs `AUTOMATIC` provenance, negative source position rejection, blank source track ID rejection, blank destination track ID rejection, negative duration rejection, negative target position rejection.
   - `ApprovedMigrationContext`: immutability, defensive copying (`List.copyOf`), non-gapless target position rejection, non-monotonic source position rejection, count mismatch rejection, lookup helpers by source/target position.
@@ -542,17 +542,40 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
   - Reflection verification: `DefaultApprovedMigrationExecutionService` holds zero fields of type `MusicDestination` or `YouTubePlaylistService`.
   - Zero destination mutation: Mockito verification that execution validation and preparation perform zero calls to `MusicDestination.createPlaylist` or `addTrackToPlaylist`.
   - Transient plan and review evidence immutability: verifies `MigrationPlan` preview snapshot and `ReviewTrack` original matching evidence remain 100% untouched.
-- `MigrationExecutionControllerTest` (8 WebMvc tests in `com.spotifyyoutube.migrator.migration.api`):
+- `DestinationPlaylistCreationResultTest` (8 tests in `com.spotifyyoutube.migrator.migration.application.execution.contract`):
+  - Valid instantiation, accessors, `Optional` handling for nullable fields (planId, url, description).
+  - Domain invariants: non-null sessionId, userId, platform, playlistId, title, createdAt; non-blank playlistId and title; non-positive approved track count rejection ($\le 0$ throws `IllegalArgumentException`).
+- `DefaultDestinationPlaylistCreationServiceTest` (15 tests in `com.spotifyyoutube.migrator.migration.application.execution`):
+  - Successful playlist creation: valid completed session, non-empty tracks, delegates to `prepareExecution`, calls `MusicDestination.createPlaylist`, returns `DestinationPlaylistCreationResult` with platform, id, url, title, approvedTrackCount.
+  - Convenience overload by `(sessionId, userId)`: delegates and creates playlist successfully.
+  - Fallback URL: correctly constructs standard YouTube URL if provider returns null url.
+  - Pre-mutation guards: rejects null request, rejects null userId, enforces anti-impersonation (rejects `request.userId != authenticatedUserId`), rejects empty approved selection with `InvalidStateException` (HTTP 409), propagates `ResourceNotFoundException` on missing session or anti-IDOR mismatch, propagates `MigrationExecutionValidationException` on incomplete review, rejects title length $> 150$ characters, rejects description length $> 5000$ characters. All guards verify `verifyNoInteractions(musicDestination)`.
+  - Provider error handling: propagates and redacts tokens on `ExternalProviderException` (e.g. 403 quota exhaustion), propagates `ResourceAccessException` on timeout and logs outcome as UNCERTAIN, throws `ExternalProviderException` if provider returns null or blank playlist ID, propagates `RestClientException`.
+  - Strict Mutation Boundary: verifies `musicDestination.addTrackToPlaylist(any(), any(), any())` is NEVER called across all tests.
+- `DestinationPlaylistCreationSafetyTest` (5 tests in `com.spotifyyoutube.migrator.migration.application.execution`):
+  - Reflection safety: `DefaultDestinationPlaylistCreationService` holds zero pipeline dependencies (`TrackMatchingEngine`, `NormalizationOrchestrator`, `CandidateDiscoveryService`, `SpotifyPlaylistService`, repositories).
+  - Reflection safety: re-verifies `DefaultApprovedPlanValidator` and `DefaultApprovedMigrationExecutionService` hold zero destination dependencies.
+  - Mutation safety: verifies destination playlist creation never invokes `addTrackToPlaylist`.
+  - Interface safety: verifies `DestinationPlaylistCreationService` declares zero methods performing track addition or insertion.
+- `MigrationExecutionControllerTest` (18 WebMvc tests in `com.spotifyyoutube.migrator.migration.api`):
   - `POST /api/migrations/execution/validate`: valid request returns 200 OK with `valid: true`, populated `approvedContext`.
   - Route alias `POST /api/migrations/approved/validate`: returns 200 OK.
   - Ineligible execution: returns 200 OK with `valid: false` and itemized errors array.
   - Validation: missing body returns 400 (`INVALID_REQUEST`), malformed JSON returns 400 (`INVALID_REQUEST`), missing `reviewSessionId` returns 400.
   - Anti-impersonation: mismatched `userId` returns 400 (`INVALID_REQUEST`).
   - Eligibility endpoint `GET /api/migrations/execution/eligibility/{sessionId}`: returns 200 OK with validation result; missing principal user record returns 404.
-  - Security: unauthenticated POST and GET rejected with 401/403 under Spring Security.
+  - `POST /api/migrations/execution/create-playlist`: valid request returns 200 OK with `DestinationPlaylistResponse` (`status: "CREATED"`).
+  - Route alias `POST /api/migrations/approved/create-playlist`: returns 200 OK.
+  - Convenience route `POST /api/migrations/execution/create-playlist/{sessionId}`: returns 200 OK.
+  - Anti-impersonation on create-playlist: mismatched `userId` in request body returns 400 (`INVALID_REQUEST`).
+  - Missing body on create-playlist returns 400 (`INVALID_REQUEST`).
+  - Empty approved selection on create-playlist returns 409 (`INVALID_STATE`).
+  - Session not found or IDOR returns 404 (`NOT_FOUND`).
+  - Provider quota exhaustion (403) returns 403 (`EXTERNAL_PROVIDER_ERROR`).
+  - Provider timeout returns 504 Gateway Timeout (`EXTERNAL_PROVIDER_ERROR`).
+  - Security: unauthenticated POST /validate, POST /create-playlist, and GET /eligibility rejected with 401/403 under Spring Security.
 
-## Future Testing Scope (Phase 11C+)
-- Destination Playlist Creation Testing (Phase 11C).
+## Future Testing Scope (Phase 11D+)
 - Ordered Track Insertion Testing (Phase 11D).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.

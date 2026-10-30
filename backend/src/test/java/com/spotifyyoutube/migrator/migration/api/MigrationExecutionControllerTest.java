@@ -5,19 +5,27 @@ import com.spotifyyoutube.migrator.common.config.SecurityConfig;
 import com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
+import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
+import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
+import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
@@ -52,6 +60,9 @@ class MigrationExecutionControllerTest {
 
     @MockBean
     private ApprovedMigrationExecutionService executionService;
+
+    @MockBean
+    private DestinationPlaylistCreationService playlistCreationService;
 
     @MockBean
     private UserService userService;
@@ -247,6 +258,202 @@ class MigrationExecutionControllerTest {
     }
 
     @Nested
+    @DisplayName("Destination Playlist Creation Endpoint Tests (POST /api/migrations/execution/create-playlist)")
+    @WithMockUser(username = "tester@example.com")
+    class CreateDestinationPlaylistTests {
+
+        @Test
+        @DisplayName("Valid create-playlist request returns 200 OK with DestinationPlaylistResponse")
+        void validCreatePlaylistReturns200() throws Exception {
+            mockAuthUser();
+
+            DestinationPlaylistCreationResult result = new DestinationPlaylistCreationResult(
+                    sessionId, UUID.randomUUID(), userId, Platform.YOUTUBE, "PL_web_999",
+                    "https://www.youtube.com/playlist?list=PL_web_999", "My Playlist",
+                    "Description", true, 5, Instant.now()
+            );
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenReturn(result);
+
+            CreateDestinationPlaylistRequest reqDto = new CreateDestinationPlaylistRequest(
+                    sessionId, userId, "sp-pl-1", "My Playlist", "Description", true
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.reviewSessionId").value(sessionId.toString()))
+                    .andExpect(jsonPath("$.destinationPlatform").value("YOUTUBE"))
+                    .andExpect(jsonPath("$.destinationPlaylistId").value("PL_web_999"))
+                    .andExpect(jsonPath("$.destinationPlaylistUrl").value("https://www.youtube.com/playlist?list=PL_web_999"))
+                    .andExpect(jsonPath("$.playlistTitle").value("My Playlist"))
+                    .andExpect(jsonPath("$.approvedTrackCount").value(5))
+                    .andExpect(jsonPath("$.status").value("CREATED"));
+        }
+
+        @Test
+        @DisplayName("Route alias /api/migrations/approved/create-playlist returns 200 OK")
+        void routeAliasReturns200() throws Exception {
+            mockAuthUser();
+
+            DestinationPlaylistCreationResult result = new DestinationPlaylistCreationResult(
+                    sessionId, null, userId, Platform.YOUTUBE, "PL_alias_1",
+                    "https://www.youtube.com/playlist?list=PL_alias_1", "Alias Playlist",
+                    null, true, 1, Instant.now()
+            );
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenReturn(result);
+
+            CreateDestinationPlaylistRequest reqDto = new CreateDestinationPlaylistRequest(
+                    sessionId, null, null, null, null, null
+            );
+
+            mockMvc.perform(post("/api/migrations/approved/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.destinationPlaylistId").value("PL_alias_1"));
+        }
+
+        @Test
+        @DisplayName("Convenience route /create-playlist/{sessionId} returns 200 OK")
+        void convenienceRouteReturns200() throws Exception {
+            mockAuthUser();
+
+            DestinationPlaylistCreationResult result = new DestinationPlaylistCreationResult(
+                    sessionId, null, userId, Platform.YOUTUBE, "PL_conv_99",
+                    "https://www.youtube.com/playlist?list=PL_conv_99", "Convenience Playlist",
+                    null, true, 3, Instant.now()
+            );
+
+            when(playlistCreationService.createDestinationPlaylist(eq(sessionId), eq(userId)))
+                    .thenReturn(result);
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist/" + sessionId)
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.destinationPlaylistId").value("PL_conv_99"))
+                    .andExpect(jsonPath("$.approvedTrackCount").value(3));
+        }
+
+        @Test
+        @DisplayName("Anti-impersonation: Request body with different userId returns 400 Bad Request")
+        void antiImpersonationReturns400() throws Exception {
+            mockAuthUser();
+
+            UUID impostorId = UUID.randomUUID();
+            CreateDestinationPlaylistRequest reqDto = new CreateDestinationPlaylistRequest(
+                    sessionId, impostorId, null, null, null, null
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
+        }
+
+        @Test
+        @DisplayName("Missing request body on POST /create-playlist returns 400 Bad Request")
+        void missingBodyReturns400() throws Exception {
+            mockAuthUser();
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .with(csrf()))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("Empty approved track selection returns 409 Conflict")
+        void emptyApprovedSelectionReturns409() throws Exception {
+            mockAuthUser();
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(new InvalidStateException("approved track selection is empty"));
+
+            CreateDestinationPlaylistRequest reqDto = new CreateDestinationPlaylistRequest(
+                    sessionId, userId, null, null, null, null
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_STATE"));
+        }
+
+        @Test
+        @DisplayName("Session not found or cross-user IDOR returns 404 Not Found")
+        void sessionNotFoundReturns404() throws Exception {
+            mockAuthUser();
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ResourceNotFoundException("Review session not found with id: " + sessionId));
+
+            CreateDestinationPlaylistRequest reqDto = new CreateDestinationPlaylistRequest(
+                    sessionId, userId, null, null, null, null
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("Provider quota exhaustion (403) maps to HTTP 403 Forbidden")
+        void providerQuotaExhaustionReturns403() throws Exception {
+            mockAuthUser();
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ExternalProviderException("YouTube quota exceeded", 403));
+
+            CreateDestinationPlaylistRequest reqDto = new CreateDestinationPlaylistRequest(
+                    sessionId, userId, null, null, null, null
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("EXTERNAL_PROVIDER_ERROR"));
+        }
+
+        @Test
+        @DisplayName("Provider timeout maps to HTTP 504 Gateway Timeout")
+        void providerTimeoutReturns504() throws Exception {
+            mockAuthUser();
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ResourceAccessException("Connection timed out"));
+
+            CreateDestinationPlaylistRequest reqDto = new CreateDestinationPlaylistRequest(
+                    sessionId, userId, null, null, null, null
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isGatewayTimeout())
+                    .andExpect(jsonPath("$.code").value("EXTERNAL_PROVIDER_ERROR"));
+        }
+    }
+
+    @Nested
     @DisplayName("Security & Authentication Rejections")
     @WithAnonymousUser
     class UnauthenticatedAccessTests {
@@ -255,6 +462,16 @@ class MigrationExecutionControllerTest {
         @DisplayName("Unauthenticated POST /validate is rejected with 401/403")
         void unauthenticatedPostRejected() throws Exception {
             mockMvc.perform(post("/api/migrations/execution/validate")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"reviewSessionId\":\"" + UUID.randomUUID() + "\"}")
+                            .with(csrf()))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("Unauthenticated POST /create-playlist is rejected with 401/403")
+        void unauthenticatedCreatePlaylistRejected() throws Exception {
+            mockMvc.perform(post("/api/migrations/execution/create-playlist")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"reviewSessionId\":\"" + UUID.randomUUID() + "\"}")
                             .with(csrf()))

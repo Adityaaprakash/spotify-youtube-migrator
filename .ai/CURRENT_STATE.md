@@ -2,10 +2,33 @@
 
 Last Updated: 2026-10-30
 
-Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A & 11B Complete; Phase 11C Next)
-Current Subphase: Phase 11A & Phase 11B Complete (Phase 11C Next)
+Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B & 11C Complete; Phase 11D Next)
+Current Subphase: Phase 11A, 11B & Phase 11C Complete (Phase 11D Next)
 
 ## Completed
+### Phase 11C (Destination Playlist Creation) [COMPLETE]
+- **Application Service & Contracts**:
+  - Published `ADR-025-destination-playlist-creation-and-mutation-safety.md`.
+  - Application service `DestinationPlaylistCreationService` interface and `DefaultDestinationPlaylistCreationService` component in `com.spotifyyoutube.migrator.migration.application.execution`.
+  - Domain contract `DestinationPlaylistCreationResult` in `com.spotifyyoutube.migrator.migration.application.execution.contract`.
+  - Orchestrates destination playlist creation on YouTube Music using server-side validated `ApprovedMigrationContext` derived from `ApprovedMigrationExecutionService.prepareExecution`.
+- **Pre-Mutation Guards & Invariant Enforcement**:
+  - Gated Validation: Fails fast before any destination call if session does not exist, fails anti-IDOR ownership checks (throws `ResourceNotFoundException` -> 404), is not completed (`MigrationExecutionValidationException` -> 409), or violates any of the 12 Phase 11B validation invariants.
+  - Anti-Impersonation: Verifies caller-supplied `userId` matches authenticated principal (HTTP 400).
+  - Empty Selection Guard: Rejects sessions with 0 approved tracks with `InvalidStateException` (HTTP 409) prior to destination mutation.
+  - Metadata Bounds: Validates title ($\le 150$ characters, non-blank) and description ($\le 5000$ characters) against YouTube constraints before dispatching provider requests.
+- **Provider Integration & Error Handling**:
+  - Integrates with provider-neutral `MusicDestination.createPlaylist(UUID, CreateDestinationPlaylistRequest)` implemented by `YouTubeMusicDestinationAdapter`.
+  - Captures and validates confirmed destination playlist identity (non-null, non-blank playlist ID).
+  - Sanitizes access tokens and secrets (`TOKEN_PATTERN`) from provider exception logs and messages.
+  - Classifies ambiguous network/socket timeouts (`ResourceAccessException`) as `UNCERTAIN` without blind retries to prevent duplicate playlist generation.
+- **Strict Mutation Boundary**:
+  - Strictly ZERO track insertions performed (`MusicDestination.addTrackToPlaylist` is never called; Phase 11D boundary respected).
+- **REST Presentation API**:
+  - `MigrationExecutionController`: Extended with `POST /api/migrations/execution/create-playlist` and convenience route `POST /api/migrations/execution/create-playlist/{sessionId}` (with alias `/api/migrations/approved/...`).
+  - DTOs: `CreateDestinationPlaylistRequest` (with `@NotNull reviewSessionId`, `@JsonAlias({"sessionId"})`) and `DestinationPlaylistResponse`.
+  - Mapper: `MigrationExecutionApiMapper.toDomainRequest` and `toPlaylistResponse`.
+
 ### Phase 11B (Approved Plan Validation) [COMPLETE]
 - **Validation Boundary & Invariant Engine**:
   - `ApprovedPlanValidator` interface and `DefaultApprovedPlanValidator` stateless component in `com.spotifyyoutube.migrator.migration.application.execution.validation`.
@@ -903,28 +926,37 @@ Current Subphase: Phase 11A & Phase 11B Complete (Phase 11C Next)
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Destination Playlist Creation (Phase 11).
+- Ordered Track Insertion (Phase 11D).
 - Async Migration & Progress Tracking (Phase 12).
 
 ## Current Verification
 - Full Test Suite Execution: Maven `clean verify` baseline passed with 1,157+ unit and service tests across the entire application.
+- Phase 11 Test Suites (89 dedicated tests across 8 test classes):
+  - `ApprovedMigrationContractTest`: 12 tests (domain contracts, bounds, immutability, relative ordering, target position indexing).
+  - `ApprovedPlanValidatorTest`: 19 tests (all 12 validation rules, terminal status guard, anti-IDOR, anti-impersonation, track eligibility, duplicate prevention).
+  - `ApprovedMigrationExecutionServiceTest`: 8 tests (service coordination, anti-IDOR 404 guards, lazy-loading, validator delegation).
+  - `ApprovedPlanExecutionSafetyTest`: 4 tests (reflection checks verifying zero destination dependencies on validator/execution service, zero mutation verification).
+  - `DestinationPlaylistCreationResultTest`: 8 tests (contract invariants, positive track counts, blank validations, Optionals).
+  - `DefaultDestinationPlaylistCreationServiceTest`: 15 tests (successful playlist creation, convenience overloads, empty selection 409 guard, anti-impersonation 400 guard, metadata bounds, quota 403 handling, timeout 504 handling, zero track insertions).
+  - `DestinationPlaylistCreationSafetyTest`: 5 tests (reflection checks, zero matching/discovery dependencies, zero track insertion guarantee).
+  - `MigrationExecutionControllerTest`: 18 tests (WebMvc endpoints for `/validate`, `/eligibility/{sessionId}`, `/create-playlist`, `/create-playlist/{sessionId}`, route aliases, anti-impersonation 400, unauthenticated 401/403, missing body 400, 404, 409, 504).
 - Review Subsystem Test Suites: 105 dedicated tests passing across 8 suites:
-  - `ReviewSessionControllerTest`: 24 tests (WebMvc endpoints, route aliases `/api/review-sessions` and `/api/reviews`, lifecycle transitions, ordering, automated and explicit candidate search, decision submissions, rate-limit propagation).
-  - `ReviewSessionIntegrationTest`: 4 tests (end-to-end plan-to-review creation, decision workflows enabling completion, candidate search delegation, immutable evidence preservation).
-  - `ReviewApiSerializationTest`: 14 tests (Jackson JSON serialization, `@JsonAlias` playlist bindings, optional candidate null safety, negative duration rejection, query length validation).
-  - `ReviewSecurityAccessTest`: 8 tests (unauthenticated 401/403 rejection, anti-impersonation 400 validation, anti-IDOR 404 protection).
-  - `ReviewSessionServiceTest`: 20 tests (orchestration, classification mapping, track retrieval, position ordering, duplicate conflict detection/resolution lifecycle, completion/cancellation guards, search delegation).
-  - `ReviewCandidateSearchServiceTest`: 19 tests (search behavior, automated query formulation, explicit query dispatch, limit bounding 1–50, encounter-order deduplication, error scrubbing, closed session guards).
-  - `ReviewSessionDomainTest`: 12 tests (domain state transitions, provenance preservation, candidate validation, idempotence, session completion invariants, summary reconciliation).
-  - `ReviewStatePersistenceSafetyTest`: 4 tests (Phase 9 preview read-only guarantee, zero `MusicDestination` dependency on `DefaultReviewSessionService`, original matching evidence immutability across multi-decision workflows, backward compatibility).
+  - `ReviewSessionControllerTest`: 24 tests.
+  - `ReviewSessionIntegrationTest`: 4 tests.
+  - `ReviewApiSerializationTest`: 14 tests.
+  - `ReviewSecurityAccessTest`: 8 tests.
+  - `ReviewSessionServiceTest`: 20 tests.
+  - `ReviewCandidateSearchServiceTest`: 19 tests.
+  - `ReviewSessionDomainTest`: 12 tests.
+  - `ReviewStatePersistenceSafetyTest`: 4 tests.
 - Migration Planning Subsystem Test Suites: 55 tests pass across all 6 suites:
-  - `DefaultPlaylistMigrationPlanGeneratorTest`: 15 tests (generator logic, duplicate detection, failure isolation, determinism, review slot safety, metadata fallback handling).
-  - `MigrationPlanTest`: 15 tests (domain contracts, immutability, mathematical summary reconciliation, bounds, sanitization).
-  - `MigrationPlanControllerTest`: 14 tests (WebMvc endpoints, principal resolution, anti-impersonation, validation, error mapping, Retry-After).
-  - `MigrationPlanServiceTest`: 7 tests (application service orchestration, flag propagation, ordering preservation, validations).
-  - `MigrationPlanSerializationTest`: 2 tests (Jackson JSON serialization, null candidate handling, request field aliases).
-  - `MigrationPlanDestinationSafetyTest`: 2 tests (zero destination mutation verification and reflection dependency checks).
-- Workflow Evaluation & Duplicate Accounting Suite (`MigrationWorkflowEvaluatorTest`): 13 tests covering multi-playlist aggregation, out-of-order detection, zero duration safety, fallback counts, and detailed vs. summary-only duplicate reconciliation without double-counting.
+  - `DefaultPlaylistMigrationPlanGeneratorTest`: 15 tests.
+  - `MigrationPlanTest`: 15 tests.
+  - `MigrationPlanControllerTest`: 14 tests.
+  - `MigrationPlanServiceTest`: 7 tests.
+  - `MigrationPlanSerializationTest`: 2 tests.
+  - `MigrationPlanDestinationSafetyTest`: 2 tests.
+- Workflow Evaluation & Duplicate Accounting Suite (`MigrationWorkflowEvaluatorTest`): 13 tests.
 - Phase 8 Orchestration Compatibility Suites: `PlaylistMigrationOrchestratorTest` (19 tests), `MigrationServiceImplTest`, `MigrationControllerTest`.
 - Benchmark Test Suite (16 test classes): 88 tests.
 - Matching Engine Regression Suite (18 test classes): 274 tests.
@@ -965,8 +997,8 @@ Current Subphase: Phase 11A & Phase 11B Complete (Phase 11C Next)
 - **Phase 11 (Playlist Creation & Execution)**:
   - **Phase 11A (Execution Architecture & Contracts)**: COMPLETE
   - **Phase 11B (Approved Plan Validation)**: COMPLETE
-  - **Phase 11C (Destination Playlist Creation)**: NOT YET IMPLEMENTED
+  - **Phase 11C (Destination Playlist Creation)**: COMPLETE
   - **Phase 11D (Ordered Track Insertion)**: NOT YET IMPLEMENTED
 
 ## Next Recommended Work
-1. Advance to Phase 11C (Destination Playlist Creation via `MusicDestination.createPlaylist`).
+1. Advance to Phase 11D (Ordered Track Insertion via `MusicDestination.addTrackToPlaylist`).

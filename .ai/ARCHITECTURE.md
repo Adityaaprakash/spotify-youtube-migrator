@@ -220,3 +220,21 @@ Controllers MUST NOT:
   - **All-or-Nothing Safety**: Ineligibility on even one track (awaiting review, unresolved conflict, missing destination identity, duplicate destination ID) causes the entire validation to fail. Partially approved selections are never returned as executable.
   - **Server-Side Security & IDOR Protection**: The authenticated user must own the review session; cross-user session execution access throws `ResourceNotFoundException` (HTTP 404) to prevent information disclosure. Caller-supplied `userId` mismatches reject with HTTP 400.
   - **Evidence & Provenance Preservation**: Immutably preserves original matching evidence and human decision provenance (`AUTOMATIC` vs `USER_SELECTED`) without generating synthetic confidence scores.
+
+## Destination Playlist Creation Layer (Phase 11C)
+
+- Packages:
+  - Contracts: `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Application Service: `com.spotifyyoutube.migrator.migration.application.execution`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.api.mapper`
+  - Destination Provider: `com.spotifyyoutube.migrator.migration.application.destination`, `com.spotifyyoutube.migrator.youtube.infrastructure.destination`
+- Architecture Decisions: ADR-025 (Destination Playlist Creation Architecture and Mutation Safety Boundary)
+- Purpose: Orchestrates destination playlist creation on YouTube Music using the server-side validated `ApprovedMigrationContext`. Gated by Phase 11A/11B validation and enforces zero track insertion.
+- Architecture Rules:
+  - **Gated Validation Boundary**: Before invoking the destination provider, the application resolves the `ApprovedMigrationContext` via `ApprovedMigrationExecutionService.prepareExecution`. If validation fails, zero provider calls are made (`verifyNoInteractions(musicDestination)`).
+  - **Zero Track Insertion Boundary**: Phase 11C strictly creates the playlist only (`MusicDestination.createPlaylist`). It NEVER calls `MusicDestination.addTrackToPlaylist(...)` and never inserts tracks. Track insertion is completely isolated and deferred to Phase 11D.
+  - **Non-Empty Approved Selection Guard**: Attempts to create a destination playlist for an approved selection with 0 tracks reject with `InvalidStateException` (HTTP 409 Conflict) prior to calling the provider.
+  - **Server-Side Security & Anti-Impersonation**: Authenticated user identity is resolved from the trusted security context. Client-supplied `userId` mismatches reject with HTTP 400. Cross-user session access throws `ResourceNotFoundException` (HTTP 404).
+  - **Metadata Bounds & Defaults**: Playlist titles are bounded to 150 characters (falling back to "Migrated - " + sourceTitle); descriptions are bounded to 5000 characters.
+  - **Idempotency & Ambiguous Timeout Handling**: Network/socket timeouts (`ResourceAccessException`) are logged with high-visibility warnings as `UNCERTAIN` and mapped to HTTP 504 Gateway Timeout. Blind retries are strictly avoided to prevent duplicate playlist creation on the user's YouTube account.
+  - **Credential Sanitization**: External provider error messages are scrubbed against `TOKEN_PATTERN` (`bearer`, `access_token=`, `api_key=`, `secret=`) before logging or inclusion in exceptions.

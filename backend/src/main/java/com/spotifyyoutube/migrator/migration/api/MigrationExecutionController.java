@@ -3,13 +3,18 @@ package com.spotifyyoutube.migrator.migration.api;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.DestinationPlaylistResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationExecutionApiMapper;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
+import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,24 +28,36 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * REST controller exposing execution validation and eligibility inspection endpoints for approved migrations.
+ * REST controller exposing execution validation, eligibility inspection, and destination playlist creation
+ * for approved migrations.
  * <p>
- * Strictly read-only boundary: validates whether a completed review session is eligible for destination execution
- * without creating playlists or inserting tracks.
+ * Enforces security ownership, anti-impersonation, and strict mutation boundaries (creates playlist only;
+ * zero track insertion).
  */
 @RestController
 @RequestMapping({"/api/migrations/execution", "/api/migrations/approved"})
 public class MigrationExecutionController {
 
     private final ApprovedMigrationExecutionService executionService;
+    private final DestinationPlaylistCreationService playlistCreationService;
     private final UserService userService;
+
+    @Autowired
+    public MigrationExecutionController(
+            ApprovedMigrationExecutionService executionService,
+            DestinationPlaylistCreationService playlistCreationService,
+            UserService userService
+    ) {
+        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
+        this.playlistCreationService = playlistCreationService;
+        this.userService = Objects.requireNonNull(userService, "UserService must not be null");
+    }
 
     public MigrationExecutionController(
             ApprovedMigrationExecutionService executionService,
             UserService userService
     ) {
-        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
-        this.userService = Objects.requireNonNull(userService, "UserService must not be null");
+        this(executionService, null, userService);
     }
 
     /**
@@ -55,6 +72,40 @@ public class MigrationExecutionController {
         ApprovedMigrationExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
         ExecutionValidationResult result = executionService.validateExecution(domainReq, userId);
         return ResponseEntity.ok(MigrationExecutionApiMapper.toResponse(request.reviewSessionId(), result));
+    }
+
+    /**
+     * Creates a destination playlist using the validated approved migration context (Phase 11C).
+     * Strictly creates the playlist only without inserting tracks.
+     */
+    @PostMapping("/create-playlist")
+    public ResponseEntity<DestinationPlaylistResponse> createDestinationPlaylist(
+            @RequestBody @Valid CreateDestinationPlaylistRequest request,
+            Principal principal
+    ) {
+        if (playlistCreationService == null) {
+            throw new IllegalStateException("DestinationPlaylistCreationService is not configured");
+        }
+        UUID userId = resolveUserId(request.userId(), principal);
+        ApprovedMigrationExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
+        DestinationPlaylistCreationResult result = playlistCreationService.createDestinationPlaylist(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toPlaylistResponse(result));
+    }
+
+    /**
+     * Convenience endpoint to create a destination playlist by review session ID (Phase 11C).
+     */
+    @PostMapping("/create-playlist/{sessionId}")
+    public ResponseEntity<DestinationPlaylistResponse> createDestinationPlaylistBySessionId(
+            @PathVariable UUID sessionId,
+            Principal principal
+    ) {
+        if (playlistCreationService == null) {
+            throw new IllegalStateException("DestinationPlaylistCreationService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        DestinationPlaylistCreationResult result = playlistCreationService.createDestinationPlaylist(sessionId, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toPlaylistResponse(result));
     }
 
     /**
