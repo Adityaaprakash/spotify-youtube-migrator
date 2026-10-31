@@ -8,12 +8,16 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.AddTr
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackInsertionOutcome;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -49,13 +53,24 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
 
     private final ApprovedMigrationExecutionService executionService;
     private final MusicDestination musicDestination;
+    private final MigrationExecutionStateService executionStateService;
+
+    @Autowired
+    public DefaultOrderedTrackInsertionService(
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            MigrationExecutionStateService executionStateService
+    ) {
+        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
+        this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
+        this.executionStateService = executionStateService;
+    }
 
     public DefaultOrderedTrackInsertionService(
             ApprovedMigrationExecutionService executionService,
             MusicDestination musicDestination
     ) {
-        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
-        this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
+        this(executionService, musicDestination, null);
     }
 
     @Override
@@ -98,6 +113,18 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
                     "Cannot insert tracks: approved track selection is empty for review session %s",
                     context.reviewSessionId()
             ));
+        }
+
+        // If durable execution state service is configured, delegate to durable execution flow (Phase 11E)
+        if (executionStateService != null) {
+            InitializeExecutionRequest initReq = InitializeExecutionRequest.of(
+                    request.reviewSessionId(),
+                    trimmedPlaylistId,
+                    authenticatedUserId
+            );
+            MigrationExecutionSummary initSummary = executionStateService.initializeExecution(initReq, authenticatedUserId);
+            MigrationExecutionSummary execSummary = executionStateService.executeTrackInsertion(initSummary.executionId(), authenticatedUserId);
+            return toInsertionSummary(execSummary);
         }
 
         // 3. Verify destination playlist existence and accessibility under authenticated user's credentials
@@ -234,5 +261,66 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
             return "null";
         }
         return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+    }
+
+    private PlaylistTrackInsertionSummary toInsertionSummary(MigrationExecutionSummary summary) {
+        List<TrackInsertionOutcome> outcomes = summary.trackRecords().stream()
+                .map(tr -> {
+                    return switch (tr.status()) {
+                        case ADDED -> TrackInsertionOutcome.success(
+                                tr.targetPosition(),
+                                tr.sourcePosition(),
+                                tr.sourceTrackId(),
+                                tr.sourceTitle(),
+                                tr.sourceArtist(),
+                                tr.destinationTrackId(),
+                                tr.destinationPlaylistItemId()
+                        );
+                        case FAILED -> TrackInsertionOutcome.failed(
+                                tr.targetPosition(),
+                                tr.sourcePosition(),
+                                tr.sourceTrackId(),
+                                tr.sourceTitle(),
+                                tr.sourceArtist(),
+                                tr.destinationTrackId(),
+                                tr.errorMessage() != null ? tr.errorMessage() : "Failed insertion"
+                        );
+                        case UNCERTAIN -> TrackInsertionOutcome.uncertain(
+                                tr.targetPosition(),
+                                tr.sourcePosition(),
+                                tr.sourceTrackId(),
+                                tr.sourceTitle(),
+                                tr.sourceArtist(),
+                                tr.destinationTrackId(),
+                                tr.errorMessage() != null ? tr.errorMessage() : "Uncertain outcome"
+                        );
+                        case SKIPPED, PENDING, ADDING -> TrackInsertionOutcome.skipped(
+                                tr.targetPosition(),
+                                tr.sourcePosition(),
+                                tr.sourceTrackId(),
+                                tr.sourceTitle(),
+                                tr.sourceArtist(),
+                                tr.destinationTrackId(),
+                                tr.errorMessage() != null ? tr.errorMessage() : "Skipped"
+                        );
+                    };
+                })
+                .toList();
+
+        return new PlaylistTrackInsertionSummary(
+                summary.reviewSessionId(),
+                summary.planId().orElse(null),
+                summary.userId(),
+                summary.destinationPlatform(),
+                summary.destinationPlaylistId(),
+                summary.totalApprovedTracks(),
+                summary.successfulInsertions(),
+                summary.failedInsertions(),
+                summary.uncertainInsertions(),
+                summary.skippedInsertions(),
+                summary.startedAt() != null ? summary.startedAt() : Instant.now(),
+                summary.completedAt() != null ? summary.completedAt() : Instant.now(),
+                outcomes
+        );
     }
 }

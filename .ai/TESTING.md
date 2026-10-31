@@ -605,17 +605,27 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
   - Ineligible session (0 approved tracks) on insert-tracks returns 409 (`INVALID_STATE`).
   - Provider quota exhaustion on insert-tracks returns 403 (`EXTERNAL_PROVIDER_ERROR`).
   - Provider timeout on insert-tracks returns 504 Gateway Timeout (`EXTERNAL_PROVIDER_ERROR`).
-  - Security: unauthenticated POST /validate, POST /create-playlist, POST /insert-tracks, and GET /eligibility rejected with 401/403 under Spring Security.
+  - `POST /api/migrations/execution/initialize`: initializes durable execution, returns 200 OK with `MigrationExecutionResponse`; repeated idempotent call returns existing record; impersonation returns 400; unowned session returns 404.
+  - `GET /api/migrations/execution/{executionId}`: returns 200 OK with execution summary and track records; unowned returns 404.
+  - `GET /api/migrations/execution/session/{sessionId}`: returns 200 OK with execution summary; unowned returns 404.
+  - `POST /api/migrations/execution/{executionId}/resume`: resumes eligible pending tracks, returns 200 OK; running execution returns 409 conflict; unowned returns 404.
+  - Security: unauthenticated POST /validate, POST /create-playlist, POST /insert-tracks, POST /initialize, GET /{id}, GET /session/{id}, POST /{id}/resume, and GET /eligibility rejected with 401/403 under Spring Security.
 
-## Future Testing Scope (Phase 11E+)
-- Migration Execution Summary & Outcomes Testing (Phase 11E).
+### Durable Execution State & Safe Resume Testing Scope (Phase 11E)
+Implemented and verified (39 dedicated Phase 11E tests):
+- `MigrationExecutionDomainTest`: 12 tests across entity invariants, track record ordering, execution claims, status transitions, stale crash state reconciliation, mathematical count consistency, and resume eligibility.
+- `DefaultMigrationExecutionStateServiceTest`: 13 tests covering idempotent initialization, anti-impersonation, anti-IDOR, sequential insertion, provider error handling, network timeout handling with `UNCERTAIN` classification, crash recovery reconciling stale `ADDING` tracks to `UNCERTAIN` and `RECOVERY_REQUIRED`, and safe resume skipping confirmed `ADDED` tracks.
+- `MigrationExecutionSafetyTest`: 4 tests validating architectural guardrails: zero pipeline dependencies on matching/discovery, strictly synchronous execution (no `@Async`, `@Scheduled`, `CompletableFuture`), JPA entity annotations with optimistic locking `@Version`, and ADR-022 transient plan guarantee (no `MigrationPlan` entity persistence).
+- `MigrationExecutionControllerTest`: 10 dedicated Phase 11E tests covering endpoints `POST /initialize`, `GET /{id}`, `GET /session/{id}`, `POST /{id}/resume`, anti-impersonation (400), not found (404), concurrency conflict (409), and unauthenticated access rejections (401/403).
+
+## Future Testing Scope (Phase 11F+)
 - Failure Recovery & Rollback Testing (Phase 11F).
 - End-to-End Migration Orchestration Testing (Phase 11G).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
-- **Phase 11 Execution & Insertion Total**: 126 tests across 11 test classes:
+- **Phase 11 Execution & Insertion Total**: 165 tests across 14 test classes:
   - `ApprovedMigrationContractTest`: 12 tests.
   - `ApprovedPlanValidatorTest`: 19 tests.
   - `ApprovedMigrationExecutionServiceTest`: 8 tests.
@@ -626,7 +636,10 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
   - `TrackInsertionContractsTest`: 12 tests.
   - `DefaultOrderedTrackInsertionServiceTest`: 10 tests.
   - `OrderedTrackInsertionSafetyTest`: 6 tests.
-  - `MigrationExecutionControllerTest`: 27 tests.
+  - `MigrationExecutionDomainTest`: 12 tests.
+  - `DefaultMigrationExecutionStateServiceTest`: 13 tests.
+  - `MigrationExecutionSafetyTest`: 4 tests.
+  - `MigrationExecutionControllerTest`: 37 tests.
 - **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites:
   - `ReviewSessionControllerTest`: 24 tests.
   - `ReviewSessionIntegrationTest`: 4 tests.

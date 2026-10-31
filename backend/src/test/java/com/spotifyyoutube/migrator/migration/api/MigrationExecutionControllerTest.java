@@ -9,20 +9,27 @@ import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
+import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
 import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionTrackRecordDto;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationError;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackInsertionOutcome;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,6 +49,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -57,7 +65,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(MigrationExecutionController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class})
-@DisplayName("Phase 11A/11B/11C/11D: Migration Execution Controller WebMvc Test")
+@DisplayName("Phase 11A/11B/11C/11D/11E: Migration Execution Controller WebMvc Test")
 class MigrationExecutionControllerTest {
 
     @Autowired
@@ -71,6 +79,9 @@ class MigrationExecutionControllerTest {
 
     @MockBean
     private OrderedTrackInsertionService trackInsertionService;
+
+    @MockBean
+    private MigrationExecutionStateService executionStateService;
 
     @MockBean
     private UserService userService;
@@ -642,6 +653,174 @@ class MigrationExecutionControllerTest {
     }
 
     @Nested
+    @DisplayName("Phase 11E: Durable Execution State & Resume Tests")
+    @WithMockUser(username = "tester@example.com")
+    class DurableExecutionEndpointTests {
+
+        private UUID executionId;
+        private MigrationExecutionSummary sampleSummary;
+
+        @BeforeEach
+        void initSummary() {
+            executionId = UUID.randomUUID();
+            ExecutionTrackRecordDto trackDto = new ExecutionTrackRecordDto(
+                    UUID.randomUUID(),
+                    0,
+                    0,
+                    "sp_1",
+                    "Track 1",
+                    "Artist 1",
+                    "yt_1",
+                    "item_1",
+                    ExecutionTrackStatus.ADDED,
+                    null,
+                    1,
+                    Instant.now(),
+                    Instant.now()
+            );
+
+            sampleSummary = new MigrationExecutionSummary(
+                    executionId,
+                    sessionId,
+                    Optional.of(UUID.randomUUID()),
+                    userId,
+                    Platform.YOUTUBE.name(),
+                    "PL_dest_123",
+                    Optional.of("https://music.youtube.com/playlist?list=PL_dest_123"),
+                    "Target Playlist",
+                    MigrationExecutionStatus.COMPLETED,
+                    1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    true,
+                    false,
+                    Instant.now(),
+                    Instant.now(),
+                    List.of(trackDto)
+            );
+        }
+
+        @Test
+        @DisplayName("POST /initialize succeeds and returns durable execution state")
+        void initializeExecutionSuccess() throws Exception {
+            mockAuthUser();
+
+            when(executionStateService.initializeExecution(any(com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest.class), eq(userId)))
+                    .thenReturn(sampleSummary);
+
+            InitializeExecutionRequest reqDto = new InitializeExecutionRequest(
+                    sessionId,
+                    "PL_dest_123",
+                    "https://music.youtube.com/playlist?list=PL_dest_123",
+                    userId
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/initialize")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.executionId").value(executionId.toString()))
+                    .andExpect(jsonPath("$.reviewSessionId").value(sessionId.toString()))
+                    .andExpect(jsonPath("$.destinationPlaylistId").value("PL_dest_123"))
+                    .andExpect(jsonPath("$.status").value("COMPLETED"))
+                    .andExpect(jsonPath("$.successfulInsertions").value(1))
+                    .andExpect(jsonPath("$.trackRecords[0].destinationTrackId").value("yt_1"));
+        }
+
+        @Test
+        @DisplayName("POST /initialize fails with 400 when user ID impersonation is attempted")
+        void initializeImpersonationRejected() throws Exception {
+            mockAuthUser();
+
+            InitializeExecutionRequest reqDto = new InitializeExecutionRequest(
+                    sessionId,
+                    "PL_dest_123",
+                    null,
+                    UUID.randomUUID() // Different from authenticated user
+            );
+
+            mockMvc.perform(post("/api/migrations/execution/initialize")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+        }
+
+        @Test
+        @DisplayName("GET /{executionId} retrieves durable execution summary")
+        void getExecutionSuccess() throws Exception {
+            mockAuthUser();
+
+            when(executionStateService.getExecution(eq(executionId), eq(userId)))
+                    .thenReturn(sampleSummary);
+
+            mockMvc.perform(get("/api/migrations/execution/" + executionId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.executionId").value(executionId.toString()))
+                    .andExpect(jsonPath("$.status").value("COMPLETED"));
+        }
+
+        @Test
+        @DisplayName("GET /{executionId} returns 404 when execution does not exist")
+        void getExecutionNotFound() throws Exception {
+            mockAuthUser();
+
+            UUID missingId = UUID.randomUUID();
+            when(executionStateService.getExecution(eq(missingId), eq(userId)))
+                    .thenThrow(new ResourceNotFoundException("MigrationExecution not found"));
+
+            mockMvc.perform(get("/api/migrations/execution/" + missingId))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("GET /session/{sessionId} retrieves execution summary by review session ID")
+        void getExecutionBySessionSuccess() throws Exception {
+            mockAuthUser();
+
+            when(executionStateService.getExecutionByReviewSession(eq(sessionId), eq(userId)))
+                    .thenReturn(sampleSummary);
+
+            mockMvc.perform(get("/api/migrations/execution/session/" + sessionId))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.reviewSessionId").value(sessionId.toString()));
+        }
+
+        @Test
+        @DisplayName("POST /{executionId}/resume resumes eligible execution")
+        void resumeExecutionSuccess() throws Exception {
+            mockAuthUser();
+
+            when(executionStateService.resumeExecution(eq(executionId), eq(userId)))
+                    .thenReturn(sampleSummary);
+
+            mockMvc.perform(post("/api/migrations/execution/" + executionId + "/resume")
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.executionId").value(executionId.toString()));
+        }
+
+        @Test
+        @DisplayName("POST /{executionId}/resume returns 409 Conflict when execution is currently running")
+        void resumeExecutionConflictWhenRunning() throws Exception {
+            mockAuthUser();
+
+            when(executionStateService.resumeExecution(eq(executionId), eq(userId)))
+                    .thenThrow(new InvalidStateException("Execution is currently running"));
+
+            mockMvc.perform(post("/api/migrations/execution/" + executionId + "/resume")
+                            .with(csrf()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_STATE"));
+        }
+    }
+
+    @Nested
     @DisplayName("Security & Authentication Rejections")
     @WithAnonymousUser
     class UnauthenticatedAccessTests {
@@ -680,6 +859,31 @@ class MigrationExecutionControllerTest {
         @DisplayName("Unauthenticated GET /eligibility is rejected with 401/403")
         void unauthenticatedGetRejected() throws Exception {
             mockMvc.perform(get("/api/migrations/execution/eligibility/" + UUID.randomUUID()))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("Unauthenticated POST /initialize is rejected with 401/403")
+        void unauthenticatedInitializeRejected() throws Exception {
+            mockMvc.perform(post("/api/migrations/execution/initialize")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"reviewSessionId\":\"" + UUID.randomUUID() + "\",\"destinationPlaylistId\":\"PL_123\"}")
+                            .with(csrf()))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("Unauthenticated GET /{executionId} is rejected with 401/403")
+        void unauthenticatedGetExecutionRejected() throws Exception {
+            mockMvc.perform(get("/api/migrations/execution/" + UUID.randomUUID()))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("Unauthenticated POST /{executionId}/resume is rejected with 401/403")
+        void unauthenticatedResumeRejected() throws Exception {
+            mockMvc.perform(post("/api/migrations/execution/" + UUID.randomUUID() + "/resume")
+                            .with(csrf()))
                     .andExpect(status().isForbidden());
         }
     }

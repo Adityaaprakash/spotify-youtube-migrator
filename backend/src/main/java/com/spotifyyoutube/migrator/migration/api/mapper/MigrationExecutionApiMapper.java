@@ -4,9 +4,11 @@ import com.spotifyyoutube.migrator.migration.api.dto.ApprovedMigrationContextRes
 import com.spotifyyoutube.migrator.migration.api.dto.ApprovedTrackResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.DestinationPlaylistResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.ExecutionTrackRecordResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationErrorResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.MigrationExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.PlaylistTrackInsertionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.TrackInsertionOutcomeResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
@@ -14,9 +16,11 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Appr
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionTrackRecordDto;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationError;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackInsertionOutcome;
 
@@ -210,6 +214,74 @@ public final class MigrationExecutionApiMapper {
                 outcome.destinationPlaylistItemId(),
                 outcome.status().name(),
                 outcome.message()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest toDomainRequest(
+            com.spotifyyoutube.migrator.migration.api.dto.InitializeExecutionRequest dto,
+            UUID authenticatedUserId
+    ) {
+        if (dto == null) {
+            return null;
+        }
+        return new com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest(
+                dto.reviewSessionId(),
+                dto.destinationPlaylistId(),
+                dto.destinationPlaylistUrl(),
+                dto.userId() != null ? dto.userId() : authenticatedUserId
+        );
+    }
+
+    public static MigrationExecutionResponse toExecutionResponse(MigrationExecutionSummary summary) {
+        if (summary == null) {
+            return null;
+        }
+
+        List<ExecutionTrackRecordResponse> trackResponses = summary.trackRecords().stream()
+                .map(MigrationExecutionApiMapper::toTrackRecordResponse)
+                .toList();
+
+        return new MigrationExecutionResponse(
+                summary.executionId(),
+                summary.reviewSessionId(),
+                summary.planId().orElse(null),
+                summary.userId(),
+                summary.destinationPlatform(),
+                summary.destinationPlaylistId(),
+                summary.destinationPlaylistUrl().orElse(null),
+                summary.sourcePlaylistTitle(),
+                summary.status().name(),
+                summary.totalApprovedTracks(),
+                summary.successfulInsertions(),
+                summary.failedInsertions(),
+                summary.uncertainInsertions(),
+                summary.skippedInsertions(),
+                summary.fullySuccessful(),
+                summary.canResume(),
+                summary.startedAt(),
+                summary.completedAt(),
+                trackResponses
+        );
+    }
+
+    public static ExecutionTrackRecordResponse toTrackRecordResponse(ExecutionTrackRecordDto dto) {
+        if (dto == null) {
+            return null;
+        }
+        return new ExecutionTrackRecordResponse(
+                dto.id(),
+                dto.targetPosition(),
+                dto.sourcePosition(),
+                dto.sourceTrackId(),
+                dto.sourceTitle(),
+                dto.sourceArtist(),
+                dto.destinationTrackId(),
+                dto.destinationPlaylistItemId(),
+                dto.status().name(),
+                dto.errorMessage(),
+                dto.attemptCount(),
+                dto.startedAt(),
+                dto.completedAt()
         );
     }
 }

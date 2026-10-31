@@ -260,3 +260,36 @@ Controllers MUST NOT:
     - Reconciliation Guarantee: `totalApprovedTracks == successfulInsertions + failedInsertions + uncertainInsertions + skippedInsertions` is strictly enforced.
   - **Credential & Secret Redaction**: Upstream Bearer and OAuth tokens in error messages are scrubbed (`[REDACTED_TOKEN]`).
   - **Zero Database Schema Intrusion**: Preserves ADR-022 transient plan guarantee without creating new database tables or entities.
+
+## Durable Execution State & Safe Resume Layer (Phase 11E)
+
+- Packages:
+  - Persistence & Domain: `com.spotifyyoutube.migrator.migration.execution.domain`, `com.spotifyyoutube.migrator.migration.execution.repository`
+  - Contracts: `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Application Service: `com.spotifyyoutube.migrator.migration.application.execution`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.api.mapper`
+- Architecture Decisions: ADR-027 (Durable Execution State, Per-Track Outcome Persistence, and Safe Resume Semantics)
+- Database Migration: `V6__phase11e_durable_execution_schema.sql` (`migration_executions`, `execution_track_records`)
+- Purpose: Durable persistence of approved migration execution state and per-track insertion outcomes in PostgreSQL, establishing process-restart survivability, concurrency claim locking, crash recovery, and deterministic safe resume semantics without duplicate remote insertions.
+- Architecture Rules:
+  - **Durable Persistence Model**:
+    - `MigrationExecution` persists execution lifecycle (`INITIALIZED`, `RUNNING`, `PARTIALLY_COMPLETED`, `COMPLETED`, `FAILED`, `RECOVERY_REQUIRED`), destination playlist identity, user ownership, review session link, and reconciled counters.
+    - `ExecutionTrackRecord` persists per-track outcomes (`PENDING`, `ADDING`, `ADDED`, `FAILED`, `UNCERTAIN`, `SKIPPED`), canonical target positions, destination item IDs, attempt counts, and timestamps.
+  - **Transaction Boundaries & External API Separation**:
+    - Database transactions are kept discrete and short using programmatic `TransactionTemplate`.
+    - Long-running YouTube API calls (`MusicDestination.addTrackToPlaylist`) are strictly executed *outside* active database transactions to prevent connection pool exhaustion and locking contention during external network latency.
+  - **Concurrency Claim Locking**:
+    - Executions must be claimed by setting `status = RUNNING` within a short transaction.
+    - Concurrent requests targeting an active `RUNNING` execution are immediately rejected with `InvalidStateException` (HTTP 409 Conflict).
+    - Optimistic locking via `@Version` columns protects both `MigrationExecution` and `ExecutionTrackRecord` from stale concurrent updates.
+  - **Crash Recovery & Stale State Reconciliation**:
+    - If the application crashes or restarts while a track was in `ADDING` status, reload/resume reconciles that track to `UNCERTAIN` and the execution to `RECOVERY_REQUIRED`.
+    - Stale `ADDING` tracks are *never* blindly reset to `PENDING` or automatically reinserted, avoiding duplicate playlist tracks on YouTube.
+  - **Safe Resume Semantics**:
+    - Resuming an execution skips all tracks already confirmed as `ADDED`.
+    - Only tracks remaining in `PENDING` status are eligible for automatic insertion, preserving canonical target position order.
+    - Terminal executions (`COMPLETED`) cannot be resumed.
+  - **ADR-022 Transient Plan Preservation**:
+    - Only the execution metadata and `planId` (UUID) are stored; the transient in-memory `MigrationPlan` entity is never persisted.
+  - **Synchronous Execution Boundary**:
+    - All Phase 11E execution and resume operations are strictly synchronous on the calling thread. No background queues, schedulers, or `@Async` workers are introduced (preserving Phase 12 boundaries).

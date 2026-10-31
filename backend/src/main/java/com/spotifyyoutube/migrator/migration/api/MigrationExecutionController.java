@@ -6,17 +6,21 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.DestinationPlaylistResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.MigrationExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.PlaylistTrackInsertionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationExecutionApiMapper;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
+import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
 import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,9 +39,10 @@ import java.util.UUID;
 
 /**
  * REST controller exposing execution validation, eligibility inspection, destination playlist creation,
- * and ordered track insertion for approved migrations.
+ * ordered track insertion, and durable execution state management for approved migrations.
  * <p>
- * Enforces security ownership, anti-impersonation, strict validation boundaries, and deterministic ordered insertion.
+ * Enforces security ownership, anti-impersonation, strict validation boundaries, optimistic locking,
+ * and deterministic safe resume semantics.
  */
 @RestController
 @RequestMapping({"/api/migrations/execution", "/api/migrations/approved"})
@@ -46,6 +51,7 @@ public class MigrationExecutionController {
     private final ApprovedMigrationExecutionService executionService;
     private final DestinationPlaylistCreationService playlistCreationService;
     private final OrderedTrackInsertionService trackInsertionService;
+    private final MigrationExecutionStateService executionStateService;
     private final UserService userService;
 
     @Autowired
@@ -53,12 +59,23 @@ public class MigrationExecutionController {
             ApprovedMigrationExecutionService executionService,
             DestinationPlaylistCreationService playlistCreationService,
             OrderedTrackInsertionService trackInsertionService,
+            MigrationExecutionStateService executionStateService,
             UserService userService
     ) {
         this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
         this.playlistCreationService = playlistCreationService;
         this.trackInsertionService = trackInsertionService;
+        this.executionStateService = executionStateService;
         this.userService = Objects.requireNonNull(userService, "UserService must not be null");
+    }
+
+    public MigrationExecutionController(
+            ApprovedMigrationExecutionService executionService,
+            DestinationPlaylistCreationService playlistCreationService,
+            OrderedTrackInsertionService trackInsertionService,
+            UserService userService
+    ) {
+        this(executionService, playlistCreationService, trackInsertionService, null, userService);
     }
 
     public MigrationExecutionController(
@@ -66,14 +83,14 @@ public class MigrationExecutionController {
             DestinationPlaylistCreationService playlistCreationService,
             UserService userService
     ) {
-        this(executionService, playlistCreationService, null, userService);
+        this(executionService, playlistCreationService, null, null, userService);
     }
 
     public MigrationExecutionController(
             ApprovedMigrationExecutionService executionService,
             UserService userService
     ) {
-        this(executionService, null, null, userService);
+        this(executionService, null, null, null, userService);
     }
 
     /**
@@ -170,6 +187,73 @@ public class MigrationExecutionController {
         InsertTracksExecutionRequest domainReq = new InsertTracksExecutionRequest(sessionId, destinationPlaylistId, userId);
         PlaylistTrackInsertionSummary summary = trackInsertionService.insertApprovedTracks(domainReq, userId);
         return ResponseEntity.ok(MigrationExecutionApiMapper.toInsertionResponse(summary));
+    }
+
+    /**
+     * Initializes durable execution state for an approved migration with a confirmed destination playlist (Phase 11E).
+     * Idempotent: repeated calls with the same reviewSessionId and destinationPlaylistId return the existing execution record.
+     */
+    @PostMapping("/initialize")
+    public ResponseEntity<MigrationExecutionResponse> initializeExecution(
+            @RequestBody @Valid InitializeExecutionRequest request,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(request.userId(), principal);
+        var domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
+        MigrationExecutionSummary summary = executionStateService.initializeExecution(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
+    }
+
+    /**
+     * Retrieves the durable execution state and track records by execution ID (Phase 11E).
+     */
+    @GetMapping("/{executionId}")
+    public ResponseEntity<MigrationExecutionResponse> getExecution(
+            @PathVariable UUID executionId,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        MigrationExecutionSummary summary = executionStateService.getExecution(executionId, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
+    }
+
+    /**
+     * Retrieves the durable execution state by review session ID (Phase 11E).
+     */
+    @GetMapping("/session/{sessionId}")
+    public ResponseEntity<MigrationExecutionResponse> getExecutionByReviewSession(
+            @PathVariable UUID sessionId,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        MigrationExecutionSummary summary = executionStateService.getExecutionByReviewSession(sessionId, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
+    }
+
+    /**
+     * Resumes execution of pending tracks for an eligible migration execution (Phase 11E).
+     * Never re-inserts ADDED tracks; executes pending tracks in canonical order.
+     */
+    @PostMapping("/{executionId}/resume")
+    public ResponseEntity<MigrationExecutionResponse> resumeExecution(
+            @PathVariable UUID executionId,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        MigrationExecutionSummary summary = executionStateService.resumeExecution(executionId, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
     }
 
     private UUID resolveUserId(UUID requestedUserId, Principal principal) {

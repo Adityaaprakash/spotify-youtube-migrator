@@ -2,10 +2,50 @@
 
 Last Updated: 2026-10-31
 
-Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B, 11C & 11D Complete; Phase 11E Next)
-Current Subphase: Phase 11D Complete (Ordered Track Insertion)
+Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B, 11C, 11D & 11E Complete; Phase 11F Next)
+Current Subphase: Phase 11E Complete (Durable Execution State & Safe Resume)
 
 ## Completed
+### Phase 11E (Durable Execution State & Safe Resume) [COMPLETE]
+- **Architectural Decision Record**:
+  - Published `ADR-027-durable-execution-state-and-safe-resume.md`.
+- **Database Persistence Schema**:
+  - Flyway migration `V6__phase11e_durable_execution_schema.sql` creating tables `migration_executions` and `execution_track_records`.
+  - Foreign key constraints to `users(id)` and `review_sessions(id)`.
+  - Unique constraint on `review_session_id` enforcing 1-to-1 durable execution mapping per review session.
+  - Composite unique constraint `(execution_id, target_position)` enforcing gapless canonical ordering.
+  - Performance indexes on `user_id`, `review_session_id`, `status`, and `execution_id`.
+  - Optimistic locking version columns (`version`) on both tables.
+- **Domain Model & Entities**:
+  - Enums: `MigrationExecutionStatus` (`INITIALIZED`, `RUNNING`, `PARTIALLY_COMPLETED`, `COMPLETED`, `FAILED`, `RECOVERY_REQUIRED`) and `ExecutionTrackStatus` (`PENDING`, `ADDING`, `ADDED`, `FAILED`, `UNCERTAIN`, `SKIPPED`).
+  - Entity `MigrationExecution`: Durable aggregate root capturing execution identity, user ownership, review session association, destination playlist metadata, summary counters, and lifecycle transitions.
+  - Entity `ExecutionTrackRecord`: Durable per-track record tracking canonical `targetPosition`, `sourcePosition`, track identities, status, attempt counts, timestamps, and sanitized error messages.
+- **JPA Repositories**:
+  - `MigrationExecutionRepository` (`findByReviewSessionId`, `findByIdAndUserId`, `findByUserIdOrderByCreatedAtDesc`, `existsByReviewSessionId`).
+  - `ExecutionTrackRecordRepository` (`findByExecutionIdOrderByTargetPositionAsc`, `findByExecutionIdAndStatus`).
+- **Application Service Layer**:
+  - Interface `MigrationExecutionStateService` and implementation `DefaultMigrationExecutionStateService`.
+  - Transaction Isolation: Employs discrete, programmatic database transactions via `TransactionTemplate`. External destination API calls are executed strictly *outside* database transactions to prevent connection pool exhaustion during network latency.
+  - Concurrency Claims: Thread claims execution by transitioning `status -> RUNNING`; concurrent requests are rejected with `InvalidStateException` (HTTP 409).
+  - Stale Crash Reconciliation: On server restart or recovery reload, stale `ADDING` tracks are reconciled to `UNCERTAIN` and the execution transitions to `RECOVERY_REQUIRED` rather than blindly retrying, preventing duplicate remote track additions.
+  - Safe Resume Semantics: Never re-inserts already confirmed `ADDED` tracks; only attempts remaining `PENDING` tracks in canonical 0-indexed target position order.
+  - Token Scrubbing: Redacts Bearer and OAuth tokens (`TOKEN_PATTERN`) from provider exception messages and logs (`[REDACTED]`).
+  - Anti-Impersonation & Anti-IDOR: Rejects user ID mismatches (HTTP 400) and unowned executions/sessions (HTTP 404).
+  - Mathematical Reconciliation Invariant: $\text{totalApprovedTracks} = \text{successful} + \text{failed} + \text{uncertain} + \text{skipped} + \text{pending}$.
+- **Backward Compatibility**:
+  - `DefaultOrderedTrackInsertionService`: Updated with overloaded constructor delegating to `MigrationExecutionStateService` while preserving Phase 11D in-memory fallback.
+- **REST Presentation API**:
+  - Endpoints on `MigrationExecutionController`:
+    - `POST /api/migrations/execution/initialize`: Initializes durable execution state (idempotent).
+    - `GET /api/migrations/execution/{executionId}`: Retrieves execution state and track records by execution ID.
+    - `GET /api/migrations/execution/session/{sessionId}`: Retrieves execution state by review session ID.
+    - `POST /api/migrations/execution/{executionId}/resume`: Resumes eligible execution.
+  - DTOs: `InitializeExecutionRequest`, `MigrationExecutionResponse`, `ExecutionTrackRecordResponse`.
+  - Mapper: `MigrationExecutionApiMapper.toDomainRequest`, `toExecutionResponse`, `toTrackRecordResponse`.
+- **Architectural Guardrails & Verification**:
+  - Preserves ADR-022 transient plan guarantee (only references `planId`, never persists `MigrationPlan` entity).
+  - Strictly synchronous execution (zero `@Async`, `CompletableFuture`, background queues, or scheduled tasks).
+  - Zero modifications to frozen Phase 5–10 production code.
 ### Phase 11D (Ordered Track Insertion) [COMPLETE]
 - **Application Service & Contracts**:
   - Published `ADR-026-ordered-destination-track-insertion-and-outcome-handling.md`.
