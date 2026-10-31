@@ -557,7 +557,31 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
   - Reflection safety: re-verifies `DefaultApprovedPlanValidator` and `DefaultApprovedMigrationExecutionService` hold zero destination dependencies.
   - Mutation safety: verifies destination playlist creation never invokes `addTrackToPlaylist`.
   - Interface safety: verifies `DestinationPlaylistCreationService` declares zero methods performing track addition or insertion.
-- `MigrationExecutionControllerTest` (18 WebMvc tests in `com.spotifyyoutube.migrator.migration.api`):
+- `TrackInsertionContractsTest` (12 tests in `com.spotifyyoutube.migrator.migration.application.execution.contract`):
+  - Enum completeness: verifies `TrackInsertionStatus` contains `SUCCESS`, `FAILED`, `UNCERTAIN`, `SKIPPED`.
+  - Outcome factories: verifies `TrackInsertionOutcome` factories (`success`, `failed`, `uncertain`, `skipped`), position non-negativity checks, null guards, and sanitized error messages.
+  - Summary instantiation & evaluation: verifies `PlaylistTrackInsertionSummary` computation of `fullySuccessful` and execution status (`COMPLETED`, `PARTIALLY_FAILED`, `STOPPED_ON_UNCERTAIN_OUTCOME`, `FAILED`).
+  - Mathematical reconciliation invariant: enforces $\text{totalApprovedTracks} = \text{successful} + \text{failed} + \text{uncertain} + \text{skipped}$; fails fast on discrepancy.
+  - Size invariant: enforces `trackOutcomes.size() == totalApprovedTracks`.
+  - Target position monotonicity: enforces that outcomes are strictly ordered by ascending `targetPosition`.
+  - List immutability: verifies unmodifiable collection defensive copy.
+  - Request validation: verifies `InsertTracksExecutionRequest` non-null session ID, non-null and non-blank playlist ID, and user resolution helpers.
+- `DefaultOrderedTrackInsertionServiceTest` (10 tests in `com.spotifyyoutube.migrator.migration.application.execution`):
+  - Pre-mutation guards: rejects null request, rejects null authenticated userId, enforces anti-impersonation (rejects `request.userId != authenticatedUserId`), rejects non-YouTube platform with `InvalidStateException` (409), rejects empty approved selection with `InvalidStateException` (409), propagates `ResourceNotFoundException` when playlist is not found or inaccessible under OAuth token (404). All pre-mutation guards verify `verifyNoInteractions(musicDestination)` or zero calls to `addTrackToPlaylist`.
+  - Canonical ordered insertion: verifies 3 approved tracks are inserted sequentially in ascending `targetPosition` order via `musicDestination.addTrackToPlaylist` with Mockito `InOrder` verification.
+  - Input list invariance: verifies that even if `ApprovedMigrationContext.approvedTracks` list was unordered, tracks are sorted and inserted in ascending `targetPosition` order.
+  - Confirmed failure & stopping policy: track 0 succeeds, track 1 fails with provider rejection; verifies track 1 is marked `FAILED`, track 2 is aborted and marked `SKIPPED`, and summary status is `PARTIALLY_FAILED`.
+  - Ambiguous timeout & stopping policy: track 0 succeeds, track 1 throws `ResourceAccessException` (socket timeout); verifies track 1 is marked `UNCERTAIN`, track 2 is aborted and marked `SKIPPED`, summary status is `STOPPED_ON_UNCERTAIN_OUTCOME`, and no blind retries are executed.
+  - First-track failure: verifies first track failure marks execution status as `FAILED` and skips remaining tracks.
+  - Token scrubbing: verifies sensitive Bearer and OAuth tokens in provider error messages are scrubbed (`[REDACTED_TOKEN]`).
+- `OrderedTrackInsertionSafetyTest` (6 tests in `com.spotifyyoutube.migrator.migration.application.execution`):
+  - Reflection safety: `DefaultOrderedTrackInsertionService` holds zero pipeline dependencies (`TrackMatchingEngine`, `NormalizationOrchestrator`, `CandidateDiscoveryService`, `SpotifyPlaylistService`, `ReviewSessionRepository`, `ReviewTrackRepository`).
+  - Reflection safety: re-verifies `DefaultApprovedPlanValidator` and `DefaultApprovedMigrationExecutionService` hold zero destination dependencies.
+  - Strict mutation boundary: verifies `OrderedTrackInsertionService` declares zero methods named `createPlaylist`.
+  - No async infrastructure: verifies service contains no methods returning `CompletableFuture`, `Future`, or annotated with `@Async` (preserving Phase 12 boundaries).
+  - Validation failure safety: zero provider mutations if execution preparation fails.
+  - Monotonic sequential ordering invariant: verifies 4 approved tracks are sequentially dispatched with 0-indexed destination positions (0, 1, 2, 3) using `InOrder`.
+- `MigrationExecutionControllerTest` (27 WebMvc tests in `com.spotifyyoutube.migrator.migration.api`):
   - `POST /api/migrations/execution/validate`: valid request returns 200 OK with `valid: true`, populated `approvedContext`.
   - Route alias `POST /api/migrations/approved/validate`: returns 200 OK.
   - Ineligible execution: returns 200 OK with `valid: false` and itemized errors array.
@@ -573,14 +597,36 @@ Implemented across 11 dedicated test classes (4 Phase 8A/8B foundation tests + 7
   - Session not found or IDOR returns 404 (`NOT_FOUND`).
   - Provider quota exhaustion (403) returns 403 (`EXTERNAL_PROVIDER_ERROR`).
   - Provider timeout returns 504 Gateway Timeout (`EXTERNAL_PROVIDER_ERROR`).
-  - Security: unauthenticated POST /validate, POST /create-playlist, and GET /eligibility rejected with 401/403 under Spring Security.
+  - `POST /api/migrations/execution/insert-tracks`: valid request returns 200 OK with `PlaylistTrackInsertionResponse` (`executionStatus: "COMPLETED"`, per-track outcomes array).
+  - Route alias `POST /api/migrations/approved/insert-tracks`: returns 200 OK.
+  - Convenience route `POST /api/migrations/execution/insert-tracks/{sessionId}?destinationPlaylistId=...`: returns 200 OK.
+  - Anti-impersonation on insert-tracks: mismatched `userId` returns 400 (`INVALID_REQUEST`).
+  - Session not found or IDOR on insert-tracks returns 404 (`NOT_FOUND`).
+  - Ineligible session (0 approved tracks) on insert-tracks returns 409 (`INVALID_STATE`).
+  - Provider quota exhaustion on insert-tracks returns 403 (`EXTERNAL_PROVIDER_ERROR`).
+  - Provider timeout on insert-tracks returns 504 Gateway Timeout (`EXTERNAL_PROVIDER_ERROR`).
+  - Security: unauthenticated POST /validate, POST /create-playlist, POST /insert-tracks, and GET /eligibility rejected with 401/403 under Spring Security.
 
-## Future Testing Scope (Phase 11D+)
-- Ordered Track Insertion Testing (Phase 11D).
+## Future Testing Scope (Phase 11E+)
+- Migration Execution Summary & Outcomes Testing (Phase 11E).
+- Failure Recovery & Rollback Testing (Phase 11F).
+- End-to-End Migration Orchestration Testing (Phase 11G).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
+- **Phase 11 Execution & Insertion Total**: 126 tests across 11 test classes:
+  - `ApprovedMigrationContractTest`: 12 tests.
+  - `ApprovedPlanValidatorTest`: 19 tests.
+  - `ApprovedMigrationExecutionServiceTest`: 8 tests.
+  - `ApprovedPlanExecutionSafetyTest`: 4 tests.
+  - `DestinationPlaylistCreationResultTest`: 8 tests.
+  - `DefaultDestinationPlaylistCreationServiceTest`: 15 tests.
+  - `DestinationPlaylistCreationSafetyTest`: 5 tests.
+  - `TrackInsertionContractsTest`: 12 tests.
+  - `DefaultOrderedTrackInsertionServiceTest`: 10 tests.
+  - `OrderedTrackInsertionSafetyTest`: 6 tests.
+  - `MigrationExecutionControllerTest`: 27 tests.
 - **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites:
   - `ReviewSessionControllerTest`: 24 tests.
   - `ReviewSessionIntegrationTest`: 4 tests.

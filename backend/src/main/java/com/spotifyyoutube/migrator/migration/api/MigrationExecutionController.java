@@ -6,13 +6,18 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.DestinationPlaylistResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.PlaylistTrackInsertionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationExecutionApiMapper;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
+import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +26,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.security.Principal;
@@ -28,11 +34,10 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * REST controller exposing execution validation, eligibility inspection, and destination playlist creation
- * for approved migrations.
+ * REST controller exposing execution validation, eligibility inspection, destination playlist creation,
+ * and ordered track insertion for approved migrations.
  * <p>
- * Enforces security ownership, anti-impersonation, and strict mutation boundaries (creates playlist only;
- * zero track insertion).
+ * Enforces security ownership, anti-impersonation, strict validation boundaries, and deterministic ordered insertion.
  */
 @RestController
 @RequestMapping({"/api/migrations/execution", "/api/migrations/approved"})
@@ -40,24 +45,35 @@ public class MigrationExecutionController {
 
     private final ApprovedMigrationExecutionService executionService;
     private final DestinationPlaylistCreationService playlistCreationService;
+    private final OrderedTrackInsertionService trackInsertionService;
     private final UserService userService;
 
     @Autowired
     public MigrationExecutionController(
             ApprovedMigrationExecutionService executionService,
             DestinationPlaylistCreationService playlistCreationService,
+            OrderedTrackInsertionService trackInsertionService,
             UserService userService
     ) {
         this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
         this.playlistCreationService = playlistCreationService;
+        this.trackInsertionService = trackInsertionService;
         this.userService = Objects.requireNonNull(userService, "UserService must not be null");
+    }
+
+    public MigrationExecutionController(
+            ApprovedMigrationExecutionService executionService,
+            DestinationPlaylistCreationService playlistCreationService,
+            UserService userService
+    ) {
+        this(executionService, playlistCreationService, null, userService);
     }
 
     public MigrationExecutionController(
             ApprovedMigrationExecutionService executionService,
             UserService userService
     ) {
-        this(executionService, null, userService);
+        this(executionService, null, null, userService);
     }
 
     /**
@@ -119,6 +135,41 @@ public class MigrationExecutionController {
         UUID userId = resolveUserId(null, principal);
         ExecutionValidationResult result = executionService.validateExecution(sessionId, userId);
         return ResponseEntity.ok(MigrationExecutionApiMapper.toResponse(sessionId, result));
+    }
+
+    /**
+     * Inserts approved tracks into the specified destination playlist in canonical approved order (Phase 11D).
+     */
+    @PostMapping("/insert-tracks")
+    public ResponseEntity<PlaylistTrackInsertionResponse> insertApprovedTracks(
+            @RequestBody @Valid InsertTracksRequest request,
+            Principal principal
+    ) {
+        if (trackInsertionService == null) {
+            throw new IllegalStateException("OrderedTrackInsertionService is not configured");
+        }
+        UUID userId = resolveUserId(request.userId(), principal);
+        InsertTracksExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
+        PlaylistTrackInsertionSummary summary = trackInsertionService.insertApprovedTracks(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toInsertionResponse(summary));
+    }
+
+    /**
+     * Convenience endpoint to insert approved tracks into a destination playlist by review session ID (Phase 11D).
+     */
+    @PostMapping("/insert-tracks/{sessionId}")
+    public ResponseEntity<PlaylistTrackInsertionResponse> insertApprovedTracksBySessionId(
+            @PathVariable UUID sessionId,
+            @RequestParam String destinationPlaylistId,
+            Principal principal
+    ) {
+        if (trackInsertionService == null) {
+            throw new IllegalStateException("OrderedTrackInsertionService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        InsertTracksExecutionRequest domainReq = new InsertTracksExecutionRequest(sessionId, destinationPlaylistId, userId);
+        PlaylistTrackInsertionSummary summary = trackInsertionService.insertApprovedTracks(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toInsertionResponse(summary));
     }
 
     private UUID resolveUserId(UUID requestedUserId, Principal principal) {

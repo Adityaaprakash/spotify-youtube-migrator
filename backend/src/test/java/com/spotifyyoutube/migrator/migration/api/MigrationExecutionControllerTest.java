@@ -9,14 +9,19 @@ import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
+import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackInsertionOutcome;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
@@ -52,7 +57,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(MigrationExecutionController.class)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class})
-@DisplayName("Phase 11A/11B: Migration Execution Controller WebMvc Test")
+@DisplayName("Phase 11A/11B/11C/11D: Migration Execution Controller WebMvc Test")
 class MigrationExecutionControllerTest {
 
     @Autowired
@@ -63,6 +68,9 @@ class MigrationExecutionControllerTest {
 
     @MockBean
     private DestinationPlaylistCreationService playlistCreationService;
+
+    @MockBean
+    private OrderedTrackInsertionService trackInsertionService;
 
     @MockBean
     private UserService userService;
@@ -454,6 +462,186 @@ class MigrationExecutionControllerTest {
     }
 
     @Nested
+    @DisplayName("Track Insertion Endpoint Tests (POST /api/migrations/execution/insert-tracks)")
+    @WithMockUser(username = "tester@example.com")
+    class InsertApprovedTracksTests {
+
+        private PlaylistTrackInsertionSummary createMockSummary(String playlistId) {
+            TrackInsertionOutcome o0 = TrackInsertionOutcome.success(0, 0, "sp-0", "Song 0", "Artist 0", "yt-0", "item-0");
+            TrackInsertionOutcome o1 = TrackInsertionOutcome.success(1, 1, "sp-1", "Song 1", "Artist 1", "yt-1", "item-1");
+
+            return new PlaylistTrackInsertionSummary(
+                    sessionId, UUID.randomUUID(), userId, Platform.YOUTUBE, playlistId,
+                    2, 2, 0, 0, 0,
+                    Instant.now().minusSeconds(1), Instant.now(),
+                    List.of(o0, o1)
+            );
+        }
+
+        @Test
+        @DisplayName("Valid track insertion request returns 200 OK with detailed outcomes")
+        void validInsertionReturns200() throws Exception {
+            mockAuthUser();
+
+            PlaylistTrackInsertionSummary summary = createMockSummary("PL_created_123");
+            when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
+                    .thenReturn(summary);
+
+            InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_created_123", userId);
+
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.reviewSessionId").value(sessionId.toString()))
+                    .andExpect(jsonPath("$.destinationPlaylistId").value("PL_created_123"))
+                    .andExpect(jsonPath("$.destinationPlatform").value("YOUTUBE"))
+                    .andExpect(jsonPath("$.totalApprovedTracks").value(2))
+                    .andExpect(jsonPath("$.successfulInsertions").value(2))
+                    .andExpect(jsonPath("$.failedInsertions").value(0))
+                    .andExpect(jsonPath("$.uncertainInsertions").value(0))
+                    .andExpect(jsonPath("$.skippedInsertions").value(0))
+                    .andExpect(jsonPath("$.fullySuccessful").value(true))
+                    .andExpect(jsonPath("$.executionStatus").value("COMPLETED"))
+                    .andExpect(jsonPath("$.trackOutcomes").isArray())
+                    .andExpect(jsonPath("$.trackOutcomes[0].targetPosition").value(0))
+                    .andExpect(jsonPath("$.trackOutcomes[0].destinationTrackId").value("yt-0"))
+                    .andExpect(jsonPath("$.trackOutcomes[0].destinationPlaylistItemId").value("item-0"))
+                    .andExpect(jsonPath("$.trackOutcomes[0].status").value("SUCCESS"))
+                    .andExpect(jsonPath("$.trackOutcomes[1].targetPosition").value(1))
+                    .andExpect(jsonPath("$.trackOutcomes[1].destinationTrackId").value("yt-1"))
+                    .andExpect(jsonPath("$.trackOutcomes[1].status").value("SUCCESS"));
+        }
+
+        @Test
+        @DisplayName("Dual-route alias POST /api/migrations/approved/insert-tracks also returns 200 OK")
+        void dualRouteAliasWorks() throws Exception {
+            mockAuthUser();
+
+            PlaylistTrackInsertionSummary summary = createMockSummary("PL_alias_123");
+            when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
+                    .thenReturn(summary);
+
+            InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_alias_123", null);
+
+            mockMvc.perform(post("/api/migrations/approved/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.destinationPlaylistId").value("PL_alias_123"));
+        }
+
+        @Test
+        @DisplayName("Convenience route POST /insert-tracks/{sessionId} returns 200 OK")
+        void convenienceRouteReturns200() throws Exception {
+            mockAuthUser();
+
+            PlaylistTrackInsertionSummary summary = createMockSummary("PL_conv_123");
+            when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
+                    .thenReturn(summary);
+
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks/" + sessionId)
+                            .param("destinationPlaylistId", "PL_conv_123")
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.destinationPlaylistId").value("PL_conv_123"))
+                    .andExpect(jsonPath("$.fullySuccessful").value(true));
+        }
+
+        @Test
+        @DisplayName("Anti-impersonation: caller-supplied userId differing from authenticated user returns 400 Bad Request")
+        void impersonationReturns400() throws Exception {
+            mockAuthUser();
+
+            UUID maliciousUserId = UUID.randomUUID();
+            InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_impersonate", maliciousUserId);
+
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+
+            verify(trackInsertionService, never()).insertApprovedTracks(any(), any());
+        }
+
+        @Test
+        @DisplayName("Review session not found maps to HTTP 404 Not Found")
+        void sessionNotFoundReturns404() throws Exception {
+            mockAuthUser();
+
+            when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ResourceNotFoundException("Review session not found: " + sessionId));
+
+            InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_missing", null);
+
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+        }
+
+        @Test
+        @DisplayName("Ineligible session (no approved tracks) maps to HTTP 409 Conflict")
+        void ineligibleSessionReturns409() throws Exception {
+            mockAuthUser();
+
+            when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
+                    .thenThrow(new InvalidStateException("Cannot insert tracks into destination playlist: no approved tracks available"));
+
+            InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_empty", null);
+
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_STATE"));
+        }
+
+        @Test
+        @DisplayName("Provider quota exhaustion maps to HTTP 403 Forbidden")
+        void quotaExhaustionReturns403() throws Exception {
+            mockAuthUser();
+
+            when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ExternalProviderException("YouTube API quota exceeded (quotaExceeded)"));
+
+            InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_quota", null);
+
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isForbidden())
+                    .andExpect(jsonPath("$.code").value("EXTERNAL_PROVIDER_ERROR"));
+        }
+
+        @Test
+        @DisplayName("Provider timeout maps to HTTP 504 Gateway Timeout")
+        void providerTimeoutReturns504() throws Exception {
+            mockAuthUser();
+
+            when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ResourceAccessException("I/O error on POST request: Read timed out"));
+
+            InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_timeout", null);
+
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(reqDto))
+                            .with(csrf()))
+                    .andExpect(status().isGatewayTimeout())
+                    .andExpect(jsonPath("$.code").value("EXTERNAL_PROVIDER_ERROR"));
+        }
+    }
+
+    @Nested
     @DisplayName("Security & Authentication Rejections")
     @WithAnonymousUser
     class UnauthenticatedAccessTests {
@@ -474,6 +662,16 @@ class MigrationExecutionControllerTest {
             mockMvc.perform(post("/api/migrations/execution/create-playlist")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"reviewSessionId\":\"" + UUID.randomUUID() + "\"}")
+                            .with(csrf()))
+                    .andExpect(status().isForbidden());
+        }
+
+        @Test
+        @DisplayName("Unauthenticated POST /insert-tracks is rejected with 401/403")
+        void unauthenticatedInsertTracksRejected() throws Exception {
+            mockMvc.perform(post("/api/migrations/execution/insert-tracks")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"reviewSessionId\":\"" + UUID.randomUUID() + "\",\"destinationPlaylistId\":\"PL_123\"}")
                             .with(csrf()))
                     .andExpect(status().isForbidden());
         }

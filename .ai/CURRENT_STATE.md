@@ -1,11 +1,43 @@
 # Current State
 
-Last Updated: 2026-10-30
+Last Updated: 2026-10-31
 
-Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B & 11C Complete; Phase 11D Next)
-Current Subphase: Phase 11A, 11B & Phase 11C Complete (Phase 11D Next)
+Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B, 11C & 11D Complete; Phase 11E Next)
+Current Subphase: Phase 11D Complete (Ordered Track Insertion)
 
 ## Completed
+### Phase 11D (Ordered Track Insertion) [COMPLETE]
+- **Application Service & Contracts**:
+  - Published `ADR-026-ordered-destination-track-insertion-and-outcome-handling.md`.
+  - Application service `OrderedTrackInsertionService` interface and `DefaultOrderedTrackInsertionService` component in `com.spotifyyoutube.migrator.migration.application.execution`.
+  - Domain contracts in `com.spotifyyoutube.migrator.migration.application.execution.contract`:
+    - `TrackInsertionStatus`: Enum (`SUCCESS`, `FAILED`, `UNCERTAIN`, `SKIPPED`).
+    - `TrackInsertionOutcome`: Immutable record capturing per-track outcomes (`targetPosition`, `sourcePosition`, source metadata, `destinationTrackId`, `destinationPlaylistItemId`, `status`, `message`) with convenience factories (`success`, `failed`, `uncertain`, `skipped`).
+    - `PlaylistTrackInsertionSummary`: Immutable summary record enforcing the mathematical reconciliation invariant ($\text{totalApprovedTracks} = \text{successful} + \text{failed} + \text{uncertain} + \text{skipped}$), target position monotonicity invariant, unmodifiable outcomes list, and `getExecutionStatus()` evaluation (`COMPLETED`, `PARTIALLY_FAILED`, `STOPPED_ON_UNCERTAIN_OUTCOME`, `FAILED`).
+    - `InsertTracksExecutionRequest`: Application request record with `reviewSessionId`, `destinationPlaylistId`, and optional `userId`.
+- **Pre-Mutation Validation & Authorization**:
+  - Pre-mutation gating via `ApprovedMigrationExecutionService.prepareExecution`: Fails fast before any provider mutation if session does not exist, fails anti-IDOR checks (404), is not completed (409), has zero approved tracks (409), or violates any Phase 11B invariant.
+  - Anti-impersonation: Enforces caller-supplied `userId` matches authenticated principal (HTTP 400).
+  - Playlist existence and access check: Calls `youTubePlaylistService.getPlaylist(userId, destinationPlaylistId)` to verify playlist exists and belongs to the authenticated user before attempting any track insertions (throws `ResourceNotFoundException` -> 404).
+  - Platform guard: Restricts destination to `Platform.YOUTUBE`.
+- **Ordered Sequential Insertion**:
+  - Iterates through approved tracks sequentially in strictly ascending `targetPosition` order ($0, 1, \dots, M-1$).
+  - Invokes `MusicDestination.addTrackToPlaylist(userId, playlistId, new AddTrackToDestinationPlaylistRequest(trackId, position))`, passing explicit 0-indexed destination positions.
+  - Preserves relative source order for newly created empty destination playlists.
+  - Zero concurrent or asynchronous workers (no `parallelStream`, `CompletableFuture`, or `@Async`), preventing out-of-order YouTube insertions.
+- **Conservative Failure-Continuation Policy**:
+  - Confirmed Provider Rejection: When the provider rejects an insertion (e.g. video unavailable, private, deleted), the track is marked `FAILED` and all subsequent tracks are immediately aborted and marked `SKIPPED` to preserve destination playlist order.
+  - Ambiguous Network Timeouts / Connection Resets: Caught as `ResourceAccessException`, classified as `UNCERTAIN`, and never blindly retried. All subsequent tracks are marked `SKIPPED`.
+  - First-Track Failure: Classified as `FAILED` execution status.
+  - Partial Success: Classified as `PARTIALLY_FAILED` execution status.
+- **Credential & Secret Redaction**:
+  - Regex pattern scrubbing (`TOKEN_PATTERN`) removes Bearer and OAuth tokens from provider exception messages and logs, substituting `[REDACTED_TOKEN]`.
+- **Zero Database Schema Intrusion**:
+  - Preserves ADR-022 transient plan guarantee: zero new database tables, entities, or Flyway migrations. Execution outcomes are returned synchronously to the caller.
+- **REST Presentation API**:
+  - `MigrationExecutionController`: Extended with `POST /api/migrations/execution/insert-tracks` and convenience route `POST /api/migrations/execution/insert-tracks/{sessionId}?destinationPlaylistId=...` (plus `/api/migrations/approved/...` aliases).
+  - DTOs: `InsertTracksRequest`, `PlaylistTrackInsertionResponse`, `TrackInsertionOutcomeResponse`.
+  - Mapper: `MigrationExecutionApiMapper.toDomainRequest`, `toInsertionResponse`, `toOutcomeResponse`.
 ### Phase 11C (Destination Playlist Creation) [COMPLETE]
 - **Application Service & Contracts**:
   - Published `ADR-025-destination-playlist-creation-and-mutation-safety.md`.
@@ -926,12 +958,14 @@ Current Subphase: Phase 11A, 11B & Phase 11C Complete (Phase 11D Next)
 - Environment configuration: `Testcontainers` Docker integration passes when Docker Desktop is available, but currently the local Docker engine is not running, blocking database containers. (Docker daemon is globally unavailable in this specific execution environment).
 
 ## Not Yet Implemented
-- Ordered Track Insertion (Phase 11D).
+- Migration Execution Summary & Outcomes (Phase 11E).
+- Failure Recovery & Partial Rollback Policies (Phase 11F).
+- End-to-End Migration Orchestration & Hardening (Phase 11G).
 - Async Migration & Progress Tracking (Phase 12).
 
 ## Current Verification
-- Full Test Suite Execution: Maven `clean verify` baseline passed with 1,157+ unit and service tests across the entire application.
-- Phase 11 Test Suites (89 dedicated tests across 8 test classes):
+- Full Test Suite Execution: Maven `clean verify` baseline passed with 1,194+ unit and service tests across the entire application.
+- Phase 11 Test Suites (126 dedicated tests across 11 test classes):
   - `ApprovedMigrationContractTest`: 12 tests (domain contracts, bounds, immutability, relative ordering, target position indexing).
   - `ApprovedPlanValidatorTest`: 19 tests (all 12 validation rules, terminal status guard, anti-IDOR, anti-impersonation, track eligibility, duplicate prevention).
   - `ApprovedMigrationExecutionServiceTest`: 8 tests (service coordination, anti-IDOR 404 guards, lazy-loading, validator delegation).
@@ -939,7 +973,10 @@ Current Subphase: Phase 11A, 11B & Phase 11C Complete (Phase 11D Next)
   - `DestinationPlaylistCreationResultTest`: 8 tests (contract invariants, positive track counts, blank validations, Optionals).
   - `DefaultDestinationPlaylistCreationServiceTest`: 15 tests (successful playlist creation, convenience overloads, empty selection 409 guard, anti-impersonation 400 guard, metadata bounds, quota 403 handling, timeout 504 handling, zero track insertions).
   - `DestinationPlaylistCreationSafetyTest`: 5 tests (reflection checks, zero matching/discovery dependencies, zero track insertion guarantee).
-  - `MigrationExecutionControllerTest`: 18 tests (WebMvc endpoints for `/validate`, `/eligibility/{sessionId}`, `/create-playlist`, `/create-playlist/{sessionId}`, route aliases, anti-impersonation 400, unauthenticated 401/403, missing body 400, 404, 409, 504).
+  - `TrackInsertionContractsTest`: 12 tests (domain contracts, bounds, immutability, mathematical reconciliation, monotonicity, request validations).
+  - `DefaultOrderedTrackInsertionServiceTest`: 10 tests (canonical ordered insertion, InOrder verification, scrambled context list order preservation, anti-impersonation, missing playlist 404, empty selection 409, non-YouTube platform 409, confirmed rejection with conservative stop policy, ambiguous timeout classification, token scrubbing).
+  - `OrderedTrackInsertionSafetyTest`: 6 tests (reflection safety on pipeline dependencies, ADR-024 validator isolation, strict mutation boundary preserving Phase 11C, no async infrastructure, validation failure zero mutations, monotonic position order).
+  - `MigrationExecutionControllerTest`: 27 tests (WebMvc endpoints for `/validate`, `/eligibility/{sessionId}`, `/create-playlist`, `/create-playlist/{sessionId}`, `/insert-tracks`, `/insert-tracks/{sessionId}`, route aliases, anti-impersonation 400, unauthenticated 401/403, missing body 400, 404, 409, 504).
 - Review Subsystem Test Suites: 105 dedicated tests passing across 8 suites:
   - `ReviewSessionControllerTest`: 24 tests.
   - `ReviewSessionIntegrationTest`: 4 tests.
@@ -998,7 +1035,10 @@ Current Subphase: Phase 11A, 11B & Phase 11C Complete (Phase 11D Next)
   - **Phase 11A (Execution Architecture & Contracts)**: COMPLETE
   - **Phase 11B (Approved Plan Validation)**: COMPLETE
   - **Phase 11C (Destination Playlist Creation)**: COMPLETE
-  - **Phase 11D (Ordered Track Insertion)**: NOT YET IMPLEMENTED
+  - **Phase 11D (Ordered Track Insertion)**: COMPLETE
+  - **Phase 11E (Migration Execution Summary & Outcomes)**: NOT YET IMPLEMENTED
+  - **Phase 11F (Failure Recovery & Partial Rollback Policies)**: NOT YET IMPLEMENTED
+  - **Phase 11G (End-to-End Migration Orchestration & Hardening)**: NOT YET IMPLEMENTED
 
 ## Next Recommended Work
-1. Advance to Phase 11D (Ordered Track Insertion via `MusicDestination.addTrackToPlaylist`).
+1. Advance to Phase 11E (Migration Execution Summary & Outcomes).

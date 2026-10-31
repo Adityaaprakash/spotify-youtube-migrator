@@ -238,3 +238,25 @@ Controllers MUST NOT:
   - **Metadata Bounds & Defaults**: Playlist titles are bounded to 150 characters (falling back to "Migrated - " + sourceTitle); descriptions are bounded to 5000 characters.
   - **Idempotency & Ambiguous Timeout Handling**: Network/socket timeouts (`ResourceAccessException`) are logged with high-visibility warnings as `UNCERTAIN` and mapped to HTTP 504 Gateway Timeout. Blind retries are strictly avoided to prevent duplicate playlist creation on the user's YouTube account.
   - **Credential Sanitization**: External provider error messages are scrubbed against `TOKEN_PATTERN` (`bearer`, `access_token=`, `api_key=`, `secret=`) before logging or inclusion in exceptions.
+
+## Ordered Destination Track Insertion Layer (Phase 11D)
+
+- Packages:
+  - Contracts: `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Application Service: `com.spotifyyoutube.migrator.migration.application.execution`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.api.mapper`
+  - Destination Provider: `com.spotifyyoutube.migrator.migration.application.destination`, `com.spotifyyoutube.migrator.youtube.infrastructure.destination`
+- Architecture Decisions: ADR-026 (Ordered Destination Track Insertion and Outcome Handling)
+- Purpose: Deterministic, sequential insertion of approved tracks into an existing destination playlist created during Phase 11C, adhering to canonical target position ordering, recording per-track insertion outcomes, and enforcing conservative continuation policies under failure.
+- Architecture Rules:
+  - **Pre-Mutation Validation & Gating**: Validates execution context and permissions via `ApprovedMigrationExecutionService.prepareExecution` before any destination call. If validation fails, zero provider mutations are executed.
+  - **Destination Verification**: Verifies that the destination playlist exists and is accessible under the authenticated user's credentials via `YouTubePlaylistService.getPlaylist(userId, playlistId)` before attempting insertions.
+  - **Deterministic Canonical Ordering**: Tracks are inserted sequentially in ascending order of `targetPosition` ($0 \le \text{targetPosition} < M$), passing explicit 0-indexed positions to `MusicDestination.addTrackToPlaylist`.
+  - **Sequential Execution**: All insertions are performed synchronously on the calling thread. No asynchronous workers, parallel streams, or background queues are permitted (preserving Phase 12 boundaries and preventing out-of-order provider mutations).
+  - **Per-Track Outcome Tracking**: Every approved track receives an immutable `TrackInsertionOutcome` with explicit status (`SUCCESS`, `FAILED`, `UNCERTAIN`, `SKIPPED`).
+  - **Conservative Failure-Continuation Policy**:
+    - Confirmed Provider Rejection: When a track insertion fails with a confirmed provider rejection, the track is marked `FAILED` and all subsequent unattempted tracks are aborted and marked `SKIPPED` to preserve destination playlist ordering.
+    - Ambiguous Network Timeouts: Caught as `ResourceAccessException`, classified as `UNCERTAIN`, and never blindly retried. All subsequent tracks are aborted and marked `SKIPPED`.
+    - Reconciliation Guarantee: `totalApprovedTracks == successfulInsertions + failedInsertions + uncertainInsertions + skippedInsertions` is strictly enforced.
+  - **Credential & Secret Redaction**: Upstream Bearer and OAuth tokens in error messages are scrubbed (`[REDACTED_TOKEN]`).
+  - **Zero Database Schema Intrusion**: Preserves ADR-022 transient plan guarantee without creating new database tables or entities.
