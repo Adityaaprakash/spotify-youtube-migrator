@@ -256,8 +256,10 @@ public final class MigrationExecutionApiMapper {
                 summary.failedInsertions(),
                 summary.uncertainInsertions(),
                 summary.skippedInsertions(),
+                summary.rolledBackInsertions(),
                 summary.fullySuccessful(),
                 summary.canResume(),
+                summary.canRollback(),
                 summary.startedAt(),
                 summary.completedAt(),
                 trackResponses
@@ -281,6 +283,93 @@ public final class MigrationExecutionApiMapper {
                 dto.errorMessage(),
                 dto.attemptCount(),
                 dto.startedAt(),
+                dto.completedAt()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.application.execution.contract.RecoverExecutionRequest toDomainRequest(
+            com.spotifyyoutube.migrator.migration.api.dto.RecoverExecutionApiRequest dto,
+            UUID authenticatedUserId
+    ) {
+        if (dto == null) {
+            return com.spotifyyoutube.migrator.migration.application.execution.contract.RecoverExecutionRequest.all();
+        }
+        return new com.spotifyyoutube.migrator.migration.application.execution.contract.RecoverExecutionRequest(
+                dto.reviewSessionId(),
+                dto.targetPosition(),
+                dto.userId() != null ? dto.userId() : authenticatedUserId
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest toDomainRequest(
+            com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionApiRequest dto,
+            UUID authenticatedUserId
+    ) {
+        if (dto == null) {
+            return com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest.all();
+        }
+        return new com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest(
+                dto.targetPositions(),
+                dto.userId() != null ? dto.userId() : authenticatedUserId
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionResponse toRollbackResponse(
+            com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionRollbackSummary summary
+    ) {
+        if (summary == null) {
+            return null;
+        }
+
+        List<com.spotifyyoutube.migrator.migration.api.dto.RollbackTrackOutcomeResponse> outcomes = summary.trackOutcomes().stream()
+                .map(MigrationExecutionApiMapper::toOutcomeResponse)
+                .toList();
+
+        MigrationExecutionResponse updatedExecution = toExecutionResponse(summary.updatedExecution());
+
+        return new com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionResponse(
+                summary.executionId(),
+                summary.overallStatus().name(),
+                summary.totalRequested(),
+                summary.successfullyRolledBack(),
+                summary.failedRollbacks(),
+                summary.alreadyRolledBack(),
+                outcomes,
+                updatedExecution
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.RollbackTrackOutcomeResponse toOutcomeResponse(
+            com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackTrackOutcomeDto dto
+    ) {
+        if (dto == null) {
+            return null;
+        }
+        return new com.spotifyyoutube.migrator.migration.api.dto.RollbackTrackOutcomeResponse(
+                dto.targetPosition(),
+                dto.destinationTrackId(),
+                dto.destinationPlaylistItemId(),
+                dto.status().name(),
+                dto.message()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.RollbackRecordResponse toRollbackRecordResponse(
+            com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackRecordDto dto
+    ) {
+        if (dto == null) {
+            return null;
+        }
+        return new com.spotifyyoutube.migrator.migration.api.dto.RollbackRecordResponse(
+                dto.id(),
+                dto.executionId(),
+                dto.trackRecordId(),
+                dto.targetPosition(),
+                dto.destinationTrackId(),
+                dto.destinationPlaylistItemId(),
+                dto.status().name(),
+                dto.errorMessage(),
+                dto.attemptedAt(),
                 dto.completedAt()
         );
     }

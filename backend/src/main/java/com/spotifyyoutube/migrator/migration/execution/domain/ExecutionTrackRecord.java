@@ -186,6 +186,37 @@ public class ExecutionTrackRecord extends BaseEntity {
         }
     }
 
+    /**
+     * Marks this track as rolled back following confirmed removal from the destination playlist (Phase 11F).
+     */
+    public void markRolledBack(String reason) {
+        if (status != ExecutionTrackStatus.ADDED) {
+            throw new InvalidStateException(String.format(
+                    "Cannot mark track at position %d as ROLLED_BACK; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.ROLLED_BACK;
+        this.errorMessage = reason != null ? reason : "Rolled back: removed from destination playlist";
+        this.completedAt = Instant.now();
+    }
+
+    /**
+     * Resets a FAILED or SKIPPED track for controlled recovery execution (Phase 11F).
+     */
+    public void resetForRecovery() {
+        if (status != ExecutionTrackStatus.FAILED && status != ExecutionTrackStatus.SKIPPED) {
+            throw new InvalidStateException(String.format(
+                    "Cannot reset track at position %d for recovery; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.PENDING;
+        this.errorMessage = null;
+        this.startedAt = null;
+        this.completedAt = null;
+    }
+
     // Getters
 
     public MigrationExecution getExecution() {

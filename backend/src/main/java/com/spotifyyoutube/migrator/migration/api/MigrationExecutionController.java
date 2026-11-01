@@ -10,6 +10,10 @@ import com.spotifyyoutube.migrator.migration.api.dto.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.PlaylistTrackInsertionResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.RecoverExecutionApiRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionApiRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.RollbackRecordResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationExecutionApiMapper;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
@@ -18,10 +22,14 @@ import com.spotifyyoutube.migrator.migration.application.execution.MigrationExec
 import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionRollbackSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.RecoverExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackRecordDto;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -34,6 +42,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.security.Principal;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -254,6 +263,65 @@ public class MigrationExecutionController {
         UUID userId = resolveUserId(null, principal);
         MigrationExecutionSummary summary = executionStateService.resumeExecution(executionId, userId);
         return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
+    }
+
+    /**
+     * Recovers eligible failed tracks for an execution and executes insertion (Phase 11F).
+     * Strictly preserves ADDED tracks, maintains canonical order, and rejects executions with UNCERTAIN tracks.
+     */
+    @PostMapping("/{executionId}/recover")
+    public ResponseEntity<MigrationExecutionResponse> recoverExecution(
+            @PathVariable UUID executionId,
+            @RequestBody(required = false) RecoverExecutionApiRequest request,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID requestedUserId = request != null ? request.userId() : null;
+        UUID userId = resolveUserId(requestedUserId, principal);
+        RecoverExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(executionId, request, userId);
+        MigrationExecutionSummary summary = executionStateService.recoverExecution(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
+    }
+
+    /**
+     * Partially rolls back confirmed inserted tracks from the destination playlist (Phase 11F).
+     * Performs remote playlistItem deletion outside database transactions, updates state,
+     * and persists audit records. Idempotent on already rolled-back items.
+     */
+    @PostMapping("/{executionId}/rollback")
+    public ResponseEntity<RollbackExecutionResponse> rollbackExecution(
+            @PathVariable UUID executionId,
+            @RequestBody @Valid RollbackExecutionApiRequest request,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(request.userId(), principal);
+        RollbackExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(executionId, request, userId);
+        ExecutionRollbackSummary summary = executionStateService.rollbackExecution(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toRollbackResponse(summary));
+    }
+
+    /**
+     * Retrieves the audit history of all rollback attempts for an execution (Phase 11F).
+     */
+    @GetMapping({"/{executionId}/rollbacks", "/{executionId}/rollback-history"})
+    public ResponseEntity<List<RollbackRecordResponse>> getRollbackHistory(
+            @PathVariable UUID executionId,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        List<RollbackRecordDto> records = executionStateService.getRollbackHistory(executionId, userId);
+        List<RollbackRecordResponse> response = records.stream()
+                .map(MigrationExecutionApiMapper::toRollbackRecordResponse)
+                .toList();
+        return ResponseEntity.ok(response);
     }
 
     private UUID resolveUserId(UUID requestedUserId, Principal principal) {

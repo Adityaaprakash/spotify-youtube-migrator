@@ -136,6 +136,27 @@ public class YouTubePlaylistService {
         return youTubeMapper.toPlaylistItemResponse(itemDto);
     }
 
+    public void removeVideoFromPlaylist(UUID userId, String playlistItemId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("User ID must not be null");
+        }
+        if (playlistItemId == null || playlistItemId.isBlank()) {
+            throw new IllegalArgumentException("Playlist item ID must not be blank");
+        }
+
+        OAuthConnection connection = tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.GOOGLE);
+        if (connection == null || connection.getStatus() != ConnectionStatus.CONNECTED) {
+            throw new InvalidStateException("Google account is not connected or requires reauthorization.");
+        }
+
+        String accessToken = connection.getAccessToken();
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new InvalidStateException("Google access token is not available. Please reconnect your Google account.");
+        }
+
+        youTubeClient.removeVideoFromPlaylist(accessToken, playlistItemId.trim());
+    }
+
     public YouTubePlaylistResponse getPlaylist(UUID userId, String playlistId) {
         if (userId == null) {
             throw new IllegalArgumentException("User ID must not be null");

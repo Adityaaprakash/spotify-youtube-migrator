@@ -139,6 +139,17 @@ public class YouTubeMusicDestinationAdapter implements MusicDestination {
     }
 
     @Override
+    public void removeTrackFromPlaylist(UUID userId, String playlistItemId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("User ID must not be null");
+        }
+        if (playlistItemId == null || playlistItemId.isBlank()) {
+            throw new IllegalArgumentException("Playlist item ID must not be blank");
+        }
+        playlistService.removeVideoFromPlaylist(userId, playlistItemId.trim());
+    }
+
+    @Override
     public DestinationPlaylist getPlaylist(UUID userId, String playlistId) {
         YouTubePlaylistResponse response = playlistService.getPlaylist(userId, playlistId);
         return toDestinationPlaylist(response);

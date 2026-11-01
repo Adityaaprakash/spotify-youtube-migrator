@@ -89,6 +89,9 @@ public class MigrationExecution extends BaseEntity {
     @Column(name = "skipped_insertions", nullable = false)
     private int skippedInsertions = 0;
 
+    @Column(name = "rolled_back_insertions", nullable = false)
+    private int rolledBackInsertions = 0;
+
     @Column(name = "started_at")
     private Instant startedAt;
 
@@ -189,6 +192,7 @@ public class MigrationExecution extends BaseEntity {
         this.failedInsertions = 0;
         this.uncertainInsertions = 0;
         this.skippedInsertions = 0;
+        this.rolledBackInsertions = 0;
     }
 
     /**
@@ -215,11 +219,16 @@ public class MigrationExecution extends BaseEntity {
     public void releaseExecution() {
         reconcileCounts();
 
-        if (successfulInsertions == totalApprovedTracks) {
+        if (successfulInsertions == totalApprovedTracks && totalApprovedTracks > 0) {
             this.status = MigrationExecutionStatus.COMPLETED;
             this.completedAt = Instant.now();
         } else if (uncertainInsertions > 0 || hasStaleAdding()) {
             this.status = MigrationExecutionStatus.RECOVERY_REQUIRED;
+        } else if (rolledBackInsertions == totalApprovedTracks && totalApprovedTracks > 0) {
+            this.status = MigrationExecutionStatus.ROLLED_BACK;
+            this.completedAt = Instant.now();
+        } else if (rolledBackInsertions > 0) {
+            this.status = MigrationExecutionStatus.PARTIALLY_ROLLED_BACK;
         } else if (successfulInsertions > 0) {
             this.status = MigrationExecutionStatus.PARTIALLY_COMPLETED;
         } else {
@@ -236,6 +245,7 @@ public class MigrationExecution extends BaseEntity {
         int failed = 0;
         int uncertain = 0;
         int skipped = 0;
+        int rolledBack = 0;
 
         for (ExecutionTrackRecord record : trackRecords) {
             switch (record.getStatus()) {
@@ -243,6 +253,7 @@ public class MigrationExecution extends BaseEntity {
                 case FAILED -> failed++;
                 case UNCERTAIN -> uncertain++;
                 case SKIPPED -> skipped++;
+                case ROLLED_BACK -> rolledBack++;
                 default -> {
                     // PENDING or ADDING
                 }
@@ -253,6 +264,7 @@ public class MigrationExecution extends BaseEntity {
         this.failedInsertions = failed;
         this.uncertainInsertions = uncertain;
         this.skippedInsertions = skipped;
+        this.rolledBackInsertions = rolledBack;
     }
 
     /**
@@ -360,6 +372,24 @@ public class MigrationExecution extends BaseEntity {
 
     public int getSkippedInsertions() {
         return skippedInsertions;
+    }
+
+    public int getRolledBackInsertions() {
+        return rolledBackInsertions;
+    }
+
+    public boolean hasFailedTracks() {
+        return trackRecords.stream().anyMatch(record -> record.getStatus() == ExecutionTrackStatus.FAILED);
+    }
+
+    public boolean hasAddedTracks() {
+        return trackRecords.stream().anyMatch(record -> record.getStatus() == ExecutionTrackStatus.ADDED);
+    }
+
+    public boolean canRollback() {
+        return this.status != MigrationExecutionStatus.RUNNING
+                && this.status != MigrationExecutionStatus.ROLLED_BACK
+                && (hasAddedTracks() || rolledBackInsertions > 0);
     }
 
     public Instant getStartedAt() {

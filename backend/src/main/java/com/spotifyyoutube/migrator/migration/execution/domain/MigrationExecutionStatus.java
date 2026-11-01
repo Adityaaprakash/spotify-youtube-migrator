@@ -36,19 +36,36 @@ public enum MigrationExecutionStatus {
      * Interrupted or ambiguous execution detected (e.g. crash during ADDING or UNCERTAIN timeout),
      * requiring reconciliation or review before proceeding.
      */
-    RECOVERY_REQUIRED;
+    RECOVERY_REQUIRED,
+
+    /**
+     * Terminal state: all successfully inserted tracks have been completely rolled back from the destination (Phase 11F).
+     */
+    ROLLED_BACK,
+
+    /**
+     * Execution where some inserted tracks were rolled back while others remain or failed (Phase 11F).
+     */
+    PARTIALLY_ROLLED_BACK;
 
     /**
      * Returns true if this status represents a terminal state where no further execution is permitted.
      */
     public boolean isTerminal() {
-        return this == COMPLETED || this == FAILED;
+        return this == COMPLETED || this == FAILED || this == ROLLED_BACK;
     }
 
     /**
      * Returns true if this execution can safely be resumed to process pending tracks.
      */
     public boolean canResume() {
-        return this == INITIALIZED || this == PARTIALLY_COMPLETED || this == RECOVERY_REQUIRED;
+        return this == INITIALIZED || this == PARTIALLY_COMPLETED || this == RECOVERY_REQUIRED || this == PARTIALLY_ROLLED_BACK;
+    }
+
+    /**
+     * Returns true if this execution is eligible for a rollback operation.
+     */
+    public boolean canRollback() {
+        return this != RUNNING && this != ROLLED_BACK;
     }
 }

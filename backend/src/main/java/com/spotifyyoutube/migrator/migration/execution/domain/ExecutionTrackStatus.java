@@ -36,13 +36,18 @@ public enum ExecutionTrackStatus {
     /**
      * Skipped to preserve canonical playlist ordering following a prior failure or uncertain outcome.
      */
-    SKIPPED;
+    SKIPPED,
+
+    /**
+     * Track was successfully inserted into destination and subsequently removed during a rollback (Phase 11F).
+     */
+    ROLLED_BACK;
 
     /**
      * Returns true if the track is in a final, settled state.
      */
     public boolean isSettled() {
-        return this == ADDED || this == FAILED || this == UNCERTAIN || this == SKIPPED;
+        return this == ADDED || this == FAILED || this == UNCERTAIN || this == SKIPPED || this == ROLLED_BACK;
     }
 
     /**
@@ -50,5 +55,12 @@ public enum ExecutionTrackStatus {
      */
     public boolean isEligibleForAttempt() {
         return this == PENDING;
+    }
+
+    /**
+     * Returns true if the track has been rolled back from the destination playlist.
+     */
+    public boolean isRolledBack() {
+        return this == ROLLED_BACK;
     }
 }

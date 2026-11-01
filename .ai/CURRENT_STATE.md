@@ -1,11 +1,59 @@
 # Current State
 
-Last Updated: 2026-10-31
+Last Updated: 2026-11-01
 
-Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B, 11C, 11D & 11E Complete; Phase 11F Next)
-Current Subphase: Phase 11E Complete (Durable Execution State & Safe Resume)
+Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B, 11C, 11D, 11E & 11F Complete; Phase 11G Next)
+Current Subphase: Phase 11F Complete (Failure Recovery & Partial Rollback)
 
 ## Completed
+### Phase 11F (Failure Recovery & Partial Rollback) [COMPLETE]
+- **Architectural Decision Record**:
+  - Published `ADR-028-failure-recovery-and-partial-rollback.md`.
+- **Database Persistence Schema**:
+  - Flyway migration `V7__phase11f_failure_recovery_and_rollback_schema.sql` adding `rolled_back_insertions` column to `migration_executions` and creating table `execution_rollback_records`.
+  - Foreign key constraints to `migration_executions(id)` (`ON DELETE CASCADE`) and `execution_track_records(id)` (`ON DELETE SET NULL`).
+  - Performance indexes on `execution_id` and `destination_playlist_item_id`.
+- **Failure Classification Subsystem**:
+  - Domain records and enums: `ExecutionFailureClassification` (7 explicit taxonomies: `CONFIRMED_RETRYABLE_PROVIDER_REJECTION`, `CONFIRMED_NON_RETRYABLE_PROVIDER_REJECTION`, `AUTHENTICATION_OR_AUTHORIZATION_FAILURE`, `INVALID_DESTINATION_RESOURCE`, `LOCAL_PERSISTENCE_FAILURE`, `CONFIRMED_PROVIDER_OPERATION_FAILURE`, `MANUAL_INTERVENTION_REQUIRED`), and immutable analysis record `ExecutionFailureAnalysis`.
+  - Component `ExecutionFailureClassifier`: Classifies provider exceptions, HTTP status codes, network socket timeouts, and database persistence errors into deterministic actionable outcomes.
+- **Domain Model & Entities**:
+  - Entity `ExecutionRollbackRecord`: JPA entity for immutable audit logging of rollback attempts.
+  - Enums: `RollbackRecordStatus` (`ROLLED_BACK`, `ALREADY_ROLLED_BACK`, `FAILED`) and `RollbackExecutionStatus` (`SUCCESS`, `PARTIAL_SUCCESS`, `FAILED`, `NO_OP`).
+  - Extended enums: `ExecutionTrackStatus` (`ROLLED_BACK`), `MigrationExecutionStatus` (`ROLLED_BACK`, `PARTIALLY_ROLLED_BACK`).
+  - Aggregate methods: `MigrationExecution.releaseExecution(boolean, boolean)`, `canRollback()`, `ExecutionTrackRecord.markRolledBack(String)`, `resetForRecovery()`.
+- **Controlled Failure Recovery**:
+  - Application service implementation in `DefaultMigrationExecutionStateService.recoverExecution`.
+  - Preserves confirmed work: Tracks in status `ADDED` are strictly untouched and never re-inserted.
+  - Canonical Ordering: Re-attempts eligible `FAILED` tracks in strict 0-indexed destination order.
+  - Safety guards: Rejects recovery on executions in status `COMPLETED` (HTTP 409) or containing `UNCERTAIN` tracks (HTTP 409).
+  - Concurrency guard: Rejects recovery if execution is currently `RUNNING`.
+- **Safe Partial Rollback (Compensating Mutations)**:
+  - Application service implementation in `DefaultMigrationExecutionStateService.rollbackExecution`.
+  - Provider Resource Targeting: Operates strictly using confirmed `destinationPlaylistItemId` (not YouTube video ID), targeting `DELETE https://www.googleapis.com/youtube/v3/playlistItems?id={id}`.
+  - Scope Confinement: Validates that all target playlist items belong to the execution.
+  - Remote 404 Handling: Remote 404 response on deletion is safely treated as confirmed deletion (already removed remotely).
+  - State-Level Idempotency: Repeating rollback on an already `ROLLED_BACK` item bypasses remote calls and yields `ALREADY_ROLLED_BACK`.
+  - Sequential Multi-Item Execution: Deletes items sequentially outside database transactions, isolating per-item failures and recording immutable audit records.
+  - Audit History: Accessible via `DefaultMigrationExecutionStateService.getRollbackHistory`.
+- **Music Destination & YouTube Client Extension**:
+  - `MusicDestination`: Extended with `void removeTrackFromPlaylist(UUID userId, String playlistItemId)`.
+  - `YouTubeMusicDestinationAdapter` and `YouTubePlaylistService`: Delegating playlist item deletion.
+  - `YouTubeClient`: Added `void removeVideoFromPlaylist(String accessToken, String playlistItemId)` issuing HTTP DELETE with OAuth2 Bearer token and 404-handling.
+- **REST Presentation API**:
+  - Endpoints on `MigrationExecutionController`:
+    - `POST /api/migrations/execution/{executionId}/recover`: Recovers eligible failed tracks.
+    - `POST /api/migrations/execution/{executionId}/rollback`: Partially or fully rolls back confirmed inserted tracks.
+    - `GET /api/migrations/execution/{executionId}/rollbacks`: Retrieves audit history of rollback attempts (alias `/rollback-history`).
+  - DTOs: `RecoverExecutionApiRequest`, `RollbackExecutionApiRequest`, `RollbackExecutionResponse`, `RollbackRecordResponse`, `RollbackTrackOutcomeResponse`.
+  - Mapper: `MigrationExecutionApiMapper.toDomainRequest`, `toRollbackResponse`, `toRollbackRecordResponse`.
+- **Architectural Guardrails & Verification**:
+  - Discrete database transactions via `TransactionTemplate`; external provider mutations executed strictly outside DB transactions.
+  - Anti-impersonation and anti-IDOR security enforced.
+  - ADR-022 transient plan guarantee preserved.
+  - Strictly synchronous execution (zero `@Async`, queues, or background tasks; Phase 12 boundary respected).
+  - Zero Phase 11G ambiguous mutation reconciliation.
+  - Zero modifications to frozen Phase 5–10 production code.
+
 ### Phase 11E (Durable Execution State & Safe Resume) [COMPLETE]
 - **Architectural Decision Record**:
   - Published `ADR-027-durable-execution-state-and-safe-resume.md`.

@@ -293,3 +293,39 @@ Controllers MUST NOT:
     - Only the execution metadata and `planId` (UUID) are stored; the transient in-memory `MigrationPlan` entity is never persisted.
   - **Synchronous Execution Boundary**:
     - All Phase 11E execution and resume operations are strictly synchronous on the calling thread. No background queues, schedulers, or `@Async` workers are introduced (preserving Phase 12 boundaries).
+
+## Failure Recovery & Partial Rollback Layer (Phase 11F)
+
+- Packages:
+  - Failure Classification: `com.spotifyyoutube.migrator.migration.application.execution.failure`
+  - Persistence & Domain: `com.spotifyyoutube.migrator.migration.execution.domain`, `com.spotifyyoutube.migrator.migration.execution.repository`
+  - Application Service & Contracts: `com.spotifyyoutube.migrator.migration.application.execution`, `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Destination Adapters: `com.spotifyyoutube.migrator.migration.application.destination`, `com.spotifyyoutube.migrator.youtube.infrastructure`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.api.mapper`
+- Architecture Decisions: ADR-028 (Failure Recovery and Partial Rollback for Destination Execution)
+- Database Migration: `V7__phase11f_failure_recovery_and_rollback_schema.sql` (`rolled_back_insertions` on `migration_executions`, `execution_rollback_records`)
+- Purpose: Controlled failure recovery for eligible failed executions and safe partial rollback of confirmed inserted items from YouTube playlists with state-level idempotency and immutable audit trails.
+- Architecture Rules:
+  - **Deterministic Failure Classification**:
+    - `ExecutionFailureClassifier` categorizes errors across 7 explicit taxonomies: retryable provider rejections, non-retryable provider rejections, authentication failures, invalid destination resources, local persistence failures, confirmed provider operation failures, and manual intervention states.
+    - Ambiguous network timeouts remain classified as `UNCERTAIN` and are strictly excluded from blind recovery (Phase 11G boundary).
+  - **Controlled Recovery Rules**:
+    - Strictly preserves confirmed `ADDED` tracks; never re-adds previously successful tracks.
+    - Re-attempts eligible `FAILED` tracks strictly in their canonical 0-indexed destination position order.
+    - Rejects recovery on `COMPLETED` executions or executions containing unresolved `UNCERTAIN` tracks (HTTP 409 Conflict).
+    - Prevents concurrent recovery by claiming execution status as `RUNNING`.
+  - **Safe Partial Rollback Rules**:
+    - Provider deletion strictly targets the provider's unique playlist item identifier (`destinationPlaylistItemId`), not YouTube video ID.
+    - Rollback requests are confined strictly to verified items belonging to the execution.
+    - External provider deletions execute outside database transactions.
+    - Remote HTTP 404 responses during deletion are treated as confirmed deletions (already removed remotely).
+    - State-level idempotency: repeating rollback on an already `ROLLED_BACK` item bypasses remote calls and records `ALREADY_ROLLED_BACK`.
+    - Every rollback operation generates an immutable audit record in `execution_rollback_records`.
+    - Updates execution status to `ROLLED_BACK` (if all confirmed items rolled back) or `PARTIALLY_ROLLED_BACK`.
+  - **Security & Authorization**:
+    - Anti-impersonation: verifies caller-supplied `userId` matches authenticated `Principal`.
+    - Anti-IDOR: verifies execution ownership before any recovery or rollback mutation.
+  - **Strict Boundaries**:
+    - Zero background threads, queues, or scheduled tasks (Phase 12 boundary).
+    - Zero ambiguous mutation reconciliation (Phase 11G boundary).
+    - Zero modifications to frozen Phase 5–10 production code.

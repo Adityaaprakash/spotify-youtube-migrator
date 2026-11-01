@@ -247,4 +247,42 @@ public class YouTubeClient {
                 })
                 .body(YouTubePlaylistListResponseDto.class);
     }
+
+    public void removeVideoFromPlaylist(String accessToken, String playlistItemId) {
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new IllegalArgumentException("Access token must not be blank");
+        }
+        if (playlistItemId == null || playlistItemId.isBlank()) {
+            throw new IllegalArgumentException("Playlist item ID must not be blank");
+        }
+
+        restClient.delete()
+                .uri(uriBuilder -> uriBuilder.path("/playlistItems")
+                        .queryParam("id", playlistItemId.trim())
+                        .build())
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .onStatus(status -> status.isError(), (req, res) -> {
+                    int statusCode = res.getStatusCode().value();
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+
+                    if (statusCode == 404) {
+                        throw new ResourceNotFoundException("YouTube playlist item not found: " + playlistItemId.trim());
+                    }
+                    if (statusCode == 401) {
+                        throw new ExternalProviderException("YouTube API authentication failed: invalid or expired access token", 401);
+                    }
+                    if (statusCode == 403) {
+                        throw new ExternalProviderException("YouTube API request forbidden: insufficient permissions or quota exceeded", 403, retryAfter);
+                    }
+                    if (statusCode == 429) {
+                        throw new ExternalProviderException("YouTube API rate limit exceeded", 429, retryAfter);
+                    }
+                    if (statusCode == 400) {
+                        throw new ExternalProviderException("YouTube API request invalid", 400);
+                    }
+                    throw new ExternalProviderException("Failed to remove video from YouTube playlist", statusCode, retryAfter);
+                })
+                .toBodilessEntity();
+    }
 }

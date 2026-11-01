@@ -64,6 +64,14 @@ public interface MusicDestination {
     DestinationPlaylistItem addTrackToPlaylist(UUID userId, String playlistId, AddTrackToDestinationPlaylistRequest request);
 
     /**
+     * Removes an inserted track/video item from a destination playlist using its provider playlist item ID.
+     *
+     * @param userId user identifier possessing the destination authorization
+     * @param playlistItemId destination playlist item identifier (NOT video ID)
+     */
+    void removeTrackFromPlaylist(UUID userId, String playlistItemId);
+
+    /**
      * Retrieves playlist details from the destination.
      *
      * @param userId user identifier possessing the destination authorization

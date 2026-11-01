@@ -12,7 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Immutable domain summary representing a durable migration execution and its per-track records (Phase 11E).
+ * Immutable domain summary representing a durable migration execution and its per-track records (Phase 11E/11F).
  */
 public record MigrationExecutionSummary(
         UUID executionId,
@@ -29,8 +29,10 @@ public record MigrationExecutionSummary(
         int failedInsertions,
         int uncertainInsertions,
         int skippedInsertions,
+        int rolledBackInsertions,
         boolean fullySuccessful,
         boolean canResume,
+        boolean canRollback,
         Instant startedAt,
         Instant completedAt,
         List<ExecutionTrackRecordDto> trackRecords
@@ -47,6 +49,104 @@ public record MigrationExecutionSummary(
         trackRecords = trackRecords != null
                 ? Collections.unmodifiableList(trackRecords)
                 : Collections.emptyList();
+    }
+
+    /**
+     * Backward-compatible 19-parameter constructor (Phase 11E).
+     */
+    public MigrationExecutionSummary(
+            UUID executionId,
+            UUID reviewSessionId,
+            UUID planId,
+            UUID userId,
+            Platform destinationPlatform,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            String sourcePlaylistTitle,
+            MigrationExecutionStatus status,
+            int totalApprovedTracks,
+            int successfulInsertions,
+            int failedInsertions,
+            int uncertainInsertions,
+            int skippedInsertions,
+            boolean fullySuccessful,
+            boolean canResume,
+            Instant startedAt,
+            Instant completedAt,
+            List<ExecutionTrackRecordDto> trackRecords
+    ) {
+        this(
+                executionId,
+                reviewSessionId,
+                planId,
+                userId,
+                destinationPlatform,
+                destinationPlaylistId,
+                destinationPlaylistUrl,
+                sourcePlaylistTitle,
+                status,
+                totalApprovedTracks,
+                successfulInsertions,
+                failedInsertions,
+                uncertainInsertions,
+                skippedInsertions,
+                0,
+                fullySuccessful,
+                canResume,
+                status.canRollback() && (successfulInsertions > 0),
+                startedAt,
+                completedAt,
+                trackRecords
+        );
+    }
+
+    /**
+     * Overloaded constructor accepting Optionals and String platform for test convenience.
+     */
+    public MigrationExecutionSummary(
+            UUID executionId,
+            UUID reviewSessionId,
+            Optional<UUID> planId,
+            UUID userId,
+            String destinationPlatform,
+            String destinationPlaylistId,
+            Optional<String> destinationPlaylistUrl,
+            String sourcePlaylistTitle,
+            MigrationExecutionStatus status,
+            int totalApprovedTracks,
+            int successfulInsertions,
+            int failedInsertions,
+            int uncertainInsertions,
+            int skippedInsertions,
+            boolean fullySuccessful,
+            boolean canResume,
+            Instant startedAt,
+            Instant completedAt,
+            List<ExecutionTrackRecordDto> trackRecords
+    ) {
+        this(
+                executionId,
+                reviewSessionId,
+                planId != null ? planId.orElse(null) : null,
+                userId,
+                destinationPlatform != null ? Platform.valueOf(destinationPlatform.trim().toUpperCase()) : Platform.YOUTUBE,
+                destinationPlaylistId,
+                destinationPlaylistUrl != null ? destinationPlaylistUrl.orElse(null) : null,
+                sourcePlaylistTitle,
+                status,
+                totalApprovedTracks,
+                successfulInsertions,
+                failedInsertions,
+                uncertainInsertions,
+                skippedInsertions,
+                0,
+                fullySuccessful,
+                canResume,
+                status.canRollback() && (successfulInsertions > 0),
+                startedAt,
+                completedAt,
+                trackRecords
+        );
     }
 
     public Optional<UUID> getPlanId() {
@@ -84,8 +184,10 @@ public record MigrationExecutionSummary(
                 execution.getFailedInsertions(),
                 execution.getUncertainInsertions(),
                 execution.getSkippedInsertions(),
+                execution.getRolledBackInsertions(),
                 fullySuccessful,
                 execution.canResume(),
+                execution.canRollback(),
                 execution.getStartedAt(),
                 execution.getCompletedAt(),
                 trackDtos

@@ -618,14 +618,13 @@ Implemented and verified (39 dedicated Phase 11E tests):
 - `MigrationExecutionSafetyTest`: 4 tests validating architectural guardrails: zero pipeline dependencies on matching/discovery, strictly synchronous execution (no `@Async`, `@Scheduled`, `CompletableFuture`), JPA entity annotations with optimistic locking `@Version`, and ADR-022 transient plan guarantee (no `MigrationPlan` entity persistence).
 - `MigrationExecutionControllerTest`: 10 dedicated Phase 11E tests covering endpoints `POST /initialize`, `GET /{id}`, `GET /session/{id}`, `POST /{id}/resume`, anti-impersonation (400), not found (404), concurrency conflict (409), and unauthenticated access rejections (401/403).
 
-## Future Testing Scope (Phase 11F+)
-- Failure Recovery & Rollback Testing (Phase 11F).
+## Future Testing Scope (Phase 11G+)
 - End-to-End Migration Orchestration Testing (Phase 11G).
 - Advanced Batching & Async Progress (Phase 12).
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
-- **Phase 11 Execution & Insertion Total**: 165 tests across 14 test classes:
+- **Phase 11 Execution, Recovery & Rollback Total**: 213 tests across 19 test classes:
   - `ApprovedMigrationContractTest`: 12 tests.
   - `ApprovedPlanValidatorTest`: 19 tests.
   - `ApprovedMigrationExecutionServiceTest`: 8 tests.
@@ -638,8 +637,13 @@ Implemented and verified (39 dedicated Phase 11E tests):
   - `OrderedTrackInsertionSafetyTest`: 6 tests.
   - `MigrationExecutionDomainTest`: 12 tests.
   - `DefaultMigrationExecutionStateServiceTest`: 13 tests.
-  - `MigrationExecutionSafetyTest`: 4 tests.
+  - `MigrationExecutionSafetyTest`: 6 tests (Phase 11E/11F reflection and entity guardrails).
   - `MigrationExecutionControllerTest`: 37 tests.
+  - `ExecutionFailureClassifierTest` (Phase 11F): 12 tests (7-class failure taxonomy).
+  - `DefaultMigrationExecutionRecoveryTest` (Phase 11F): 7 tests (controlled recovery, ordering, safety).
+  - `DefaultMigrationExecutionRollbackTest` (Phase 11F): 10 tests (partial rollback, idempotency, 404 handling, audit trail).
+  - `MigrationExecutionRecoveryAndRollbackControllerTest` (Phase 11F): 11 tests (WebMvc endpoints, anti-impersonation, anti-IDOR).
+  - `YouTubeClientRollbackTest` (Phase 11F): 8 tests (HTTP DELETE playlistItems, 204, 404, 401, 403, 429, 503).
 - **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites:
   - `ReviewSessionControllerTest`: 24 tests.
   - `ReviewSessionIntegrationTest`: 4 tests.

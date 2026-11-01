@@ -77,6 +77,17 @@ class MigrationExecutionSafetyTest {
         assertThat(trackVersion.isAnnotationPresent(Version.class))
                 .as("ExecutionTrackRecord must declare @Version for optimistic locking")
                 .isTrue();
+
+        assertThat(com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackRecord.class.isAnnotationPresent(Entity.class)).isTrue();
+        assertThat(com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackRecord.class.getAnnotation(Table.class).name())
+                .isEqualTo("execution_rollback_records");
+    }
+
+    @Test
+    @DisplayName("ADR-028 Safety: MigrationExecution must declare rolledBackInsertions and audit rollback operations")
+    void executionEntityHasRolledBackInsertionsField() throws Exception {
+        Field field = MigrationExecution.class.getDeclaredField("rolledBackInsertions");
+        assertThat(field.getType()).isEqualTo(int.class);
     }
 
     @Test
