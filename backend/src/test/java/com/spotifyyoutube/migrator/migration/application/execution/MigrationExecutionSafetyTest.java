@@ -100,4 +100,24 @@ class MigrationExecutionSafetyTest {
                     .isNotEqualTo("MigrationPlan");
         }
     }
+
+    @Test
+    @DisplayName("ADR-028 Audit Immutability Safety: ExecutionRollbackRecord is append-only audit entity without @Version")
+    void auditRecordIsAppendOnlyWithoutVersion() {
+        Field[] fields = com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackRecord.class.getDeclaredFields();
+        for (Field field : fields) {
+            assertThat(field.isAnnotationPresent(Version.class))
+                    .as("ExecutionRollbackRecord must be strictly immutable and append-only, without @Version updates")
+                    .isFalse();
+        }
+    }
+
+    @Test
+    @DisplayName("ADR-028 State Invariants: ROLLING_BACK is non-settled and UNCERTAIN is settled")
+    void stateInvariantsForRollbackAndRecovery() {
+        assertThat(ExecutionTrackStatus.ROLLING_BACK.isSettled()).isFalse();
+        assertThat(ExecutionTrackStatus.ROLLING_BACK.isTerminal()).isFalse();
+        assertThat(ExecutionTrackStatus.UNCERTAIN.isSettled()).isTrue();
+        assertThat(com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus.UNCERTAIN).isNotNull();
+    }
 }

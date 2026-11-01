@@ -31,6 +31,7 @@ import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -105,31 +106,59 @@ class DefaultMigrationExecutionRecoveryTest {
         reviewSession.setId(sessionId);
         reviewSession.setStatus(ReviewSessionStatus.APPROVED);
 
+        ApprovedTrack track0 = new ApprovedTrack(
+                0,
+                "sp_1",
+                "Song One",
+                "Artist A",
+                "yt_video_1",
+                "Song One (Audio)",
+                "Channel A",
+                Duration.ofMinutes(3),
+                ReviewDecisionSource.CONFIRMED_EXACT,
+                0
+        );
+
+        ApprovedTrack track1 = new ApprovedTrack(
+                1,
+                "sp_2",
+                "Song Two",
+                "Artist B",
+                "yt_video_2",
+                "Song Two (Audio)",
+                "Channel B",
+                Duration.ofMinutes(4),
+                ReviewDecisionSource.USER_ACCEPTED,
+                1
+        );
+
         approvedContext = new ApprovedMigrationContext(
                 sessionId,
-                reviewSession.getMigrationPlanId(),
+                UUID.randomUUID(),
                 userId,
                 "sp_pl_rec",
                 "Recovery Test Playlist",
-                List.of(
-                        new ApprovedTrack("sp_1", "Song One", "Artist A", "yt_video_1", 0, ReviewDecisionSource.MANUAL),
-                        new ApprovedTrack("sp_2", "Song Two", "Artist B", "yt_video_2", 1, ReviewDecisionSource.AUTO)
-                ),
+                "Target Playlist",
+                "Description",
+                false,
+                List.of(track0, track1),
+                2,
+                2,
+                0,
                 Instant.now()
         );
 
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(reviewSession));
-        when(executionService.loadApprovedMigrationContext(sessionId, userId)).thenReturn(approvedContext);
 
         executionId = UUID.randomUUID();
-        execution = new MigrationExecution(sessionId, reviewSession.getMigrationPlanId(), userId, "yt_pl_target", 2);
+        execution = new MigrationExecution(testUser, reviewSession, approvedContext, "yt_pl_target", null);
         execution.setId(executionId);
-        execution.setStatus(MigrationExecutionStatus.PARTIALLY_COMPLETED);
-        execution.setFailedInsertions(1);
-        execution.setSuccessfulInsertions(1);
 
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+        when(trackRecordRepository.saveAndFlush(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
     }
 
     @Nested
@@ -139,29 +168,37 @@ class DefaultMigrationExecutionRecoveryTest {
         @Test
         @DisplayName("Successfully recovers eligible FAILED track while strictly preserving ADDED track")
         void recoversFailedTrackPreservingAddedTrack() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
 
-            ExecutionTrackRecord track1 = new ExecutionTrackRecord(execution, "sp_2", "yt_video_2", 1);
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
             track1.markFailed("Network timeout on first attempt");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.PARTIALLY_COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0, track1));
-            when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+            when(trackRecordRepository.findById(track1.getId())).thenReturn(Optional.of(track1));
 
             when(musicDestination.addTrackToPlaylist(
                     eq(userId),
-                    argThat(req -> "yt_video_2".equals(req.youtubeTrackId()) && req.position() == 1)
+                    eq("yt_pl_target"),
+                    argThat(req -> "yt_video_2".equals(req.trackId()) && req.position() == 1)
             )).thenReturn(new DestinationPlaylistItem("yt_item_1", "yt_pl_target", "yt_video_2", 1));
 
-            RecoverExecutionRequest request = new RecoverExecutionRequest(executionId, userId, "Retrying failed track");
-            MigrationExecutionSummary summary = service.recoverExecution(request, userId);
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
+            MigrationExecutionSummary summary = service.recoverExecution(executionId, request, userId);
 
             // Verify MusicDestination was called ONLY for track 1
-            verify(musicDestination, times(1)).addTrackToPlaylist(eq(userId), any(AddTrackToDestinationPlaylistRequest.class));
+            verify(musicDestination, times(1)).addTrackToPlaylist(eq(userId), eq("yt_pl_target"), any(AddTrackToDestinationPlaylistRequest.class));
             verify(musicDestination, never()).addTrackToPlaylist(
                     eq(userId),
-                    argThat(req -> "yt_video_1".equals(req.youtubeTrackId()))
+                    eq("yt_pl_target"),
+                    argThat(req -> "yt_video_1".equals(req.trackId()))
             );
 
             assertThat(track1.getStatus()).isEqualTo(ExecutionTrackStatus.ADDED);
@@ -176,27 +213,35 @@ class DefaultMigrationExecutionRecoveryTest {
         @Test
         @DisplayName("Preserves canonical destination ordering during recovery")
         void preservesCanonicalOrderingDuringRecovery() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markFailed("Rate limit");
 
-            ExecutionTrackRecord track1 = new ExecutionTrackRecord(execution, "sp_2", "yt_video_2", 1);
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
             track1.markAdded("yt_item_1");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.PARTIALLY_COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0, track1));
-            when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+            when(trackRecordRepository.findById(track1.getId())).thenReturn(Optional.of(track1));
 
             when(musicDestination.addTrackToPlaylist(
                     eq(userId),
-                    argThat(req -> "yt_video_1".equals(req.youtubeTrackId()) && req.position() == 0)
-            )).thenReturn(new DestinationPlaylistItem("yt_item_0", "yt_pl_target", "yt_video_1", 0));
+                    eq("yt_pl_target"),
+                    argThat(req -> "yt_video_1".equals(req.trackId()) && req.position() == 1)
+            )).thenReturn(new DestinationPlaylistItem("yt_item_0", "yt_pl_target", "yt_video_1", 1));
 
-            RecoverExecutionRequest request = new RecoverExecutionRequest(executionId, userId, "Recover first track");
-            MigrationExecutionSummary summary = service.recoverExecution(request, userId);
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
+            MigrationExecutionSummary summary = service.recoverExecution(executionId, request, userId);
 
             verify(musicDestination, times(1)).addTrackToPlaylist(
                     eq(userId),
-                    argThat(req -> req.position() == 0 && "yt_video_1".equals(req.youtubeTrackId()))
+                    eq("yt_pl_target"),
+                    argThat(req -> "yt_video_1".equals(req.trackId()))
             );
 
             assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
@@ -211,37 +256,43 @@ class DefaultMigrationExecutionRecoveryTest {
         @Test
         @DisplayName("Rejects recovery if execution is already COMPLETED")
         void rejectsRecoveryOfCompletedExecution() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markAdded("yt_item_0");
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
+            track1.markAdded("yt_item_1");
+            execution.reconcileCounts();
             execution.setStatus(MigrationExecutionStatus.COMPLETED);
-            execution.setSuccessfulInsertions(2);
-            execution.setFailedInsertions(0);
 
-            RecoverExecutionRequest request = new RecoverExecutionRequest(executionId, userId, "Invalid retry");
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
 
-            assertThatThrownBy(() -> service.recoverExecution(request, userId))
+            assertThatThrownBy(() -> service.recoverExecution(executionId, request, userId))
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("COMPLETED");
 
-            verify(musicDestination, never()).addTrackToPlaylist(any(), any());
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }
 
         @Test
         @DisplayName("Rejects recovery if execution contains UNCERTAIN tracks")
         void rejectsRecoveryWithUncertainTracks() {
-            execution.setStatus(MigrationExecutionStatus.RECOVERY_REQUIRED);
-            execution.setUncertainInsertions(1);
-
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markUncertain("Socket timeout during POST");
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.RECOVERY_REQUIRED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0));
 
-            RecoverExecutionRequest request = new RecoverExecutionRequest(executionId, userId, "Retry uncertain");
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
 
-            assertThatThrownBy(() -> service.recoverExecution(request, userId))
+            assertThatThrownBy(() -> service.recoverExecution(executionId, request, userId))
                     .isInstanceOf(InvalidStateException.class)
-                    .hasMessageContaining("UNCERTAIN");
+                    .hasMessageContaining("uncertain");
 
-            verify(musicDestination, never()).addTrackToPlaylist(any(), any());
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }
 
         @Test
@@ -249,52 +300,58 @@ class DefaultMigrationExecutionRecoveryTest {
         void rejectsRecoveryWhenCurrentlyRunning() {
             execution.setStatus(MigrationExecutionStatus.RUNNING);
 
-            RecoverExecutionRequest request = new RecoverExecutionRequest(executionId, userId, "Concurrent recovery");
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
 
-            assertThatThrownBy(() -> service.recoverExecution(request, userId))
+            assertThatThrownBy(() -> service.recoverExecution(executionId, request, userId))
                     .isInstanceOf(InvalidStateException.class)
-                    .hasMessageContaining("RUNNING");
+                    .hasMessageContaining("already in progress");
 
-            verify(musicDestination, never()).addTrackToPlaylist(any(), any());
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }
 
         @Test
         @DisplayName("Anti-IDOR: Rejects recovery if user ID does not match execution owner")
         void rejectsCrossUserRecovery() {
             UUID otherUserId = UUID.randomUUID();
-            RecoverExecutionRequest request = new RecoverExecutionRequest(executionId, otherUserId, "Cross user attack");
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
 
-            assertThatThrownBy(() -> service.recoverExecution(request, otherUserId))
+            assertThatThrownBy(() -> service.recoverExecution(executionId, request, otherUserId))
                     .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("MigrationExecution not found");
+                    .hasMessageContaining("Migration execution not found");
 
-            verify(musicDestination, never()).addTrackToPlaylist(any(), any());
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }
 
         @Test
         @DisplayName("Releases execution lock and persists accurate PARTIALLY_COMPLETED status if recovered track fails again")
         void updatesStateAccuratelyWhenRecoveryTrackFailsAgain() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
 
-            ExecutionTrackRecord track1 = new ExecutionTrackRecord(execution, "sp_2", "yt_video_2", 1);
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
             track1.markFailed("First failure");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.PARTIALLY_COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0, track1));
-            when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+            when(trackRecordRepository.findById(track1.getId())).thenReturn(Optional.of(track1));
 
-            when(musicDestination.addTrackToPlaylist(any(), any()))
-                    .thenThrow(new ExternalProviderException("YouTube API quota exceeded", false));
+            when(musicDestination.addTrackToPlaylist(any(), any(), any()))
+                    .thenThrow(new ExternalProviderException("YouTube API quota exceeded", 403));
 
-            RecoverExecutionRequest request = new RecoverExecutionRequest(executionId, userId, "Retry will fail again");
-            MigrationExecutionSummary summary = service.recoverExecution(request, userId);
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
+            MigrationExecutionSummary summary = service.recoverExecution(executionId, request, userId);
 
             assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.PARTIALLY_COMPLETED);
             assertThat(summary.successfulInsertions()).isEqualTo(1);
             assertThat(summary.failedInsertions()).isEqualTo(1);
             assertThat(track1.getStatus()).isEqualTo(ExecutionTrackStatus.FAILED);
-            assertThat(track1.getFailureReason()).contains("YouTube API quota exceeded");
+            assertThat(track1.getErrorMessage()).contains("YouTube API quota exceeded");
         }
     }
 }

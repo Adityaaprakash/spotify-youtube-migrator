@@ -39,6 +39,12 @@ public enum ExecutionTrackStatus {
     SKIPPED,
 
     /**
+     * Compensating deletion is currently claimed and in-flight to the external music destination.
+     * Prevents concurrent duplicate deletions. If found after a process crash, indicates an interrupted rollback.
+     */
+    ROLLING_BACK,
+
+    /**
      * Track was successfully inserted into destination and subsequently removed during a rollback (Phase 11F).
      */
     ROLLED_BACK;

@@ -121,10 +121,10 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                     Instant.now()
             );
 
-            when(executionStateService.recoverExecution(any(RecoverExecutionRequest.class), eq(userId)))
+            when(executionStateService.recoverExecution(eq(executionId), any(RecoverExecutionRequest.class), eq(userId)))
                     .thenReturn(summary);
 
-            RecoverExecutionApiRequest request = new RecoverExecutionApiRequest(userId, "Retry failed tracks");
+            RecoverExecutionApiRequest request = new RecoverExecutionApiRequest(null, null, userId);
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/recover", executionId)
                             .with(csrf())
@@ -143,7 +143,7 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
         @DisplayName("400 Bad Request: Anti-impersonation rejects caller-supplied userId mismatch")
         void rejectsCallerUserIdMismatch() throws Exception {
             UUID differentUserId = UUID.randomUUID();
-            RecoverExecutionApiRequest request = new RecoverExecutionApiRequest(differentUserId, "Spoofed user");
+            RecoverExecutionApiRequest request = new RecoverExecutionApiRequest(null, null, differentUserId);
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/recover", executionId)
                             .with(csrf())
@@ -151,15 +151,15 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest());
 
-            verify(executionStateService, never()).recoverExecution(any(), any());
+            verify(executionStateService, never()).recoverExecution(any(), any(), any());
         }
 
         @Test
         @WithMockUser(username = "tester@example.com")
         @DisplayName("404 Not Found: Anti-IDOR when execution belongs to another user")
         void antiIdorReturns404() throws Exception {
-            when(executionStateService.recoverExecution(any(RecoverExecutionRequest.class), eq(userId)))
-                    .thenThrow(new ResourceNotFoundException("MigrationExecution not found for ID: " + executionId));
+            when(executionStateService.recoverExecution(eq(executionId), any(RecoverExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ResourceNotFoundException("Migration execution not found: " + executionId));
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/recover", executionId)
                             .with(csrf())
@@ -171,8 +171,8 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
         @WithMockUser(username = "tester@example.com")
         @DisplayName("409 Conflict: Rejects recovery when execution has UNCERTAIN tracks or is COMPLETED")
         void conflictOnUncertainOrCompleted() throws Exception {
-            when(executionStateService.recoverExecution(any(RecoverExecutionRequest.class), eq(userId)))
-                    .thenThrow(new InvalidStateException("Execution contains UNCERTAIN tracks"));
+            when(executionStateService.recoverExecution(eq(executionId), any(RecoverExecutionRequest.class), eq(userId)))
+                    .thenThrow(new InvalidStateException("Cannot recover execution: execution contains uncertain tracks"));
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/recover", executionId)
                             .with(csrf())
@@ -199,26 +199,42 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
         @WithMockUser(username = "tester@example.com")
         @DisplayName("200 OK: Successfully rolls back target playlist items")
         void rollsBackExecutionSuccessfully() throws Exception {
-            ExecutionRollbackSummary summary = new ExecutionRollbackSummary(
+            MigrationExecutionSummary updatedExec = new MigrationExecutionSummary(
                     executionId,
+                    UUID.randomUUID(),
+                    UUID.randomUUID(),
                     userId,
                     "yt_pl_target",
+                    MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
+                    2,
+                    1,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    Collections.emptyList(),
+                    false,
+                    true,
+                    Instant.now(),
+                    null
+            );
+
+            ExecutionRollbackSummary summary = new ExecutionRollbackSummary(
+                    executionId,
                     RollbackExecutionStatus.SUCCESS,
                     1,
                     1,
                     0,
                     0,
-                    List.of(new RollbackTrackOutcomeDto(
-                            UUID.randomUUID(), "yt_item_0", RollbackRecordStatus.ROLLED_BACK, null, Instant.now()
-                    )),
-                    Instant.now()
+                    List.of(RollbackTrackOutcomeDto.rolledBack(0, "yt_video_0", "yt_item_0")),
+                    updatedExec
             );
 
-            when(executionStateService.rollbackExecution(any(RollbackExecutionRequest.class), eq(userId)))
+            when(executionStateService.rollbackExecution(eq(executionId), any(RollbackExecutionRequest.class), eq(userId)))
                     .thenReturn(summary);
 
-            RollbackExecutionApiRequest request = new RollbackExecutionApiRequest(
-                    userId, List.of("yt_item_0"), "Clean up song");
+            RollbackExecutionApiRequest request = new RollbackExecutionApiRequest(List.of(0), userId);
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/rollback", executionId)
                             .with(csrf())
@@ -238,8 +254,7 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
         @DisplayName("400 Bad Request: Anti-impersonation rejects caller-supplied userId mismatch on rollback")
         void rejectsCallerUserIdMismatchOnRollback() throws Exception {
             UUID wrongUserId = UUID.randomUUID();
-            RollbackExecutionApiRequest request = new RollbackExecutionApiRequest(
-                    wrongUserId, List.of("yt_item_0"), "Rollback impersonation");
+            RollbackExecutionApiRequest request = new RollbackExecutionApiRequest(List.of(0), wrongUserId);
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/rollback", executionId)
                             .with(csrf())
@@ -247,18 +262,17 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest());
 
-            verify(executionStateService, never()).rollbackExecution(any(), any());
+            verify(executionStateService, never()).rollbackExecution(any(), any(), any());
         }
 
         @Test
         @WithMockUser(username = "tester@example.com")
         @DisplayName("409 Conflict: Rejects rollback when execution is RUNNING")
         void rejectsRollbackWhenRunning() throws Exception {
-            when(executionStateService.rollbackExecution(any(RollbackExecutionRequest.class), eq(userId)))
-                    .thenThrow(new InvalidStateException("Cannot perform rollback while execution is in status RUNNING"));
+            when(executionStateService.rollbackExecution(eq(executionId), any(RollbackExecutionRequest.class), eq(userId)))
+                    .thenThrow(new InvalidStateException("Migration execution is currently running; cannot rollback during execution"));
 
-            RollbackExecutionApiRequest request = new RollbackExecutionApiRequest(
-                    userId, List.of("yt_item_0"), "Rollback running");
+            RollbackExecutionApiRequest request = new RollbackExecutionApiRequest(List.of(0), userId);
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/rollback", executionId)
                             .with(csrf())
@@ -280,10 +294,12 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                     UUID.randomUUID(),
                     executionId,
                     UUID.randomUUID(),
+                    0,
+                    "yt_video_0",
                     "yt_item_0",
                     RollbackRecordStatus.ROLLED_BACK,
                     null,
-                    "User requested rollback",
+                    Instant.now(),
                     Instant.now()
             );
 
@@ -294,8 +310,7 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$[0].executionId").value(executionId.toString()))
                     .andExpect(jsonPath("$[0].destinationPlaylistItemId").value("yt_item_0"))
-                    .andExpect(jsonPath("$[0].status").value("ROLLED_BACK"))
-                    .andExpect(jsonPath("$[0].reason").value("User requested rollback"));
+                    .andExpect(jsonPath("$[0].status").value("ROLLED_BACK"));
         }
 
         @Test
@@ -303,7 +318,7 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
         @DisplayName("404 Not Found: Anti-IDOR when retrieving rollback history of another user's execution")
         void antiIdorReturns404ForRollbackHistory() throws Exception {
             when(executionStateService.getRollbackHistory(executionId, userId))
-                    .thenThrow(new ResourceNotFoundException("MigrationExecution not found for ID: " + executionId));
+                    .thenThrow(new ResourceNotFoundException("Migration execution not found: " + executionId));
 
             mockMvc.perform(get("/api/migrations/execution/{executionId}/rollbacks", executionId))
                     .andExpect(status().isNotFound());

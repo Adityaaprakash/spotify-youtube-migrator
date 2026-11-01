@@ -18,5 +18,11 @@ public enum RollbackRecordStatus {
     /**
      * Remote deletion failed or was rejected by the destination provider.
      */
-    FAILED
+    FAILED,
+
+    /**
+     * Remote deletion outcome is ambiguous (e.g. network timeout or HTTP 500/503 during deletion).
+     * Destination playlist state is uncertain and must be reconciled before further operations.
+     */
+    UNCERTAIN
 }

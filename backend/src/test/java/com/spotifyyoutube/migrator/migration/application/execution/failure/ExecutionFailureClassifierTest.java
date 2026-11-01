@@ -49,33 +49,60 @@ class ExecutionFailureClassifierTest {
         }
 
         @Test
-        @DisplayName("Classifies HTTP 503 Service Unavailable as RETRYABLE_PROVIDER_REJECTION")
-        void classifies503AsRetryable() {
+        @DisplayName("Classifies HTTP 503 Service Unavailable during read operation as RETRYABLE_PROVIDER_REJECTION")
+        void classifies503DuringReadAsRetryable() {
+            var exception = HttpServerErrorException.create(
+                    HttpStatus.SERVICE_UNAVAILABLE, "Backend unavailable", null, null, null);
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "read_playlist");
+
+            assertThat(analysis.classification())
+                    .isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);
+            assertThat(analysis.retryable()).isTrue();
+            assertThat(analysis.requiresManualIntervention()).isFalse();
+        }
+
+        @Test
+        @DisplayName("Classifies HTTP 503 Service Unavailable during remote mutation as MANUAL_INTERVENTION_REQUIRED (ambiguous)")
+        void classifies503DuringMutationAsManualIntervention() {
             var exception = HttpServerErrorException.create(
                     HttpStatus.SERVICE_UNAVAILABLE, "Backend unavailable", null, null, null);
             ExecutionFailureAnalysis analysis = classifier.classify(exception, "destination_insertion");
 
             assertThat(analysis.classification())
-                    .isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);
-            assertThat(analysis.retryable()).isTrue();
+                    .isEqualTo(ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED);
+            assertThat(analysis.retryable()).isFalse();
+            assertThat(analysis.requiresManualIntervention()).isTrue();
         }
 
         @Test
-        @DisplayName("Classifies retryable ExternalProviderException as RETRYABLE_PROVIDER_REJECTION")
-        void classifiesRetryableExternalProviderException() {
-            var exception = new ExternalProviderException("YouTube API quota temporary stall", true);
-            ExecutionFailureAnalysis analysis = classifier.classify(exception, "insert_track");
+        @DisplayName("Classifies network I/O timeout during read operation as RETRYABLE_PROVIDER_REJECTION")
+        void classifiesNetworkTimeoutDuringReadAsRetryable() {
+            var exception = new ResourceAccessException("Connection timed out", new IOException("Read timed out"));
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "read_playlist");
 
             assertThat(analysis.classification())
                     .isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);
             assertThat(analysis.retryable()).isTrue();
+            assertThat(analysis.requiresManualIntervention()).isFalse();
         }
 
         @Test
-        @DisplayName("Classifies network I/O timeout (ResourceAccessException) as RETRYABLE_PROVIDER_REJECTION")
-        void classifiesNetworkTimeoutAsRetryable() {
+        @DisplayName("Classifies network I/O timeout during remote mutation as MANUAL_INTERVENTION_REQUIRED (ambiguous)")
+        void classifiesNetworkTimeoutDuringMutationAsManualIntervention() {
             var exception = new ResourceAccessException("Connection timed out", new IOException("Read timed out"));
             ExecutionFailureAnalysis analysis = classifier.classify(exception, "playlist_item_remove");
+
+            assertThat(analysis.classification())
+                    .isEqualTo(ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED);
+            assertThat(analysis.retryable()).isFalse();
+            assertThat(analysis.requiresManualIntervention()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Classifies retryable ExternalProviderException during read as RETRYABLE_PROVIDER_REJECTION")
+        void classifiesRetryableExternalProviderExceptionDuringRead() {
+            var exception = new ExternalProviderException("YouTube API quota temporary stall", true);
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "read_playlist");
 
             assertThat(analysis.classification())
                     .isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);

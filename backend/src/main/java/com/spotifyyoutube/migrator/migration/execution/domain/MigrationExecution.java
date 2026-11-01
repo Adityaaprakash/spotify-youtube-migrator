@@ -224,7 +224,7 @@ public class MigrationExecution extends BaseEntity {
             this.completedAt = Instant.now();
         } else if (uncertainInsertions > 0 || hasStaleAdding()) {
             this.status = MigrationExecutionStatus.RECOVERY_REQUIRED;
-        } else if (rolledBackInsertions == totalApprovedTracks && totalApprovedTracks > 0) {
+        } else if (successfulInsertions == 0 && rolledBackInsertions > 0) {
             this.status = MigrationExecutionStatus.ROLLED_BACK;
             this.completedAt = Instant.now();
         } else if (rolledBackInsertions > 0) {
@@ -255,7 +255,7 @@ public class MigrationExecution extends BaseEntity {
                 case SKIPPED -> skipped++;
                 case ROLLED_BACK -> rolledBack++;
                 default -> {
-                    // PENDING or ADDING
+                    // PENDING, ADDING, or ROLLING_BACK
                 }
             }
         }
@@ -268,14 +268,14 @@ public class MigrationExecution extends BaseEntity {
     }
 
     /**
-     * Reconciles stale ADDING tracks detected after an application crash or process restart.
+     * Reconciles stale ADDING or ROLLING_BACK tracks detected after an application crash or process restart.
      *
      * @return true if stale crash state was detected and reconciled, false otherwise
      */
     public boolean reconcileStaleCrashState() {
         boolean hadStale = false;
         for (ExecutionTrackRecord record : trackRecords) {
-            if (record.getStatus() == ExecutionTrackStatus.ADDING) {
+            if (record.getStatus() == ExecutionTrackStatus.ADDING || record.getStatus() == ExecutionTrackStatus.ROLLING_BACK) {
                 record.reconcileStaleAdding();
                 hadStale = true;
             }
@@ -305,7 +305,8 @@ public class MigrationExecution extends BaseEntity {
     }
 
     private boolean hasStaleAdding() {
-        return trackRecords.stream().anyMatch(record -> record.getStatus() == ExecutionTrackStatus.ADDING);
+        return trackRecords.stream().anyMatch(record ->
+                record.getStatus() == ExecutionTrackStatus.ADDING || record.getStatus() == ExecutionTrackStatus.ROLLING_BACK);
     }
 
     public boolean canResume() {

@@ -303,28 +303,37 @@ Controllers MUST NOT:
   - Destination Adapters: `com.spotifyyoutube.migrator.migration.application.destination`, `com.spotifyyoutube.migrator.youtube.infrastructure`
   - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.api.mapper`
 - Architecture Decisions: ADR-028 (Failure Recovery and Partial Rollback for Destination Execution)
-- Database Migration: `V7__phase11f_failure_recovery_and_rollback_schema.sql` (`rolled_back_insertions` on `migration_executions`, `execution_rollback_records`)
-- Purpose: Controlled failure recovery for eligible failed executions and safe partial rollback of confirmed inserted items from YouTube playlists with state-level idempotency and immutable audit trails.
+- Database Migrations:
+  - `V7__phase11f_failure_recovery_and_rollback_schema.sql`: `rolled_back_insertions` on `migration_executions`, `execution_rollback_records` audit table.
+  - `V8__phase11f_rollback_audit_retention.sql`: Replaces `ON DELETE CASCADE` foreign keys with `ON DELETE RESTRICT` on `execution_rollback_records` to enforce audit retention and prevent accidental deletion of rollback audit history.
+- Purpose: Controlled failure recovery for eligible failed executions and safe partial rollback of confirmed inserted items from YouTube playlists with state-level idempotency, in-flight mutation claiming, and immutable audit trails.
 - Architecture Rules:
   - **Deterministic Failure Classification**:
     - `ExecutionFailureClassifier` categorizes errors across 7 explicit taxonomies: retryable provider rejections, non-retryable provider rejections, authentication failures, invalid destination resources, local persistence failures, confirmed provider operation failures, and manual intervention states.
-    - Ambiguous network timeouts remain classified as `UNCERTAIN` and are strictly excluded from blind recovery (Phase 11G boundary).
+    - Context-Aware Mutation Ambiguity: Network timeouts (`ResourceAccessException`) and HTTP 500/503 errors during remote mutations (`destination_insertion` and `destination_deletion`) are evaluated for ambiguity and strictly classified as `MANUAL_INTERVENTION_REQUIRED` (`retryable = false`, `requiresManualIntervention = true`).
+    - Ambiguous network timeouts and server errors during mutations remain classified as `UNCERTAIN` and are strictly excluded from blind recovery, preserving Phase 11G as the dedicated reconciliation subsystem.
   - **Controlled Recovery Rules**:
     - Strictly preserves confirmed `ADDED` tracks; never re-adds previously successful tracks.
     - Re-attempts eligible `FAILED` tracks strictly in their canonical 0-indexed destination position order.
     - Rejects recovery on `COMPLETED` executions or executions containing unresolved `UNCERTAIN` tracks (HTTP 409 Conflict).
-    - Prevents concurrent recovery by claiming execution status as `RUNNING`.
+    - Prevents concurrent recovery by claiming execution status as `RUNNING` within a short transaction.
   - **Safe Partial Rollback Rules**:
+    - In-Flight Concurrency Protection: Track status transitions to `ROLLING_BACK` in a short transaction before calling remote provider deletion, preventing duplicate remote DELETE requests from concurrent rollback calls.
     - Provider deletion strictly targets the provider's unique playlist item identifier (`destinationPlaylistItemId`), not YouTube video ID.
     - Rollback requests are confined strictly to verified items belonging to the execution.
     - External provider deletions execute outside database transactions.
-    - Remote HTTP 404 responses during deletion are treated as confirmed deletions (already removed remotely).
+    - Remote HTTP 404 responses during deletion are treated as confirmed safe deletions (already removed remotely).
     - State-level idempotency: repeating rollback on an already `ROLLED_BACK` item bypasses remote calls and records `ALREADY_ROLLED_BACK`.
     - Every rollback operation generates an immutable audit record in `execution_rollback_records`.
-    - Updates execution status to `ROLLED_BACK` (if all confirmed items rolled back) or `PARTIALLY_ROLLED_BACK`.
+    - If remote deletion encounters network timeout or 500/503, track outcome transitions to `UNCERTAIN`, audit is recorded as `UNCERTAIN`, and execution status becomes `RECOVERY_REQUIRED`.
+    - On confirmed provider rejection (400, 401, 403), track reverts from `ROLLING_BACK` to `ADDED` and audit is recorded as `FAILED`.
+    - Updates execution status to `ROLLED_BACK` (if `successful == 0 && rolledBack > 0`) or `PARTIALLY_ROLLED_BACK`.
   - **Security & Authorization**:
     - Anti-impersonation: verifies caller-supplied `userId` matches authenticated `Principal`.
     - Anti-IDOR: verifies execution ownership before any recovery or rollback mutation.
+  - **Concurrency & Locking**:
+    - Atomic cross-instance conditional query `claimExecutionRunning` in `MigrationExecutionRepository`.
+    - Optimistic locking `@Version` on `migration_executions` and `execution_track_records`.
   - **Strict Boundaries**:
     - Zero background threads, queues, or scheduled tasks (Phase 12 boundary).
     - Zero ambiguous mutation reconciliation (Phase 11G boundary).

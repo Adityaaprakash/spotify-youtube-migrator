@@ -69,15 +69,15 @@ class YouTubeClientRollbackTest {
         }
 
         @Test
-        @DisplayName("404 Not Found: Gracefully treated as confirmed deletion (already deleted remotely)")
-        void treats404AsAlreadyDeleted() {
+        @DisplayName("404 Not Found: Throws ResourceNotFoundException (handled upstream as already deleted)")
+        void treats404AsResourceNotFound() {
             mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?id=" + PLAYLIST_ITEM_ID))
                     .andExpect(method(HttpMethod.DELETE))
                     .andExpect(header(HttpHeaders.AUTHORIZATION, "Bearer " + ACCESS_TOKEN))
                     .andRespond(withStatus(HttpStatus.NOT_FOUND));
 
-            // Must NOT throw; 404 means the item is already gone from YouTube
-            youTubeClient.removeVideoFromPlaylist(ACCESS_TOKEN, PLAYLIST_ITEM_ID);
+            assertThatThrownBy(() -> youTubeClient.removeVideoFromPlaylist(ACCESS_TOKEN, PLAYLIST_ITEM_ID))
+                    .isInstanceOf(com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException.class);
             mockServer.verify();
         }
     }

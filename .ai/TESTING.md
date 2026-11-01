@@ -624,7 +624,7 @@ Implemented and verified (39 dedicated Phase 11E tests):
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
-- **Phase 11 Execution, Recovery & Rollback Total**: 213 tests across 19 test classes:
+- **Phase 11 Execution, Recovery & Rollback Total**: 221 tests across 19 test classes:
   - `ApprovedMigrationContractTest`: 12 tests.
   - `ApprovedPlanValidatorTest`: 19 tests.
   - `ApprovedMigrationExecutionServiceTest`: 8 tests.
@@ -637,13 +637,14 @@ Implemented and verified (39 dedicated Phase 11E tests):
   - `OrderedTrackInsertionSafetyTest`: 6 tests.
   - `MigrationExecutionDomainTest`: 12 tests.
   - `DefaultMigrationExecutionStateServiceTest`: 13 tests.
-  - `MigrationExecutionSafetyTest`: 6 tests (Phase 11E/11F reflection and entity guardrails).
+  - `MigrationExecutionSafetyTest`: 7 tests (4 Phase 11E reflection guardrails + 3 Phase 11F audit retention and status invariants).
   - `MigrationExecutionControllerTest`: 37 tests.
-  - `ExecutionFailureClassifierTest` (Phase 11F): 12 tests (7-class failure taxonomy).
+  - `ExecutionFailureClassifierTest` (Phase 11F): 19 tests (7-class failure taxonomy, read vs mutation ambiguity).
   - `DefaultMigrationExecutionRecoveryTest` (Phase 11F): 7 tests (controlled recovery, ordering, safety).
-  - `DefaultMigrationExecutionRollbackTest` (Phase 11F): 10 tests (partial rollback, idempotency, 404 handling, audit trail).
+  - `DefaultMigrationExecutionRollbackTest` (Phase 11F): 11 tests (partial rollback, in-flight claiming, idempotency, 404 handling, timeout ambiguity, audit trail).
   - `MigrationExecutionRecoveryAndRollbackControllerTest` (Phase 11F): 11 tests (WebMvc endpoints, anti-impersonation, anti-IDOR).
   - `YouTubeClientRollbackTest` (Phase 11F): 8 tests (HTTP DELETE playlistItems, 204, 404, 401, 403, 429, 503).
+  *(Note on Phase 11F Test Discrepancy Resolution: The initial 48 vs 54 reported tests reflected 48 new tests across 5 new test classes + 6 tests in MigrationExecutionSafetyTest. The corrective audit pass expands failure classification for mutation ambiguity, adds in-flight ROLLING_BACK tests, and verifies audit immutability, totaling 56 Phase 11F tests and 63 with full safety tests).*
 - **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites:
   - `ReviewSessionControllerTest`: 24 tests.
   - `ReviewSessionIntegrationTest`: 4 tests.

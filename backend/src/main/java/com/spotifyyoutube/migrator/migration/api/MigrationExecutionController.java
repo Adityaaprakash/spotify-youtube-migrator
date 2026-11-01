@@ -280,8 +280,8 @@ public class MigrationExecutionController {
         }
         UUID requestedUserId = request != null ? request.userId() : null;
         UUID userId = resolveUserId(requestedUserId, principal);
-        RecoverExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(executionId, request, userId);
-        MigrationExecutionSummary summary = executionStateService.recoverExecution(domainReq, userId);
+        RecoverExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
+        MigrationExecutionSummary summary = executionStateService.recoverExecution(executionId, domainReq, userId);
         return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
     }
 
@@ -300,8 +300,8 @@ public class MigrationExecutionController {
             throw new IllegalStateException("MigrationExecutionStateService is not configured");
         }
         UUID userId = resolveUserId(request.userId(), principal);
-        RollbackExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(executionId, request, userId);
-        ExecutionRollbackSummary summary = executionStateService.rollbackExecution(domainReq, userId);
+        RollbackExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
+        ExecutionRollbackSummary summary = executionStateService.rollbackExecution(executionId, domainReq, userId);
         return ResponseEntity.ok(MigrationExecutionApiMapper.toRollbackResponse(summary));
     }
 

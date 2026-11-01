@@ -5,6 +5,8 @@ import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionRollbackSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackRecordDto;
@@ -20,6 +22,7 @@ import com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStat
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionRollbackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
+import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
@@ -27,12 +30,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.HttpStatus;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -68,6 +71,7 @@ class DefaultMigrationExecutionRollbackTest {
     private User testUser;
     private UUID sessionId;
     private ReviewSession reviewSession;
+    private ApprovedMigrationContext approvedContext;
     private UUID executionId;
     private MigrationExecution execution;
 
@@ -107,17 +111,59 @@ class DefaultMigrationExecutionRollbackTest {
         reviewSession.setId(sessionId);
         reviewSession.setStatus(ReviewSessionStatus.APPROVED);
 
+        ApprovedTrack track0 = new ApprovedTrack(
+                0,
+                "sp_1",
+                "Song One",
+                "Artist A",
+                "yt_video_1",
+                "Song One (Audio)",
+                "Channel A",
+                Duration.ofMinutes(3),
+                ReviewDecisionSource.CONFIRMED_EXACT,
+                0
+        );
+
+        ApprovedTrack track1 = new ApprovedTrack(
+                1,
+                "sp_2",
+                "Song Two",
+                "Artist B",
+                "yt_video_2",
+                "Song Two (Audio)",
+                "Channel B",
+                Duration.ofMinutes(4),
+                ReviewDecisionSource.USER_ACCEPTED,
+                1
+        );
+
+        approvedContext = new ApprovedMigrationContext(
+                sessionId,
+                UUID.randomUUID(),
+                userId,
+                "sp_pl_rb",
+                "Rollback Test Playlist",
+                "Target Playlist",
+                "Description",
+                false,
+                List.of(track0, track1),
+                2,
+                2,
+                0,
+                Instant.now()
+        );
+
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(reviewSession));
 
         executionId = UUID.randomUUID();
-        execution = new MigrationExecution(sessionId, reviewSession.getMigrationPlanId(), userId, "yt_pl_target", 2);
+        execution = new MigrationExecution(testUser, reviewSession, approvedContext, "yt_pl_target", null);
         execution.setId(executionId);
-        execution.setStatus(MigrationExecutionStatus.COMPLETED);
-        execution.setSuccessfulInsertions(2);
-        execution.setFailedInsertions(0);
 
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+        when(trackRecordRepository.saveAndFlush(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
     }
 
     @Nested
@@ -127,23 +173,27 @@ class DefaultMigrationExecutionRollbackTest {
         @Test
         @DisplayName("Successfully rolls back a single confirmed inserted playlist item")
         void rollsBackSingleItemSuccessfully() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
 
-            ExecutionTrackRecord track1 = new ExecutionTrackRecord(execution, "sp_2", "yt_video_2", 1);
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
             track1.markAdded("yt_item_1");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0, track1));
-            when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+            when(trackRecordRepository.findById(track1.getId())).thenReturn(Optional.of(track1));
             when(rollbackRecordRepository.save(any(ExecutionRollbackRecord.class))).thenAnswer(i -> i.getArgument(0));
 
             doNothing().when(musicDestination).removeTrackFromPlaylist(userId, "yt_item_0");
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, List.of("yt_item_0"), "Removing first song");
-
-            ExecutionRollbackSummary summary = service.rollbackExecution(request, userId);
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0));
+            ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
 
             // Verify remote call targeting playlist item ID
             verify(musicDestination, times(1)).removeTrackFromPlaylist(userId, "yt_item_0");
@@ -153,12 +203,12 @@ class DefaultMigrationExecutionRollbackTest {
             assertThat(track0.getStatus()).isEqualTo(ExecutionTrackStatus.ROLLED_BACK);
             assertThat(track1.getStatus()).isEqualTo(ExecutionTrackStatus.ADDED);
 
-            assertThat(summary.status()).isEqualTo(RollbackExecutionStatus.SUCCESS);
-            assertThat(summary.requestedItems()).isEqualTo(1);
+            assertThat(summary.overallStatus()).isEqualTo(RollbackExecutionStatus.SUCCESS);
+            assertThat(summary.totalRequested()).isEqualTo(1);
             assertThat(summary.successfullyRolledBack()).isEqualTo(1);
             assertThat(summary.failedRollbacks()).isEqualTo(0);
-            assertThat(summary.outcomes()).hasSize(1);
-            assertThat(summary.outcomes().get(0).status()).isEqualTo(RollbackRecordStatus.ROLLED_BACK);
+            assertThat(summary.trackOutcomes()).hasSize(1);
+            assertThat(summary.trackOutcomes().get(0).status()).isEqualTo(RollbackRecordStatus.ROLLED_BACK);
 
             // Verify aggregate execution status is PARTIALLY_ROLLED_BACK because track 1 is still ADDED
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.PARTIALLY_ROLLED_BACK);
@@ -168,21 +218,25 @@ class DefaultMigrationExecutionRollbackTest {
         @Test
         @DisplayName("Successfully rolls back all confirmed inserted items when target list is omitted")
         void rollsBackAllConfirmedItemsWhenTargetOmitted() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
 
-            ExecutionTrackRecord track1 = new ExecutionTrackRecord(execution, "sp_2", "yt_video_2", 1);
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
             track1.markAdded("yt_item_1");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0, track1));
-            when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+            when(trackRecordRepository.findById(track1.getId())).thenReturn(Optional.of(track1));
             when(rollbackRecordRepository.save(any(ExecutionRollbackRecord.class))).thenAnswer(i -> i.getArgument(0));
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, null, "Full rollback of execution");
-
-            ExecutionRollbackSummary summary = service.rollbackExecution(request, userId);
+            RollbackExecutionRequest request = RollbackExecutionRequest.all();
+            ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
 
             verify(musicDestination, times(1)).removeTrackFromPlaylist(userId, "yt_item_0");
             verify(musicDestination, times(1)).removeTrackFromPlaylist(userId, "yt_item_1");
@@ -190,7 +244,7 @@ class DefaultMigrationExecutionRollbackTest {
             assertThat(track0.getStatus()).isEqualTo(ExecutionTrackStatus.ROLLED_BACK);
             assertThat(track1.getStatus()).isEqualTo(ExecutionTrackStatus.ROLLED_BACK);
 
-            assertThat(summary.status()).isEqualTo(RollbackExecutionStatus.SUCCESS);
+            assertThat(summary.overallStatus()).isEqualTo(RollbackExecutionStatus.SUCCESS);
             assertThat(summary.successfullyRolledBack()).isEqualTo(2);
 
             // Both items rolled back -> aggregate status is ROLLED_BACK
@@ -201,24 +255,26 @@ class DefaultMigrationExecutionRollbackTest {
         @Test
         @DisplayName("Handles remote 404 Not Found as confirmed deletion (already deleted remotely)")
         void handles404AsConfirmedDeletion() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.PARTIALLY_COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0));
-            when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
             when(rollbackRecordRepository.save(any(ExecutionRollbackRecord.class))).thenAnswer(i -> i.getArgument(0));
 
             // Remote returns 404
-            doThrow(HttpClientErrorException.create(HttpStatus.NOT_FOUND, "Not Found", null, null, null))
+            doThrow(new ResourceNotFoundException("Not Found"))
                     .when(musicDestination).removeTrackFromPlaylist(userId, "yt_item_0");
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, List.of("yt_item_0"), "Clean up deleted item");
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0));
+            ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
 
-            ExecutionRollbackSummary summary = service.rollbackExecution(request, userId);
-
-            assertThat(summary.status()).isEqualTo(RollbackExecutionStatus.SUCCESS);
+            assertThat(summary.overallStatus()).isEqualTo(RollbackExecutionStatus.SUCCESS);
             assertThat(summary.successfullyRolledBack()).isEqualTo(1);
             assertThat(track0.getStatus()).isEqualTo(ExecutionTrackStatus.ROLLED_BACK);
         }
@@ -226,62 +282,99 @@ class DefaultMigrationExecutionRollbackTest {
         @Test
         @DisplayName("State-Level Idempotency: Repeating rollback request on already ROLLED_BACK item skips remote call")
         void idempotentRollbackSkipsRemoteCall() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
             track0.markRolledBack("Previously rolled back");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.ROLLED_BACK);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
             when(rollbackRecordRepository.save(any(ExecutionRollbackRecord.class))).thenAnswer(i -> i.getArgument(0));
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, List.of("yt_item_0"), "Repeat rollback attempt");
-
-            ExecutionRollbackSummary summary = service.rollbackExecution(request, userId);
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0));
+            ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
 
             // Remote call MUST NOT be made
             verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
 
-            assertThat(summary.status()).isEqualTo(RollbackExecutionStatus.NO_OP);
-            assertThat(summary.outcomes()).hasSize(1);
-            RollbackTrackOutcomeDto outcome = summary.outcomes().get(0);
+            assertThat(summary.overallStatus()).isEqualTo(RollbackExecutionStatus.NO_OP);
+            assertThat(summary.trackOutcomes()).hasSize(1);
+            RollbackTrackOutcomeDto outcome = summary.trackOutcomes().get(0);
             assertThat(outcome.status()).isEqualTo(RollbackRecordStatus.ALREADY_ROLLED_BACK);
         }
 
         @Test
-        @DisplayName("Handles remote failure during rollback gracefully without corrupting state")
-        void handlesRemoteFailureDuringRollback() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+        @DisplayName("Handles confirmed remote rejection during rollback by reverting ROLLING_BACK to ADDED")
+        void handlesRemoteRejectionDuringRollback() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
 
-            ExecutionTrackRecord track1 = new ExecutionTrackRecord(execution, "sp_2", "yt_video_2", 1);
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
             track1.markAdded("yt_item_1");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0, track1));
-            when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+            when(trackRecordRepository.findById(track1.getId())).thenReturn(Optional.of(track1));
             when(rollbackRecordRepository.save(any(ExecutionRollbackRecord.class))).thenAnswer(i -> i.getArgument(0));
 
-            // Track 0 succeeds, Track 1 fails on remote
+            // Track 0 succeeds, Track 1 gets 403 Forbidden
             doNothing().when(musicDestination).removeTrackFromPlaylist(userId, "yt_item_0");
-            doThrow(new ExternalProviderException("YouTube API 500 Internal Server Error", true))
+            doThrow(new ExternalProviderException("YouTube API 403 Forbidden", 403))
                     .when(musicDestination).removeTrackFromPlaylist(userId, "yt_item_1");
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, List.of("yt_item_0", "yt_item_1"), "Partial failure rollback");
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0, 1));
+            ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
 
-            ExecutionRollbackSummary summary = service.rollbackExecution(request, userId);
-
-            assertThat(summary.status()).isEqualTo(RollbackExecutionStatus.PARTIAL_SUCCESS);
+            assertThat(summary.overallStatus()).isEqualTo(RollbackExecutionStatus.PARTIAL_SUCCESS);
             assertThat(summary.successfullyRolledBack()).isEqualTo(1);
             assertThat(summary.failedRollbacks()).isEqualTo(1);
 
-            // Track 0 was rolled back, Track 1 remains ADDED
+            // Track 0 was rolled back, Track 1 reverted back to ADDED
             assertThat(track0.getStatus()).isEqualTo(ExecutionTrackStatus.ROLLED_BACK);
             assertThat(track1.getStatus()).isEqualTo(ExecutionTrackStatus.ADDED);
 
             // Audit records: 1 ROLLED_BACK, 1 FAILED
             verify(rollbackRecordRepository, times(2)).save(any(ExecutionRollbackRecord.class));
+        }
+
+        @Test
+        @DisplayName("Handles network timeout during remote DELETE as UNCERTAIN, blocking blind retry")
+        void handlesNetworkTimeoutDuringRollbackAsUncertain() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markAdded("yt_item_0");
+
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
+                    .thenReturn(List.of(track0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+            when(rollbackRecordRepository.save(any(ExecutionRollbackRecord.class))).thenAnswer(i -> i.getArgument(0));
+
+            // Remote DELETE times out
+            doThrow(new ResourceAccessException("Connection timed out"))
+                    .when(musicDestination).removeTrackFromPlaylist(userId, "yt_item_0");
+
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0));
+            ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
+
+            assertThat(summary.overallStatus()).isEqualTo(RollbackExecutionStatus.FAILED);
+            assertThat(summary.failedRollbacks()).isEqualTo(1);
+            assertThat(track0.getStatus()).isEqualTo(ExecutionTrackStatus.UNCERTAIN);
+
+            // Execution status transitions to RECOVERY_REQUIRED because outcome is uncertain
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
         }
     }
 
@@ -290,39 +383,39 @@ class DefaultMigrationExecutionRollbackTest {
     class SafetyAndValidation {
 
         @Test
-        @DisplayName("Rejects rollback if requested playlist item does not belong to the execution")
-        void rejectsRollbackOfUnrecognizedPlaylistItem() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+        @DisplayName("Rejects rollback if target position does not exist in execution")
+        void rejectsRollbackOfNonExistentPosition() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markAdded("yt_item_0");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0));
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, List.of("foreign_playlist_item_999"), "Malicious rollback");
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(999));
 
-            assertThatThrownBy(() -> service.rollbackExecution(request, userId))
+            assertThatThrownBy(() -> service.rollbackExecution(executionId, request, userId))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("does not belong to execution");
+                    .hasMessageContaining("does not exist in execution");
 
             verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
         }
 
         @Test
-        @DisplayName("Rejects rollback if target track was never inserted (status PENDING or FAILED without playlistItemId)")
+        @DisplayName("Rejects rollback if target track was never inserted (status FAILED)")
         void rejectsRollbackOfUninsertedTrack() {
-            ExecutionTrackRecord track0 = new ExecutionTrackRecord(execution, "sp_1", "yt_video_1", 0);
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
             track0.markFailed("Failed before insertion");
 
-            when(trackRecordRepository.findByExecutionIdOrderByCanonicalTargetOrderAsc(executionId))
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
                     .thenReturn(List.of(track0));
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, null, "Rollback uninserted track");
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0));
 
-            assertThatThrownBy(() -> service.rollbackExecution(request, userId))
+            assertThatThrownBy(() -> service.rollbackExecution(executionId, request, userId))
                     .isInstanceOf(InvalidStateException.class)
-                    .hasMessageContaining("No confirmed inserted tracks eligible for rollback");
+                    .hasMessageContaining("never inserted");
 
             verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
         }
@@ -332,12 +425,11 @@ class DefaultMigrationExecutionRollbackTest {
         void rejectsRollbackWhenRunning() {
             execution.setStatus(MigrationExecutionStatus.RUNNING);
 
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, userId, List.of("yt_item_0"), "Rollback while running");
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0));
 
-            assertThatThrownBy(() -> service.rollbackExecution(request, userId))
+            assertThatThrownBy(() -> service.rollbackExecution(executionId, request, userId))
                     .isInstanceOf(InvalidStateException.class)
-                    .hasMessageContaining("RUNNING");
+                    .hasMessageContaining("currently running");
 
             verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
         }
@@ -346,26 +438,31 @@ class DefaultMigrationExecutionRollbackTest {
         @DisplayName("Anti-IDOR: Rejects rollback if user ID does not match execution owner")
         void rejectsCrossUserRollback() {
             UUID intruderId = UUID.randomUUID();
-            RollbackExecutionRequest request = new RollbackExecutionRequest(
-                    executionId, intruderId, List.of("yt_item_0"), "IDOR attempt");
+            RollbackExecutionRequest request = RollbackExecutionRequest.forPositions(List.of(0));
 
-            assertThatThrownBy(() -> service.rollbackExecution(request, intruderId))
+            assertThatThrownBy(() -> service.rollbackExecution(executionId, request, intruderId))
                     .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("MigrationExecution not found");
+                    .hasMessageContaining("Migration execution not found");
 
             verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
         }
 
         @Test
-        @DisplayName("Retrieves rollback audit history ordered by attemptedAt descending")
+        @DisplayName("Retrieves rollback audit history ordered by targetPosition ascending")
         void retrievesRollbackHistory() {
-            ExecutionRollbackRecord r1 = new ExecutionRollbackRecord(
-                    executionId, UUID.randomUUID(), "yt_item_0", RollbackRecordStatus.ROLLED_BACK, "User request");
-            ExecutionRollbackRecord r2 = new ExecutionRollbackRecord(
-                    executionId, UUID.randomUUID(), "yt_item_1", RollbackRecordStatus.FAILED, "YouTube 500 error");
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markAdded("yt_item_0");
 
-            when(rollbackRecordRepository.findByExecutionIdOrderByAttemptedAtDesc(executionId))
-                    .thenReturn(List.of(r1, r2));
+            ExecutionTrackRecord track1 = execution.getTrackRecords().get(1);
+            track1.markAdding();
+            track1.markAdded("yt_item_1");
+
+            ExecutionRollbackRecord r0 = ExecutionRollbackRecord.success(execution, track0);
+            ExecutionRollbackRecord r1 = ExecutionRollbackRecord.failed(execution, track1, "YouTube 500 error");
+
+            when(rollbackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
+                    .thenReturn(List.of(r0, r1));
 
             List<RollbackRecordDto> history = service.getRollbackHistory(executionId, userId);
 

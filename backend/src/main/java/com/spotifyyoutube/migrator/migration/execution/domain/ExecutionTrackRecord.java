@@ -148,7 +148,7 @@ public class ExecutionTrackRecord extends BaseEntity {
      * Records an ambiguous remote outcome (e.g. network timeout or connection reset).
      */
     public void markUncertain(String sanitizedErrorMessage) {
-        if (status != ExecutionTrackStatus.ADDING) {
+        if (status != ExecutionTrackStatus.ADDING && status != ExecutionTrackStatus.ROLLING_BACK) {
             throw new InvalidStateException(String.format(
                     "Cannot mark track at position %d as UNCERTAIN; current status is %s",
                     targetPosition, status
@@ -175,22 +175,52 @@ public class ExecutionTrackRecord extends BaseEntity {
     }
 
     /**
-     * Reconciles a stale ADDING state detected upon application startup or recovery.
-     * Marks as UNCERTAIN rather than PENDING to prevent duplicate insertion.
+     * Reconciles a stale ADDING or ROLLING_BACK state detected upon application startup or recovery.
+     * Marks as UNCERTAIN rather than PENDING to prevent duplicate mutations.
      */
     public void reconcileStaleAdding() {
-        if (this.status == ExecutionTrackStatus.ADDING) {
+        if (this.status == ExecutionTrackStatus.ADDING || this.status == ExecutionTrackStatus.ROLLING_BACK) {
+            String prior = this.status.name();
             this.status = ExecutionTrackStatus.UNCERTAIN;
-            this.errorMessage = "Operation interrupted before provider confirmation was recorded (stale ADDING recovery)";
+            this.errorMessage = "Operation interrupted before provider confirmation was recorded (stale " + prior + " recovery)";
             this.completedAt = Instant.now();
         }
+    }
+
+    /**
+     * Marks this track as claimed for compensating deletion (Phase 11F).
+     * Prevents concurrent duplicate remote DELETE requests.
+     */
+    public void markRollingBack() {
+        if (status != ExecutionTrackStatus.ADDED) {
+            throw new InvalidStateException(String.format(
+                    "Cannot mark track at position %d as ROLLING_BACK; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.ROLLING_BACK;
+        this.errorMessage = "Compensating deletion in progress";
+    }
+
+    /**
+     * Reverts a failed rollback attempt from ROLLING_BACK back to ADDED (Phase 11F).
+     */
+    public void revertRollingBackToAdded(String failureReason) {
+        if (status != ExecutionTrackStatus.ROLLING_BACK) {
+            throw new InvalidStateException(String.format(
+                    "Cannot revert track at position %d to ADDED; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.ADDED;
+        this.errorMessage = failureReason;
     }
 
     /**
      * Marks this track as rolled back following confirmed removal from the destination playlist (Phase 11F).
      */
     public void markRolledBack(String reason) {
-        if (status != ExecutionTrackStatus.ADDED) {
+        if (status != ExecutionTrackStatus.ADDED && status != ExecutionTrackStatus.ROLLING_BACK) {
             throw new InvalidStateException(String.format(
                     "Cannot mark track at position %d as ROLLED_BACK; current status is %s",
                     targetPosition, status

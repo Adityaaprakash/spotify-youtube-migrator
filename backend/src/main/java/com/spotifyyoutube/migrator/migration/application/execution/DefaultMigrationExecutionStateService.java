@@ -29,6 +29,9 @@ import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrack
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
+import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureAnalysis;
+import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureClassification;
+import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureClassifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,6 +39,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -66,7 +70,28 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     private final ReviewSessionRepository reviewSessionRepository;
     private final ApprovedMigrationExecutionService executionService;
     private final MusicDestination musicDestination;
+    private final ExecutionFailureClassifier failureClassifier;
     private final TransactionTemplate transactionTemplate;
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
+            TransactionTemplate transactionTemplate
+    ) {
+        this.executionRepository = Objects.requireNonNull(executionRepository, "MigrationExecutionRepository must not be null");
+        this.trackRecordRepository = Objects.requireNonNull(trackRecordRepository, "ExecutionTrackRecordRepository must not be null");
+        this.rollbackRecordRepository = rollbackRecordRepository;
+        this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
+        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
+        this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
+        this.failureClassifier = failureClassifier != null ? failureClassifier : new ExecutionFailureClassifier();
+        this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "TransactionTemplate must not be null");
+    }
 
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,
@@ -77,13 +102,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             MusicDestination musicDestination,
             TransactionTemplate transactionTemplate
     ) {
-        this.executionRepository = Objects.requireNonNull(executionRepository, "MigrationExecutionRepository must not be null");
-        this.trackRecordRepository = Objects.requireNonNull(trackRecordRepository, "ExecutionTrackRecordRepository must not be null");
-        this.rollbackRecordRepository = rollbackRecordRepository;
-        this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
-        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
-        this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
-        this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "TransactionTemplate must not be null");
+        this(executionRepository, trackRecordRepository, rollbackRecordRepository, reviewSessionRepository, executionService, musicDestination, new ExecutionFailureClassifier(), transactionTemplate);
     }
 
     public DefaultMigrationExecutionStateService(
@@ -94,7 +113,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             MusicDestination musicDestination,
             TransactionTemplate transactionTemplate
     ) {
-        this(executionRepository, trackRecordRepository, null, reviewSessionRepository, executionService, musicDestination, transactionTemplate);
+        this(executionRepository, trackRecordRepository, null, reviewSessionRepository, executionService, musicDestination, new ExecutionFailureClassifier(), transactionTemplate);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -105,6 +124,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             ReviewSessionRepository reviewSessionRepository,
             ApprovedMigrationExecutionService executionService,
             MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
             PlatformTransactionManager transactionManager
     ) {
         this(
@@ -114,6 +134,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 reviewSessionRepository,
                 executionService,
                 musicDestination,
+                failureClassifier,
                 new TransactionTemplate(Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null"))
         );
     }
@@ -133,6 +154,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 reviewSessionRepository,
                 executionService,
                 musicDestination,
+                new ExecutionFailureClassifier(),
                 new TransactionTemplate(Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null"))
         );
     }
@@ -529,6 +551,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 }
             } catch (ResourceAccessException ex) {
                 // Ambiguous failure: network timeout / connection reset
+                ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_insertion");
                 String sanitizedMsg = sanitize(ex.getMessage());
                 log.warn("Insertion timed out for track {} in execution {}. Remote outcome is UNCERTAIN: {}",
                         track.destinationTrackId(), executionId, sanitizedMsg);
@@ -544,34 +567,62 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 stopReason = "timeout (uncertain outcome)";
                 break;
             } catch (ExternalProviderException ex) {
+                ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_insertion");
                 String sanitizedMsg = sanitize(ex.getMessage());
-                log.error("Destination provider rejected track insertion for track {} in execution {}: {}",
-                        track.destinationTrackId(), executionId, sanitizedMsg);
+                log.error("Destination provider failed for track {} in execution {}: classification={}, msg={}",
+                        track.destinationTrackId(), executionId, analysis.classification(), sanitizedMsg);
 
-                transactionTemplate.execute(status -> {
-                    ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
-                            .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
-                    record.markFailed(sanitizedMsg);
-                    trackRecordRepository.saveAndFlush(record);
-                    return null;
-                });
-                stopRemaining = true;
-                stopReason = "provider rejection";
+                if (analysis.classification() == ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED) {
+                    // Ambiguous outcome (e.g. 500, 503 during remote mutation)
+                    transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                        record.markUncertain(sanitizedMsg);
+                        trackRecordRepository.saveAndFlush(record);
+                        return null;
+                    });
+                    stopRemaining = true;
+                    stopReason = "uncertain outcome (" + analysis.classification() + ")";
+                } else {
+                    // Confirmed provider rejection (e.g. 400, 401, 403, 404)
+                    transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                        record.markFailed(sanitizedMsg);
+                        trackRecordRepository.saveAndFlush(record);
+                        return null;
+                    });
+                    stopRemaining = true;
+                    stopReason = "provider rejection";
+                }
                 break;
             } catch (Exception ex) {
+                ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_insertion");
                 String sanitizedMsg = sanitize(ex.getMessage());
                 log.error("Unexpected error inserting track {} in execution {}: {}",
                         track.destinationTrackId(), executionId, sanitizedMsg);
 
-                transactionTemplate.execute(status -> {
-                    ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
-                            .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
-                    record.markFailed("Unexpected insertion error: " + sanitizedMsg);
-                    trackRecordRepository.saveAndFlush(record);
-                    return null;
-                });
-                stopRemaining = true;
-                stopReason = "unexpected error";
+                if (analysis.classification() == ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED) {
+                    transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                        record.markUncertain("Unexpected error with uncertain outcome: " + sanitizedMsg);
+                        trackRecordRepository.saveAndFlush(record);
+                        return null;
+                    });
+                    stopRemaining = true;
+                    stopReason = "unexpected error (uncertain outcome)";
+                } else {
+                    transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                        record.markFailed("Unexpected insertion error: " + sanitizedMsg);
+                        trackRecordRepository.saveAndFlush(record);
+                        return null;
+                    });
+                    stopRemaining = true;
+                    stopReason = "unexpected error";
+                }
                 break;
             }
         }
@@ -670,7 +721,9 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                         .toList();
 
                 for (ExecutionTrackRecord r : eligible) {
-                    if (r.getStatus() == ExecutionTrackStatus.PENDING || r.getStatus() == ExecutionTrackStatus.SKIPPED) {
+                    if (r.getStatus() == ExecutionTrackStatus.PENDING
+                            || r.getStatus() == ExecutionTrackStatus.SKIPPED
+                            || r.getStatus() == ExecutionTrackStatus.FAILED) {
                         throw new InvalidStateException(String.format(
                                 "Cannot rollback track at position %d: track was never inserted (status: %s)",
                                 r.getTargetPosition(), r.getStatus()
@@ -679,6 +732,12 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     if (r.getStatus() == ExecutionTrackStatus.UNCERTAIN) {
                         throw new InvalidStateException(String.format(
                                 "Cannot rollback track at position %d: track outcome is uncertain",
+                                r.getTargetPosition()
+                        ));
+                    }
+                    if (r.getStatus() == ExecutionTrackStatus.ROLLING_BACK) {
+                        throw new InvalidStateException(String.format(
+                                "Cannot rollback track at position %d: rollback is already in progress for this track",
                                 r.getTargetPosition()
                         ));
                     }
@@ -750,6 +809,15 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 continue;
             }
 
+            // Claim track in short transaction before calling remote provider to prevent concurrent duplicate remote DELETE calls
+            transactionTemplate.execute(status -> {
+                ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                        .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                record.markRollingBack();
+                trackRecordRepository.saveAndFlush(record);
+                return null;
+            });
+
             // Execute compensating provider operation (OUTSIDE database transaction)
             try {
                 musicDestination.removeTrackFromPlaylist(authenticatedUserId, playlistItemId.trim());
@@ -789,53 +857,93 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 successCount++;
                 outcomes.add(RollbackTrackOutcomeDto.rolledBack(pos, videoId, playlistItemId));
 
-            } catch (ExternalProviderException ex) {
-                // Provider rejected rollback
+            } catch (ResourceAccessException ex) {
+                // Ambiguous deletion: network timeout / socket dropped during remote DELETE
                 String sanitized = sanitize(ex.getMessage());
+                log.warn("Rollback timed out for track {} (item {}). Outcome is UNCERTAIN: {}",
+                        videoId, playlistItemId, sanitized);
                 failedCount++;
-                outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, sanitized));
+                outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, "UNCERTAIN: " + sanitized));
 
-                if (rollbackRecordRepository != null) {
+                transactionTemplate.execute(status -> {
+                    MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
+                    ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                    tr.markUncertain("Rollback delete timed out; remote outcome is uncertain: " + sanitized);
+                    trackRecordRepository.saveAndFlush(tr);
+
+                    if (rollbackRecordRepository != null) {
+                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.uncertain(exec, tr, sanitized);
+                        rollbackRecordRepository.save(audit);
+                    }
+                    return null;
+                });
+
+            } catch (ExternalProviderException ex) {
+                ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_deletion");
+                String sanitized = sanitize(ex.getMessage());
+
+                if (analysis.classification() == ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED) {
+                    // Ambiguous deletion: HTTP 500 / 503 during remote DELETE
+                    log.warn("Rollback server error HTTP {} for track {} (item {}). Outcome is UNCERTAIN: {}",
+                            analysis.httpStatusCode().orElse(0), videoId, playlistItemId, sanitized);
+                    failedCount++;
+                    outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, "UNCERTAIN: " + sanitized));
+
                     transactionTemplate.execute(status -> {
                         MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
                         ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
-                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.failed(exec, tr, sanitized);
-                        rollbackRecordRepository.save(audit);
+                        tr.markUncertain("Rollback outcome uncertain: " + sanitized);
+                        trackRecordRepository.saveAndFlush(tr);
+
+                        if (rollbackRecordRepository != null) {
+                            ExecutionRollbackRecord audit = ExecutionRollbackRecord.uncertain(exec, tr, sanitized);
+                            rollbackRecordRepository.save(audit);
+                        }
+                        return null;
+                    });
+                } else {
+                    // Confirmed provider rejection (e.g. 400, 401, 403)
+                    failedCount++;
+                    outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, sanitized));
+
+                    transactionTemplate.execute(status -> {
+                        MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
+                        ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                        tr.revertRollingBackToAdded("Rollback rejected by provider: " + sanitized);
+                        trackRecordRepository.saveAndFlush(tr);
+
+                        if (rollbackRecordRepository != null) {
+                            ExecutionRollbackRecord audit = ExecutionRollbackRecord.failed(exec, tr, sanitized);
+                            rollbackRecordRepository.save(audit);
+                        }
                         return null;
                     });
                 }
 
             } catch (Exception ex) {
-                // Unexpected or connection failure
                 String sanitized = sanitize(ex.getMessage());
                 failedCount++;
                 outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, sanitized));
 
-                if (rollbackRecordRepository != null) {
-                    transactionTemplate.execute(status -> {
-                        MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                        ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                transactionTemplate.execute(status -> {
+                    MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
+                    ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                    tr.revertRollingBackToAdded("Unexpected rollback error: " + sanitized);
+                    trackRecordRepository.saveAndFlush(tr);
+
+                    if (rollbackRecordRepository != null) {
                         ExecutionRollbackRecord audit = ExecutionRollbackRecord.failed(exec, tr, sanitized);
                         rollbackRecordRepository.save(audit);
-                        return null;
-                    });
-                }
+                    }
+                    return null;
+                });
             }
         }
 
         // 3. Reconcile aggregate execution state in a short transaction
         MigrationExecutionSummary updatedSummary = transactionTemplate.execute(status -> {
             MigrationExecution execution = executionRepository.findById(executionId).orElseThrow();
-            execution.reconcileCounts();
-
-            if (execution.getSuccessfulInsertions() == 0 && execution.getRolledBackInsertions() > 0) {
-                execution.setStatus(MigrationExecutionStatus.ROLLED_BACK);
-            } else if (execution.getRolledBackInsertions() > 0) {
-                execution.setStatus(MigrationExecutionStatus.PARTIALLY_ROLLED_BACK);
-            } else {
-                execution.releaseExecution();
-            }
-
+            execution.releaseExecution();
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
             return MigrationExecutionSummary.from(saved);
         });

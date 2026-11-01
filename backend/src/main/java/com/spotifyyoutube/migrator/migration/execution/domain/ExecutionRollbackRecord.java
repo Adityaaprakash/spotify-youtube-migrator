@@ -102,6 +102,14 @@ public class ExecutionRollbackRecord extends BaseEntity {
         return new ExecutionRollbackRecord(execution, trackRecord, RollbackRecordStatus.FAILED, sanitizedErrorMessage);
     }
 
+    public static ExecutionRollbackRecord uncertain(
+            MigrationExecution execution,
+            ExecutionTrackRecord trackRecord,
+            String sanitizedErrorMessage
+    ) {
+        return new ExecutionRollbackRecord(execution, trackRecord, RollbackRecordStatus.UNCERTAIN, sanitizedErrorMessage);
+    }
+
     // Getters
 
     public MigrationExecution getExecution() {

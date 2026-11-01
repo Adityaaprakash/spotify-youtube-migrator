@@ -30,21 +30,21 @@ Phase 11F introduces a dedicated failure classification engine that inspects pro
 
 The failure taxonomy comprises 7 explicit classifications:
 1. **`CONFIRMED_RETRYABLE_PROVIDER_REJECTION`**:
-   Provider explicitly rejected the mutation with a transient status (HTTP 429 Too Many Requests, HTTP 503 Service Unavailable, HTTP 500 Internal Server Error, or network I/O timeout `ResourceAccessException`). Safe for controlled retry/recovery.
+   Provider explicitly rejected an idempotent operation prior to mutation processing with a transient status (e.g. HTTP 429 Too Many Requests, or HTTP 503 / network timeout during idempotent READ operations). Safe for retry.
 2. **`CONFIRMED_NON_RETRYABLE_PROVIDER_REJECTION`**:
    Provider rejected the mutation deterministically (HTTP 400 Bad Request, playlist track quota exceeded, duplicate item rejected). Automatic retries will fail; requires user intervention or alternative candidate selection.
 3. **`AUTHENTICATION_OR_AUTHORIZATION_FAILURE`**:
-   OAuth2 token expired, revoked, or insufficient scope (HTTP 401 Unauthorized, HTTP 403 Forbidden). Requires re-authentication before recovery can proceed.
+   OAuth2 token expired, revoked, or insufficient scope (HTTP 401 Unauthorized, HTTP 403 Forbidden without quota). Requires re-authentication before recovery can proceed.
 4. **`INVALID_DESTINATION_RESOURCE`**:
    Target playlist or video does not exist or was deleted on YouTube (HTTP 404 Not Found, `ResourceNotFoundException`).
 5. **`LOCAL_PERSISTENCE_FAILURE`**:
    Database constraint violation, transaction timeout, or optimistic lock failure (`OptimisticLockingFailureException`, `CannotAcquireLockException`).
 6. **`CONFIRMED_PROVIDER_OPERATION_FAILURE`**:
    Provider returned an explicit business failure payload.
-7. **`MANUAL_INTERVENTION_REQUIRED`**:
-   Unexpected state anomaly or unclassified terminal error requiring operator inspection.
+7. **`MANUAL_INTERVENTION_REQUIRED` (UNCERTAIN Mutation Outcomes)**:
+   Any remote mutation (track insertion or compensating deletion) that fails due to a network timeout (`ResourceAccessException`) or server error (HTTP 500/503) where the remote state is ambiguous is strictly classified as `MANUAL_INTERVENTION_REQUIRED` (`retryable = false`, `requiresManualIntervention = true`).
 
-> **CRITICAL BOUNDARY RULE:** Ambiguous outcomes (where a socket timed out during the request and the remote state is unknown) are classified as `UNCERTAIN` and strictly handled under Phase 11G. Controlled recovery **never** blindly treats `UNCERTAIN` tracks as confirmed failures.
+> **CRITICAL BOUNDARY RULE:** Ambiguous mutation outcomes (where a socket dropped or 500/503 was returned during POST/DELETE and remote state is unknown) are marked `UNCERTAIN` and strictly preserved for Phase 11G dedicated reconciliation. Controlled recovery **never** blindly treats `UNCERTAIN` tracks as confirmed failures, eliminating duplicate remote mutations.
 
 ---
 
@@ -55,11 +55,11 @@ Controlled recovery allows an execution containing confirmed `FAILED` tracks to 
 #### Invariants Enforced During Recovery:
 1. **Strict Preservation of Confirmed Work**: Tracks already in status `ADDED` are **never** re-inserted.
 2. **Canonical Ordering**: Tracks are executed strictly in their canonical 0-indexed destination position (`canonicalTargetOrder`).
-3. **Uncertain Protection**: If an execution contains any tracks in status `UNCERTAIN` (or `uncertainInsertions > 0`), recovery is **strictly rejected** (HTTP 409 Conflict). Ambiguous outcomes must be reconciled before recovery can proceed.
+3. **Uncertain Protection**: If an execution contains any tracks in status `UNCERTAIN` (or `uncertainInsertions > 0`), recovery is **strictly rejected** (HTTP 409 Conflict). Ambiguous outcomes must be reconciled in Phase 11G before recovery can proceed.
 4. **Completed Protection**: Executions with status `COMPLETED` cannot be recovered (HTTP 409 Conflict).
-5. **Concurrency Lock**: Recovery transitions the execution to `RUNNING`. If the execution is already `RUNNING`, concurrent recovery is rejected.
+5. **Concurrency Lock**: Recovery transitions the execution to `RUNNING` within a short transaction. If the execution is already `RUNNING`, concurrent recovery is rejected. Concurrent updates are protected by JPA optimistic locking (`@Version`).
 6. **Isolated Provider Calls**: External provider calls execute strictly **outside** active database transactions to prevent long-running locks or connection starvation.
-7. **Accurate Aggregate Reconciliation**: Upon recovery completion, aggregate counters (`successfulInsertions`, `failedInsertions`, `pendingInsertions`) and execution status (`COMPLETED`, `PARTIALLY_COMPLETED`, or `FAILED`) are transactionally reconciled.
+7. **Accurate Aggregate Reconciliation**: Upon recovery completion, aggregate counters (`successfulInsertions`, `failedInsertions`, `uncertainInsertions`, `skippedInsertions`, `rolledBackInsertions`) and execution status are transactionally reconciled.
 
 ---
 
@@ -73,35 +73,30 @@ Partial rollback provides safe compensating deletion of items previously inserte
 - Phase 11E already persists `destinationPlaylistItemId` in `execution_track_records`.
 
 #### Invariants Enforced During Rollback:
-1. **Scope Confinement**: Rollback requests can only target playlist items belonging to the verified execution. Attempting to delete items from other playlists or executions throws an error.
-2. **Selective or Complete Rollback**: Callers may provide an explicit list of `destinationPlaylistItemId` targets, or omit the list to roll back all confirmed `ADDED` tracks in the execution.
-3. **Remote 404 Semantics**: If YouTube returns HTTP 404 Not Found on deletion, the item has already been deleted on the provider. The system treats this safely as a confirmed deletion and updates state to `ROLLED_BACK`.
-4. **State-Level Idempotency**: Repeating a rollback request on an already `ROLLED_BACK` item bypasses remote provider calls and records an `ALREADY_ROLLED_BACK` audit outcome.
-5. **Non-Atomic Multi-Item Execution**: Deletions across multiple items execute sequentially. If item $k$ fails due to a provider rejection, previous deletions remain confirmed and persisted, and the failed item is recorded as `FAILED`.
-6. **Audit Persistence**: Every rollback attempt (success, idempotent no-op, or failure) is immutably recorded in the `execution_rollback_records` table.
-7. **Lifecycle State Transitions**:
-   - If all confirmed `ADDED` tracks are rolled back: execution status transitions to `ROLLED_BACK`.
-   - If a subset of tracks is rolled back or some deletions fail: execution status transitions to `PARTIALLY_ROLLED_BACK`.
-   - Confirmed rolled-back count is tracked in `migration_executions.rolled_back_insertions`.
+1. **In-Flight Concurrency Protection (`ROLLING_BACK`)**: Before calling `MusicDestination.removeTrackFromPlaylist`, the track status is claimed as `ROLLING_BACK` in a discrete short database transaction. This eliminates duplicate remote DELETE calls from concurrent rollback requests.
+2. **Scope Confinement**: Rollback requests can only target playlist items belonging to the verified execution. Attempting to delete items from other playlists or executions throws an error.
+3. **Selective or Complete Rollback**: Callers may provide an explicit list of canonical `targetPositions`, or omit the list to roll back all confirmed `ADDED` tracks in the execution.
+4. **Remote 404 Semantics**: If YouTube returns HTTP 404 Not Found on deletion, the item has already been deleted on the provider. The system treats this safely as a confirmed deletion and updates state to `ROLLED_BACK`.
+5. **State-Level Idempotency**: Repeating a rollback request on an already `ROLLED_BACK` item bypasses remote provider calls and records an `ALREADY_ROLLED_BACK` audit outcome.
+6. **Mutation Ambiguity Handling**: If remote deletion encounters a network timeout (`ResourceAccessException`) or HTTP 500/503 server error, the track status transitions to `UNCERTAIN` and an audit record with status `UNCERTAIN` is persisted. The execution transitions to `RECOVERY_REQUIRED`.
+7. **Failure Reversion**: On confirmed provider rejection (e.g. HTTP 400, 401, 403), the track reverts from `ROLLING_BACK` back to `ADDED`, allowing future retry or inspection, and an audit record with status `FAILED` is saved.
+8. **Audit Persistence & Retention**: Every rollback attempt (success, idempotent no-op, failure, or uncertain) is immutably recorded in the `execution_rollback_records` table.
+9. **Lifecycle State Transitions**:
+   - If `successfulInsertions == 0 && rolledBackInsertions > 0`: execution status transitions to `ROLLED_BACK`.
+   - If `successfulInsertions > 0 && rolledBackInsertions > 0`: execution status transitions to `PARTIALLY_ROLLED_BACK`.
+   - If `uncertainInsertions > 0`: execution status transitions to `RECOVERY_REQUIRED`.
+   - Confirmed rolled-back count is transactionally reconciled in `migration_executions.rolled_back_insertions`.
 
 ---
 
-### 4. Database Schema Changes (Flyway Migration `V7`)
+### 4. Database Schema Changes (Flyway Migrations `V7` and `V8`)
 
-Flyway migration `V7__phase11f_failure_recovery_and_rollback_schema.sql` introduces:
-
-1. **Column Addition to `migration_executions`**:
-   - `rolled_back_insertions INT NOT NULL DEFAULT 0`
-2. **New Audit Table `execution_rollback_records`**:
-   - `id UUID PRIMARY KEY`
-   - `execution_id UUID NOT NULL REFERENCES migration_executions(id) ON DELETE CASCADE`
-   - `execution_track_record_id UUID REFERENCES execution_track_records(id) ON DELETE SET NULL`
-   - `destination_playlist_item_id VARCHAR(255) NOT NULL`
-   - `status VARCHAR(50) NOT NULL` (`ROLLED_BACK`, `ALREADY_ROLLED_BACK`, `FAILED`)
-   - `error_message TEXT`
-   - `reason VARCHAR(500)`
-   - `attempted_at TIMESTAMPTZ NOT NULL`
-   - Indexes: `idx_exec_rollback_execution_id` on `execution_id`, `idx_exec_rollback_item_id` on `destination_playlist_item_id`.
+1. **Flyway Migration `V7` (`V7__phase11f_failure_recovery_and_rollback_schema.sql`)**:
+   - Column `rolled_back_insertions INT NOT NULL DEFAULT 0` on `migration_executions`.
+   - Audit table `execution_rollback_records` with foreign keys referencing `migration_executions` and `execution_track_records`.
+2. **Flyway Migration `V8` (`V8__phase11f_rollback_audit_retention.sql`)**:
+   - Alters foreign key constraints `fk_rollback_execution` and `fk_rollback_track_record` from `ON DELETE CASCADE` to `ON DELETE RESTRICT`.
+   - Enforces audit retention at the PostgreSQL database level: prevents silent loss of compensating mutation history if an execution or track record deletion is attempted.
 
 ---
 
