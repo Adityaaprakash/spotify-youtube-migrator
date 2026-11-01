@@ -21,6 +21,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import jakarta.persistence.Version;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -268,20 +269,65 @@ public class MigrationExecution extends BaseEntity {
     }
 
     /**
-     * Reconciles stale ADDING or ROLLING_BACK tracks detected after an application crash or process restart.
+     * Default lease duration before an in-flight operation (ADDING or ROLLING_BACK) is classified as abandoned/stale.
+     * Prevents active, slow provider operations from being prematurely classified as uncertain.
+     */
+    public static final Duration DEFAULT_STALE_THRESHOLD = Duration.ofMinutes(5);
+
+    /**
+     * Reconciles stale ADDING or ROLLING_BACK tracks detected after an application crash or process restart,
+     * applying the default 5-minute lease threshold.
      *
      * @return true if stale crash state was detected and reconciled, false otherwise
      */
     public boolean reconcileStaleCrashState() {
+        return reconcileStaleCrashState(DEFAULT_STALE_THRESHOLD);
+    }
+
+    /**
+     * Reconciles stale ADDING or ROLLING_BACK tracks using a custom lease duration threshold.
+     * In-flight tracks started within the lease window are preserved as active and not marked uncertain.
+     *
+     * @param staleThreshold lease duration threshold
+     * @return true if stale tracks were found and transitioned to UNCERTAIN, false otherwise
+     */
+    public boolean reconcileStaleCrashState(Duration staleThreshold) {
+        Duration threshold = staleThreshold != null ? staleThreshold : DEFAULT_STALE_THRESHOLD;
+        Instant cutoff = Instant.now().minus(threshold);
+        return reconcileStaleCrashState(cutoff);
+    }
+
+    /**
+     * Reconciles stale ADDING or ROLLING_BACK tracks using a specific cutoff timestamp.
+     *
+     * @param cutoff timestamp threshold before which an in-flight operation is deemed abandoned
+     * @return true if stale tracks were found and transitioned to UNCERTAIN, false otherwise
+     */
+    public boolean reconcileStaleCrashState(Instant cutoff) {
         boolean hadStale = false;
+        boolean hasActiveInFlight = false;
+
         for (ExecutionTrackRecord record : trackRecords) {
             if (record.getStatus() == ExecutionTrackStatus.ADDING || record.getStatus() == ExecutionTrackStatus.ROLLING_BACK) {
-                record.reconcileStaleAdding();
-                hadStale = true;
+                if (record.isStaleInFlight(cutoff)) {
+                    record.reconcileStaleInFlight(cutoff);
+                    hadStale = true;
+                } else {
+                    hasActiveInFlight = true;
+                }
             }
         }
 
-        if (hadStale || this.status == MigrationExecutionStatus.RUNNING) {
+        if (hadStale) {
+            this.status = MigrationExecutionStatus.RECOVERY_REQUIRED;
+            reconcileCounts();
+            return true;
+        } else if (hasActiveInFlight) {
+            // An active provider operation is currently in progress within the lease window.
+            // Do not overwrite active execution state.
+            return false;
+        } else if (this.status == MigrationExecutionStatus.RUNNING) {
+            // Execution marked RUNNING with no active in-flight tracks -> stale abandoned execution claim
             this.status = MigrationExecutionStatus.RECOVERY_REQUIRED;
             reconcileCounts();
             return true;

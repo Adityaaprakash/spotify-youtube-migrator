@@ -332,7 +332,11 @@ Controllers MUST NOT:
     - Anti-impersonation: verifies caller-supplied `userId` matches authenticated `Principal`.
     - Anti-IDOR: verifies execution ownership before any recovery or rollback mutation.
   - **Concurrency & Locking**:
-    - Atomic cross-instance conditional query `claimExecutionRunning` in `MigrationExecutionRepository`.
+    - Atomic cross-instance conditional query `claimExecutionRunningWithVersion` in `MigrationExecutionRepository` enforcing operation-specific eligible statuses and optimistic lock version matching.
+    - Atomic cross-instance track claim query `claimTrackRollingBack` in `ExecutionTrackRecordRepository` preventing concurrent remote deletion invocations.
+    - 5-minute lease threshold (`DEFAULT_STALE_THRESHOLD`) in `reconcileStaleCrashState` protecting active slow provider mutations.
+    - Consistent HTTP 409 Conflict translation for all claim conflicts and optimistic locking exceptions (`OptimisticLockException`, `ObjectOptimisticLockingFailureException`).
+    - Exact derived counter reconciliation in `reconcileCounts()` preventing duplicate increments or counter drift across partial rollbacks.
     - Optimistic locking `@Version` on `migration_executions` and `execution_track_records`.
   - **Strict Boundaries**:
     - Zero background threads, queues, or scheduled tasks (Phase 12 boundary).

@@ -44,6 +44,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
@@ -162,6 +163,8 @@ class DefaultMigrationExecutionRollbackTest {
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
         when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any())).thenReturn(1);
+        when(trackRecordRepository.claimTrackRollingBack(any(), any())).thenReturn(1);
         when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
         when(trackRecordRepository.saveAndFlush(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
     }
@@ -471,6 +474,91 @@ class DefaultMigrationExecutionRollbackTest {
             assertThat(history.get(0).status()).isEqualTo(RollbackRecordStatus.ROLLED_BACK);
             assertThat(history.get(1).destinationPlaylistItemId()).isEqualTo("yt_item_1");
             assertThat(history.get(1).status()).isEqualTo(RollbackRecordStatus.FAILED);
+        }
+
+        @Test
+        @DisplayName("Concurrency: Two simultaneous rollback claims result in second claim failing fast with InvalidStateException (HTTP 409)")
+        void twoSimultaneousExecutionClaimsForRollback_secondClaimFailsWithConflict() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markAdded("yt_item_0");
+
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
+                    .thenReturn(List.of(track0));
+
+            // Another instance already claimed this execution for rollback, returning 0 rows updated
+            when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any()))
+                    .thenReturn(0);
+
+            RollbackExecutionRequest request = RollbackExecutionRequest.all();
+
+            assertThatThrownBy(() -> service.rollbackExecution(executionId, request, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("could not be claimed for rollback");
+
+            verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
+        }
+
+        @Test
+        @DisplayName("Concurrency: Stale optimistic-lock version during rollback claim throws InvalidStateException")
+        void staleOptimisticLockVersionDuringRollbackClaim() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markAdded("yt_item_0");
+
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
+                    .thenReturn(List.of(track0));
+
+            // Stale version mismatch results in 0 rows updated
+            when(executionRepository.claimExecutionRunningWithVersion(eq(executionId), any(), anyLong(), any()))
+                    .thenReturn(0);
+
+            RollbackExecutionRequest request = RollbackExecutionRequest.all();
+
+            assertThatThrownBy(() -> service.rollbackExecution(executionId, request, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("could not be claimed for rollback");
+
+            verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
+        }
+
+        @Test
+        @DisplayName("Concurrency: Two simultaneous rollback claims for same track: second claim fails and does NOT invoke provider")
+        void twoSimultaneousRollbackClaimsForSameTrack_secondClaimFailsAndDoesNotCallProvider() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markAdded("yt_item_0");
+
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.COMPLETED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
+                    .thenReturn(List.of(track0));
+
+            // Execution claim succeeds
+            when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any()))
+                    .thenReturn(1);
+
+            // But track-level atomic claim returns 0 (already claimed ROLLING_BACK by concurrent instance)
+            when(trackRecordRepository.claimTrackRollingBack(eq(track0.getId()), any()))
+                    .thenReturn(0);
+
+            RollbackExecutionRequest request = RollbackExecutionRequest.all();
+            ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
+
+            assertThat(summary.status()).isEqualTo(RollbackExecutionStatus.FAILED);
+            assertThat(summary.failedCount()).isEqualTo(1);
+            assertThat(summary.outcomes()).hasSize(1);
+            assertThat(summary.outcomes().get(0).errorMessage()).contains("concurrently claimed");
+
+            // CRITICAL: remote provider MUST NOT be called!
+            verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());
         }
     }
 }

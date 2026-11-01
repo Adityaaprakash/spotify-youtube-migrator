@@ -635,16 +635,16 @@ Implemented and verified (39 dedicated Phase 11E tests):
   - `TrackInsertionContractsTest`: 12 tests.
   - `DefaultOrderedTrackInsertionServiceTest`: 10 tests.
   - `OrderedTrackInsertionSafetyTest`: 6 tests.
-  - `MigrationExecutionDomainTest`: 12 tests.
+  - `MigrationExecutionDomainTest`: 21 tests (lifecycle states, resume eligibility, 5-minute lease thresholds, crash recovery, and all 7 aggregate state permutations).
   - `DefaultMigrationExecutionStateServiceTest`: 13 tests.
-  - `MigrationExecutionSafetyTest`: 7 tests (4 Phase 11E reflection guardrails + 3 Phase 11F audit retention and status invariants).
+  - `MigrationExecutionSafetyTest`: 8 tests (4 Phase 11E reflection guardrails + 4 Phase 11F audit retention, state invariants, and atomic claim @Modifying clear/flush guardrails).
   - `MigrationExecutionControllerTest`: 37 tests.
   - `ExecutionFailureClassifierTest` (Phase 11F): 19 tests (7-class failure taxonomy, read vs mutation ambiguity).
-  - `DefaultMigrationExecutionRecoveryTest` (Phase 11F): 7 tests (controlled recovery, ordering, safety).
-  - `DefaultMigrationExecutionRollbackTest` (Phase 11F): 11 tests (partial rollback, in-flight claiming, idempotency, 404 handling, timeout ambiguity, audit trail).
-  - `MigrationExecutionRecoveryAndRollbackControllerTest` (Phase 11F): 11 tests (WebMvc endpoints, anti-impersonation, anti-IDOR).
+  - `DefaultMigrationExecutionRecoveryTest` (Phase 11F): 9 tests (controlled recovery, ordering, safety, concurrent claims, stale version conflict).
+  - `DefaultMigrationExecutionRollbackTest` (Phase 11F): 14 tests (partial rollback, in-flight claiming, idempotency, 404 handling, timeout ambiguity, audit trail, concurrent execution claims, concurrent track claims, stale version conflict).
+  - `MigrationExecutionRecoveryAndRollbackControllerTest` (Phase 11F): 12 tests (WebMvc endpoints, anti-impersonation, anti-IDOR, 409 conflict on state invalidity and optimistic locking).
   - `YouTubeClientRollbackTest` (Phase 11F): 8 tests (HTTP DELETE playlistItems, 204, 404, 401, 403, 429, 503).
-  *(Note on Phase 11F Test Discrepancy Resolution: The initial 48 vs 54 reported tests reflected 48 new tests across 5 new test classes + 6 tests in MigrationExecutionSafetyTest. The corrective audit pass expands failure classification for mutation ambiguity, adds in-flight ROLLING_BACK tests, and verifies audit immutability, totaling 56 Phase 11F tests and 63 with full safety tests).*
+  *(Note on Phase 11F Test Discrepancy Resolution: The initial 48 vs 54 reported tests reflected 48 new tests across 5 new test classes + 6 tests in MigrationExecutionSafetyTest. The corrective audit pass expands failure classification for mutation ambiguity, adds in-flight ROLLING_BACK tests, verifies audit immutability, and establishes cross-instance atomic claiming with lease checks, totaling 62 dedicated Phase 11F tests across the 5 focused suites and 83 including full domain and architectural guardrails).*
 - **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites:
   - `ReviewSessionControllerTest`: 24 tests.
   - `ReviewSessionIntegrationTest`: 4 tests.

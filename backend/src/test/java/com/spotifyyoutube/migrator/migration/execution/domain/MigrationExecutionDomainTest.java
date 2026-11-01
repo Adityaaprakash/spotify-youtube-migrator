@@ -453,5 +453,284 @@ class MigrationExecutionDomainTest {
             assertThat(execution.getTotalApprovedTracks()).isEqualTo(2);
             assertThat(sum).isZero(); // All 2 are currently PENDING
         }
+
+        @Test
+        @DisplayName("Lease Safety: Slow active rollback within 5-minute threshold is NOT classified as abandoned/stale")
+        void slowActiveRollbackNotMarkedStale() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            ExecutionTrackRecord r0 = execution.getTrackRecords().get(0);
+            r0.markAdding();
+            r0.markAdded("item_0");
+
+            // Track claimed for rollback 15 seconds ago (active, slow operation)
+            r0.markRollingBack();
+            r0.setStartedAt(Instant.now().minusSeconds(15));
+
+            boolean reconciled = execution.reconcileStaleCrashState();
+
+            assertThat(reconciled).isFalse();
+            assertThat(r0.getStatus()).isEqualTo(ExecutionTrackStatus.ROLLING_BACK);
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
+        }
+
+        @Test
+        @DisplayName("Lease Expiration: Abandoned ROLLING_BACK operation exceeding 5-minute threshold transitions to UNCERTAIN")
+        void abandonedRollingBackStateBecomesUncertain() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            ExecutionTrackRecord r0 = execution.getTrackRecords().get(0);
+            r0.markAdding();
+            r0.markAdded("item_0");
+
+            // Track claimed for rollback 10 minutes ago (exceeds default 5-minute lease threshold)
+            r0.markRollingBack();
+            r0.setStartedAt(Instant.now().minus(Duration.ofMinutes(10)));
+
+            boolean reconciled = execution.reconcileStaleCrashState();
+
+            assertThat(reconciled).isTrue();
+            assertThat(r0.getStatus()).isEqualTo(ExecutionTrackStatus.UNCERTAIN);
+            assertThat(r0.getErrorMessage()).contains("lease expired");
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
+        }
+
+        @Test
+        @DisplayName("Aggregate State: All tracks ADDED releases to COMPLETED")
+        void aggregateState_allTracksAdded() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            for (int i = 0; i < execution.getTrackRecords().size(); i++) {
+                ExecutionTrackRecord r = execution.getTrackRecords().get(i);
+                r.markAdding();
+                r.markAdded("item_" + i);
+            }
+
+            execution.releaseExecution();
+
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            assertThat(execution.getSuccessfulInsertions()).isEqualTo(2);
+            assertThat(execution.getRolledBackInsertions()).isZero();
+        }
+
+        @Test
+        @DisplayName("Aggregate State: All inserted tracks ROLLED_BACK releases to ROLLED_BACK")
+        void aggregateState_allInsertedTracksRolledBack() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            for (ExecutionTrackRecord r : execution.getTrackRecords()) {
+                r.markAdding();
+                r.markAdded("item_x");
+                r.markRollingBack();
+                r.markRolledBack("compensating delete confirmed");
+            }
+
+            execution.releaseExecution();
+
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.ROLLED_BACK);
+            assertThat(execution.getSuccessfulInsertions()).isZero();
+            assertThat(execution.getRolledBackInsertions()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("Aggregate State: Mixed ADDED and ROLLED_BACK releases to PARTIALLY_ROLLED_BACK")
+        void aggregateState_mixedAddedAndRolledBack() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            ExecutionTrackRecord r0 = execution.getTrackRecords().get(0);
+            r0.markAdding();
+            r0.markAdded("item_0");
+
+            ExecutionTrackRecord r1 = execution.getTrackRecords().get(1);
+            r1.markAdding();
+            r1.markAdded("item_1");
+            r1.markRollingBack();
+            r1.markRolledBack("rolled back");
+
+            execution.releaseExecution();
+
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.PARTIALLY_ROLLED_BACK);
+            assertThat(execution.getSuccessfulInsertions()).isEqualTo(1);
+            assertThat(execution.getRolledBackInsertions()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Aggregate State: ROLLED_BACK with PENDING tracks releases to ROLLED_BACK")
+        void aggregateState_rolledBackWithPendingTracks() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            ExecutionTrackRecord r0 = execution.getTrackRecords().get(0);
+            r0.markAdding();
+            r0.markAdded("item_0");
+            r0.markRollingBack();
+            r0.markRolledBack("rolled back");
+
+            // r1 remains PENDING
+
+            execution.releaseExecution();
+
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.ROLLED_BACK);
+            assertThat(execution.getSuccessfulInsertions()).isZero();
+            assertThat(execution.getRolledBackInsertions()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Aggregate State: ROLLED_BACK with FAILED tracks releases to ROLLED_BACK")
+        void aggregateState_rolledBackWithFailedTracks() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            ExecutionTrackRecord r0 = execution.getTrackRecords().get(0);
+            r0.markAdding();
+            r0.markAdded("item_0");
+            r0.markRollingBack();
+            r0.markRolledBack("rolled back");
+
+            ExecutionTrackRecord r1 = execution.getTrackRecords().get(1);
+            r1.markAdding();
+            r1.markFailed("Provider error");
+
+            execution.releaseExecution();
+
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.ROLLED_BACK);
+            assertThat(execution.getSuccessfulInsertions()).isZero();
+            assertThat(execution.getRolledBackInsertions()).isEqualTo(1);
+            assertThat(execution.getFailedInsertions()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Aggregate State: UNCERTAIN with ROLLED_BACK releases to RECOVERY_REQUIRED")
+        void aggregateState_uncertainWithRolledBack() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            ExecutionTrackRecord r0 = execution.getTrackRecords().get(0);
+            r0.markAdding();
+            r0.markAdded("item_0");
+            r0.markRollingBack();
+            r0.markRolledBack("rolled back");
+
+            ExecutionTrackRecord r1 = execution.getTrackRecords().get(1);
+            r1.markAdding();
+            r1.markUncertain("Socket timeout during mutation");
+
+            execution.releaseExecution();
+
+            // UNCERTAIN forces RECOVERY_REQUIRED regardless of rolled back tracks
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
+            assertThat(execution.getUncertainInsertions()).isEqualTo(1);
+            assertThat(execution.getRolledBackInsertions()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("Aggregate State: ROLLING_BACK with other settled states releases to RECOVERY_REQUIRED")
+        void aggregateState_rollingBackWithSettledStates() {
+            MigrationExecution execution = new MigrationExecution(
+                    testSession,
+                    testUser,
+                    Platform.YOUTUBE.name(),
+                    "PL_youtube_123",
+                    null,
+                    "Title",
+                    null
+            );
+            execution.initializeTracks(sampleContext.approvedTracks());
+            execution.claimExecution();
+
+            ExecutionTrackRecord r0 = execution.getTrackRecords().get(0);
+            r0.markAdding();
+            r0.markAdded("item_0");
+            r0.markRollingBack();
+            r0.markRolledBack("rolled back");
+
+            ExecutionTrackRecord r1 = execution.getTrackRecords().get(1);
+            r1.markAdding();
+            r1.markAdded("item_1");
+            r1.markRollingBack(); // Left in ROLLING_BACK
+
+            execution.releaseExecution();
+
+            // Unsettled ROLLING_BACK forces RECOVERY_REQUIRED
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
+            assertThat(execution.getRolledBackInsertions()).isEqualTo(1);
+        }
     }
 }

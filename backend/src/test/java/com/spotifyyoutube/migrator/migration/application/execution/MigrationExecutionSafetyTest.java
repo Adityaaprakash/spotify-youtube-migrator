@@ -10,6 +10,9 @@ import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.jpa.repository.Modifying;
+import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
+import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 
@@ -119,5 +122,39 @@ class MigrationExecutionSafetyTest {
         assertThat(ExecutionTrackStatus.ROLLING_BACK.isTerminal()).isFalse();
         assertThat(ExecutionTrackStatus.UNCERTAIN.isSettled()).isTrue();
         assertThat(com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus.UNCERTAIN).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Concurrency Guardrail: Atomic claim methods must declare @Modifying with clearAutomatically and flushAutomatically")
+    void claimMethodsDeclareModifyingWithClearAndFlush() {
+        for (Method method : MigrationExecutionRepository.class.getDeclaredMethods()) {
+            if (method.getName().startsWith("claimExecution")) {
+                Modifying modifying = method.getAnnotation(Modifying.class);
+                assertThat(modifying)
+                        .as("Method %s must be annotated with @Modifying", method.getName())
+                        .isNotNull();
+                assertThat(modifying.clearAutomatically())
+                        .as("Method %s must clear persistence context automatically", method.getName())
+                        .isTrue();
+                assertThat(modifying.flushAutomatically())
+                        .as("Method %s must flush persistence context automatically", method.getName())
+                        .isTrue();
+            }
+        }
+
+        for (Method method : ExecutionTrackRecordRepository.class.getDeclaredMethods()) {
+            if (method.getName().startsWith("claimTrack")) {
+                Modifying modifying = method.getAnnotation(Modifying.class);
+                assertThat(modifying)
+                        .as("Method %s must be annotated with @Modifying", method.getName())
+                        .isNotNull();
+                assertThat(modifying.clearAutomatically())
+                        .as("Method %s must clear persistence context automatically", method.getName())
+                        .isTrue();
+                assertThat(modifying.flushAutomatically())
+                        .as("Method %s must flush persistence context automatically", method.getName())
+                        .isTrue();
+            }
+        }
     }
 }

@@ -5,6 +5,7 @@ import com.spotifyyoutube.migrator.common.config.SecurityConfig;
 import com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import jakarta.persistence.OptimisticLockException;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.dto.RecoverExecutionApiRequest;
@@ -279,6 +280,24 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isConflict());
+        }
+
+        @Test
+        @WithMockUser(username = "tester@example.com")
+        @DisplayName("409 Conflict: OptimisticLockException translates into HTTP 409 CONFLICT response")
+        void optimisticLockExceptionReturns409Conflict() throws Exception {
+            when(executionStateService.rollbackExecution(eq(executionId), any(RollbackExecutionRequest.class), eq(userId)))
+                    .thenThrow(new OptimisticLockException("Row was updated or deleted by another transaction"));
+
+            RollbackExecutionApiRequest request = new RollbackExecutionApiRequest(List.of(0), userId);
+
+            mockMvc.perform(post("/api/migrations/execution/{executionId}/rollback", executionId)
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(request)))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.errorCode").value("CONFLICT"))
+                    .andExpect(jsonPath("$.message").value("Concurrent modification detected; resource was updated by another request"));
         }
     }
 

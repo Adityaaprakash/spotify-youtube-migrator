@@ -188,6 +188,41 @@ public class ExecutionTrackRecord extends BaseEntity {
     }
 
     /**
+     * Returns true if this track is currently in-flight (ADDING or ROLLING_BACK) and its startedAt timestamp
+     * is older than the specified cutoff, indicating an abandoned or crashed operation.
+     *
+     * @param cutoff timestamp threshold before which an in-flight operation is deemed abandoned
+     * @return true if in-flight and started before cutoff, false otherwise
+     */
+    public boolean isStaleInFlight(Instant cutoff) {
+        if (status != ExecutionTrackStatus.ADDING && status != ExecutionTrackStatus.ROLLING_BACK) {
+            return false;
+        }
+        if (startedAt == null) {
+            return true;
+        }
+        return startedAt.isBefore(cutoff);
+    }
+
+    /**
+     * Reconciles a stale in-flight state if older than the cutoff threshold.
+     * Transitions status to UNCERTAIN to prevent duplicate remote mutations.
+     *
+     * @param cutoff timestamp threshold before which an in-flight operation is deemed abandoned
+     * @return true if reconciled, false if not stale or not in-flight
+     */
+    public boolean reconcileStaleInFlight(Instant cutoff) {
+        if (isStaleInFlight(cutoff)) {
+            String prior = this.status.name();
+            this.status = ExecutionTrackStatus.UNCERTAIN;
+            this.errorMessage = "Operation interrupted or lease expired before provider confirmation was recorded (stale " + prior + " recovery)";
+            this.completedAt = Instant.now();
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Marks this track as claimed for compensating deletion (Phase 11F).
      * Prevents concurrent duplicate remote DELETE requests.
      */
@@ -199,6 +234,7 @@ public class ExecutionTrackRecord extends BaseEntity {
             ));
         }
         this.status = ExecutionTrackStatus.ROLLING_BACK;
+        this.startedAt = Instant.now();
         this.errorMessage = "Compensating deletion in progress";
     }
 
@@ -299,6 +335,10 @@ public class ExecutionTrackRecord extends BaseEntity {
 
     public Instant getStartedAt() {
         return startedAt;
+    }
+
+    public void setStartedAt(Instant startedAt) {
+        this.startedAt = startedAt;
     }
 
     public Instant getCompletedAt() {

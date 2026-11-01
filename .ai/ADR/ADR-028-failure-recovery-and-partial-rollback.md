@@ -57,9 +57,10 @@ Controlled recovery allows an execution containing confirmed `FAILED` tracks to 
 2. **Canonical Ordering**: Tracks are executed strictly in their canonical 0-indexed destination position (`canonicalTargetOrder`).
 3. **Uncertain Protection**: If an execution contains any tracks in status `UNCERTAIN` (or `uncertainInsertions > 0`), recovery is **strictly rejected** (HTTP 409 Conflict). Ambiguous outcomes must be reconciled in Phase 11G before recovery can proceed.
 4. **Completed Protection**: Executions with status `COMPLETED` cannot be recovered (HTTP 409 Conflict).
-5. **Concurrency Lock**: Recovery transitions the execution to `RUNNING` within a short transaction. If the execution is already `RUNNING`, concurrent recovery is rejected. Concurrent updates are protected by JPA optimistic locking (`@Version`).
-6. **Isolated Provider Calls**: External provider calls execute strictly **outside** active database transactions to prevent long-running locks or connection starvation.
-7. **Accurate Aggregate Reconciliation**: Upon recovery completion, aggregate counters (`successfulInsertions`, `failedInsertions`, `uncertainInsertions`, `skippedInsertions`, `rolledBackInsertions`) and execution status are transactionally reconciled.
+5. **Cross-Instance Atomic Concurrency Lock**: Recovery claims the execution using `MigrationExecutionRepository.claimExecutionRunningWithVersion` within a short transaction. The query executes a conditional SQL update checking that the execution is in an eligible status (`PARTIALLY_COMPLETED`, `FAILED`, `RECOVERY_REQUIRED`, `PARTIALLY_ROLLED_BACK`) and that its version matches `expectedVersion`. If another instance claimed or modified the execution concurrently, 0 rows are updated, throwing `InvalidStateException` (HTTP 409 Conflict). `@Modifying(clearAutomatically = true, flushAutomatically = true)` clears the persistence context to prevent stale in-memory state.
+6. **Lease-Aware Crash Reconciliation**: Stale in-flight states (`ADDING` or `ROLLING_BACK`) are evaluated against a defined 5-minute lease threshold (`DEFAULT_STALE_THRESHOLD`). Active, slow operations whose `startedAt` is within the lease window are preserved and not marked uncertain. Only operations exceeding 5 minutes are classified as abandoned and transitioned to `UNCERTAIN`.
+7. **Isolated Provider Calls**: External provider calls execute strictly **outside** active database transactions to prevent long-running locks or connection starvation.
+8. **Accurate Aggregate Reconciliation**: Upon recovery completion, aggregate counters (`successfulInsertions`, `failedInsertions`, `uncertainInsertions`, `skippedInsertions`, `rolledBackInsertions`) and execution status are transactionally reconciled directly from persisted track records.
 
 ---
 
@@ -73,19 +74,22 @@ Partial rollback provides safe compensating deletion of items previously inserte
 - Phase 11E already persists `destinationPlaylistItemId` in `execution_track_records`.
 
 #### Invariants Enforced During Rollback:
-1. **In-Flight Concurrency Protection (`ROLLING_BACK`)**: Before calling `MusicDestination.removeTrackFromPlaylist`, the track status is claimed as `ROLLING_BACK` in a discrete short database transaction. This eliminates duplicate remote DELETE calls from concurrent rollback requests.
-2. **Scope Confinement**: Rollback requests can only target playlist items belonging to the verified execution. Attempting to delete items from other playlists or executions throws an error.
-3. **Selective or Complete Rollback**: Callers may provide an explicit list of canonical `targetPositions`, or omit the list to roll back all confirmed `ADDED` tracks in the execution.
-4. **Remote 404 Semantics**: If YouTube returns HTTP 404 Not Found on deletion, the item has already been deleted on the provider. The system treats this safely as a confirmed deletion and updates state to `ROLLED_BACK`.
-5. **State-Level Idempotency**: Repeating a rollback request on an already `ROLLED_BACK` item bypasses remote provider calls and records an `ALREADY_ROLLED_BACK` audit outcome.
-6. **Mutation Ambiguity Handling**: If remote deletion encounters a network timeout (`ResourceAccessException`) or HTTP 500/503 server error, the track status transitions to `UNCERTAIN` and an audit record with status `UNCERTAIN` is persisted. The execution transitions to `RECOVERY_REQUIRED`.
-7. **Failure Reversion**: On confirmed provider rejection (e.g. HTTP 400, 401, 403), the track reverts from `ROLLING_BACK` back to `ADDED`, allowing future retry or inspection, and an audit record with status `FAILED` is saved.
-8. **Audit Persistence & Retention**: Every rollback attempt (success, idempotent no-op, failure, or uncertain) is immutably recorded in the `execution_rollback_records` table.
-9. **Lifecycle State Transitions**:
-   - If `successfulInsertions == 0 && rolledBackInsertions > 0`: execution status transitions to `ROLLED_BACK`.
-   - If `successfulInsertions > 0 && rolledBackInsertions > 0`: execution status transitions to `PARTIALLY_ROLLED_BACK`.
-   - If `uncertainInsertions > 0`: execution status transitions to `RECOVERY_REQUIRED`.
-   - Confirmed rolled-back count is transactionally reconciled in `migration_executions.rolled_back_insertions`.
+1. **Execution-Level Atomic Claim**: Rollback claims the execution using `MigrationExecutionRepository.claimExecutionRunningWithVersion` checking eligible statuses (`PARTIALLY_COMPLETED`, `COMPLETED`, `PARTIALLY_ROLLED_BACK`, `RECOVERY_REQUIRED`, `FAILED`) and expected version. Concurrent claims fail fast with HTTP 409 Conflict.
+2. **Track-Level Atomic Claim (`ROLLING_BACK`)**: Before calling `MusicDestination.removeTrackFromPlaylist`, each track is atomically claimed via `ExecutionTrackRecordRepository.claimTrackRollingBack`. The query conditionally updates status from `ADDED` to `ROLLING_BACK` with row-level locking. If a concurrent rollback request or instance already claimed the track, 0 rows are updated, preventing duplicate remote DELETE calls.
+3. **Scope Confinement**: Rollback requests can only target playlist items belonging to the verified execution. Attempting to delete items from other playlists or executions throws an error.
+4. **Selective or Complete Rollback**: Callers may provide an explicit list of canonical `targetPositions`, or omit the list to roll back all confirmed `ADDED` tracks in the execution.
+5. **Remote 404 Semantics**: If YouTube returns HTTP 404 Not Found on deletion, the item has already been deleted on the provider. The system treats this safely as a confirmed deletion and updates state to `ROLLED_BACK`.
+6. **State-Level Idempotency**: Repeating a rollback request on an already `ROLLED_BACK` item bypasses remote provider calls and records an `ALREADY_ROLLED_BACK` audit outcome.
+7. **Mutation Ambiguity Handling**: If remote deletion encounters a network timeout (`ResourceAccessException`) or HTTP 500/503 server error, the track status transitions to `UNCERTAIN` and an audit record with status `UNCERTAIN` is persisted. The execution transitions to `RECOVERY_REQUIRED`.
+8. **Failure Reversion**: On confirmed provider rejection (e.g. HTTP 400, 401, 403), the track reverts from `ROLLING_BACK` back to `ADDED`, allowing future retry or inspection, and an audit record with status `FAILED` is saved.
+9. **Audit Persistence & Retention**: Every rollback attempt (success, idempotent no-op, failure, or uncertain) is immutably recorded in the `execution_rollback_records` table with `ON DELETE RESTRICT` foreign keys.
+10. **Lifecycle State Transitions & Aggregate Integrity**:
+    - If `successfulInsertions == totalApprovedTracks`: execution status transitions to `COMPLETED`.
+    - If `uncertainInsertions > 0 || hasStaleAdding()`: execution status transitions to `RECOVERY_REQUIRED`.
+    - If `successfulInsertions == 0 && rolledBackInsertions > 0`: execution status transitions to `ROLLED_BACK` (terminal).
+    - If `successfulInsertions > 0 && rolledBackInsertions > 0`: execution status transitions to `PARTIALLY_ROLLED_BACK`.
+    - If `successfulInsertions > 0`: execution status transitions to `PARTIALLY_COMPLETED`.
+    - All summary counters are derived directly from persisted track records in `reconcileCounts()`, preventing counter drift or double-incrementing.
 
 ---
 

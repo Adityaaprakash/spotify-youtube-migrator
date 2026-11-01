@@ -46,6 +46,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -342,9 +343,25 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 throw new InvalidStateException("Execution cannot be resumed in current status: " + execution.getStatus());
             }
 
-            // Claim execution lock (transitions to RUNNING)
+            // Claim execution lock with atomic conditional update
+            Set<MigrationExecutionStatus> eligibleStatuses = Set.of(
+                    MigrationExecutionStatus.INITIALIZED,
+                    MigrationExecutionStatus.PARTIALLY_COMPLETED,
+                    MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
+                    MigrationExecutionStatus.RECOVERY_REQUIRED
+            );
+            long expectedVersion = execution.getVersion() != null ? execution.getVersion() : 0L;
+            int claimed = executionRepository.claimExecutionRunningWithVersion(
+                    executionId,
+                    eligibleStatuses,
+                    expectedVersion,
+                    Instant.now()
+            );
+            if (claimed == 0) {
+                throw new InvalidStateException("Migration execution could not be claimed: " +
+                        "execution is already in progress, in an invalid state, or was modified concurrently");
+            }
             execution.claimExecution();
-            executionRepository.saveAndFlush(execution);
 
             return execution.getDestinationPlaylistId();
         });
@@ -470,9 +487,25 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
             trackRecordRepository.flush();
 
-            // Claim execution lock (transitions to RUNNING)
+            // Claim execution lock for recovery with atomic conditional update
+            Set<MigrationExecutionStatus> eligibleStatuses = Set.of(
+                    MigrationExecutionStatus.PARTIALLY_COMPLETED,
+                    MigrationExecutionStatus.FAILED,
+                    MigrationExecutionStatus.RECOVERY_REQUIRED,
+                    MigrationExecutionStatus.PARTIALLY_ROLLED_BACK
+            );
+            long expectedVersion = execution.getVersion() != null ? execution.getVersion() : 0L;
+            int claimed = executionRepository.claimExecutionRunningWithVersion(
+                    executionId,
+                    eligibleStatuses,
+                    expectedVersion,
+                    Instant.now()
+            );
+            if (claimed == 0) {
+                throw new InvalidStateException("Migration execution could not be claimed for recovery: " +
+                        "execution is either already in progress, in an invalid state, or was modified concurrently");
+            }
             execution.claimExecution();
-            executionRepository.saveAndFlush(execution);
 
             return execution.getDestinationPlaylistId();
         });
@@ -752,9 +785,26 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 }
             }
 
-            // Claim execution for rollback
+            // Claim execution for rollback with atomic conditional update
+            Set<MigrationExecutionStatus> eligibleStatuses = Set.of(
+                    MigrationExecutionStatus.PARTIALLY_COMPLETED,
+                    MigrationExecutionStatus.COMPLETED,
+                    MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
+                    MigrationExecutionStatus.RECOVERY_REQUIRED,
+                    MigrationExecutionStatus.FAILED
+            );
+            long expectedVersion = execution.getVersion() != null ? execution.getVersion() : 0L;
+            int claimed = executionRepository.claimExecutionRunningWithVersion(
+                    executionId,
+                    eligibleStatuses,
+                    expectedVersion,
+                    Instant.now()
+            );
+            if (claimed == 0) {
+                throw new InvalidStateException("Migration execution could not be claimed for rollback: " +
+                        "execution is either already in progress, in an invalid state, or was modified concurrently");
+            }
             execution.setStatus(MigrationExecutionStatus.RUNNING);
-            executionRepository.saveAndFlush(execution);
 
             return eligible.stream().map(ExecutionTrackRecordDto::from).toList();
         });
@@ -809,14 +859,19 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 continue;
             }
 
-            // Claim track in short transaction before calling remote provider to prevent concurrent duplicate remote DELETE calls
-            transactionTemplate.execute(status -> {
-                ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
-                        .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
-                record.markRollingBack();
-                trackRecordRepository.saveAndFlush(record);
-                return null;
-            });
+            // Atomically claim track in short transaction before calling remote provider
+            // to prevent concurrent duplicate remote DELETE calls
+            boolean trackClaimed = Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+                int rows = trackRecordRepository.claimTrackRollingBack(trackId, Instant.now());
+                return rows == 1;
+            }));
+
+            if (!trackClaimed) {
+                failedCount++;
+                String conflictMsg = "Cannot rollback track at position " + pos + ": track is concurrently claimed by another operation or not in ADDED status";
+                outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, conflictMsg));
+                continue;
+            }
 
             // Execute compensating provider operation (OUTSIDE database transaction)
             try {

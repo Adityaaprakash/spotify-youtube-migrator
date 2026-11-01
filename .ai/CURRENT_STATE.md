@@ -38,7 +38,11 @@ Current Subphase: Phase 11F Complete (Failure Recovery & Partial Rollback)
   - Failure Reversion: On confirmed provider rejection, track reverts from `ROLLING_BACK` to `ADDED` and records audit `FAILED`.
   - Audit History: Accessible via `DefaultMigrationExecutionStateService.getRollbackHistory`.
 - **Concurrency & Locking**:
-  - Atomic cross-instance claim query `claimExecutionRunning` in `MigrationExecutionRepository`.
+  - Atomic cross-instance claim queries `claimExecutionRunningWithVersion` and `claimExecutionRunning` in `MigrationExecutionRepository`.
+  - Atomic cross-instance track claim query `claimTrackRollingBack` in `ExecutionTrackRecordRepository`.
+  - Defined 5-minute lease mechanism (`DEFAULT_STALE_THRESHOLD`) in `reconcileStaleCrashState` protecting active slow provider mutations.
+  - Consistent HTTP 409 Conflict translation for all claim conflicts and optimistic locking exceptions (`OptimisticLockException`, `ObjectOptimisticLockingFailureException`).
+  - Strict derived counter reconciliation in `reconcileCounts()` preventing duplicate increments or counter drift across partial rollbacks.
   - Optimistic locking `@Version` on `migration_executions` and `execution_track_records`.
 - **Music Destination & YouTube Client Extension**:
   - `MusicDestination`: Extended with `void removeTrackFromPlaylist(UUID userId, String playlistItemId)`.

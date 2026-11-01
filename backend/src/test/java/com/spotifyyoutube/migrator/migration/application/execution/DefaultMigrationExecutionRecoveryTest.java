@@ -40,6 +40,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -157,6 +158,7 @@ class DefaultMigrationExecutionRecoveryTest {
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
         when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any())).thenReturn(1);
         when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
         when(trackRecordRepository.saveAndFlush(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
     }
@@ -352,6 +354,60 @@ class DefaultMigrationExecutionRecoveryTest {
             assertThat(summary.failedInsertions()).isEqualTo(1);
             assertThat(track1.getStatus()).isEqualTo(ExecutionTrackStatus.FAILED);
             assertThat(track1.getErrorMessage()).contains("YouTube API quota exceeded");
+        }
+
+        @Test
+        @DisplayName("Concurrency: Two simultaneous recovery claims result in second claim failing fast with InvalidStateException (HTTP 409)")
+        void twoSimultaneousRecoveryClaims_secondClaimFailsWithConflict() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markFailed("Initial failure");
+
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.FAILED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
+                    .thenReturn(List.of(track0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+
+            // First claim succeeded, so for the second simultaneous claim, the DB returns 0 rows updated
+            when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any()))
+                    .thenReturn(0);
+
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
+
+            assertThatThrownBy(() -> service.recoverExecution(executionId, request, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("could not be claimed for recovery");
+
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Concurrency: Stale optimistic-lock version during recovery claim throws InvalidStateException")
+        void staleOptimisticLockVersionDuringRecoveryClaim() {
+            ExecutionTrackRecord track0 = execution.getTrackRecords().get(0);
+            track0.markAdding();
+            track0.markFailed("Initial failure");
+
+            execution.reconcileCounts();
+            execution.setStatus(MigrationExecutionStatus.FAILED);
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId))
+                    .thenReturn(List.of(track0));
+            when(trackRecordRepository.findById(track0.getId())).thenReturn(Optional.of(track0));
+
+            // Version mismatch in DB causes 0 rows updated
+            when(executionRepository.claimExecutionRunningWithVersion(eq(executionId), any(), anyLong(), any()))
+                    .thenReturn(0);
+
+            RecoverExecutionRequest request = RecoverExecutionRequest.all();
+
+            assertThatThrownBy(() -> service.recoverExecution(executionId, request, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("could not be claimed for recovery");
+
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }
     }
 }
