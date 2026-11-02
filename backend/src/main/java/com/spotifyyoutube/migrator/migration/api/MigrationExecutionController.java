@@ -18,7 +18,9 @@ import com.spotifyyoutube.migrator.migration.api.dto.ReconcileExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ReconciliationRecordResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RollbackRecordResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.RunMigrationApiRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationOrchestrator;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationStatusDto;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest;
@@ -69,6 +71,7 @@ public class MigrationExecutionController {
     private final DestinationPlaylistCreationService playlistCreationService;
     private final OrderedTrackInsertionService trackInsertionService;
     private final MigrationExecutionStateService executionStateService;
+    private final ApprovedMigrationOrchestrator migrationOrchestrator;
     private final UserService userService;
 
     @Autowired
@@ -77,13 +80,25 @@ public class MigrationExecutionController {
             DestinationPlaylistCreationService playlistCreationService,
             OrderedTrackInsertionService trackInsertionService,
             MigrationExecutionStateService executionStateService,
+            ApprovedMigrationOrchestrator migrationOrchestrator,
             UserService userService
     ) {
         this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
         this.playlistCreationService = playlistCreationService;
         this.trackInsertionService = trackInsertionService;
         this.executionStateService = executionStateService;
+        this.migrationOrchestrator = migrationOrchestrator;
         this.userService = Objects.requireNonNull(userService, "UserService must not be null");
+    }
+
+    public MigrationExecutionController(
+            ApprovedMigrationExecutionService executionService,
+            DestinationPlaylistCreationService playlistCreationService,
+            OrderedTrackInsertionService trackInsertionService,
+            MigrationExecutionStateService executionStateService,
+            UserService userService
+    ) {
+        this(executionService, playlistCreationService, trackInsertionService, executionStateService, null, userService);
     }
 
     public MigrationExecutionController(
@@ -92,7 +107,7 @@ public class MigrationExecutionController {
             OrderedTrackInsertionService trackInsertionService,
             UserService userService
     ) {
-        this(executionService, playlistCreationService, trackInsertionService, null, userService);
+        this(executionService, playlistCreationService, trackInsertionService, null, null, userService);
     }
 
     public MigrationExecutionController(
@@ -100,14 +115,14 @@ public class MigrationExecutionController {
             DestinationPlaylistCreationService playlistCreationService,
             UserService userService
     ) {
-        this(executionService, playlistCreationService, null, null, userService);
+        this(executionService, playlistCreationService, null, null, null, userService);
     }
 
     public MigrationExecutionController(
             ApprovedMigrationExecutionService executionService,
             UserService userService
     ) {
-        this(executionService, null, null, null, userService);
+        this(executionService, null, null, null, null, userService);
     }
 
     /**
@@ -385,6 +400,42 @@ public class MigrationExecutionController {
         UUID userId = resolveUserId(null, principal);
         ExecutionReconciliationStatusDto status = executionStateService.getReconciliationStatus(executionId, userId);
         return ResponseEntity.ok(MigrationExecutionApiMapper.toReconciliationStatusResponse(status));
+    }
+
+    /**
+     * Executes an approved playlist migration end-to-end (Phase 11H).
+     * Validates approved review session decisions, creates destination playlist,
+     * initializes durable execution tracking, and performs ordered track insertion.
+     */
+    @PostMapping("/run")
+    public ResponseEntity<MigrationExecutionResponse> runApprovedMigration(
+            @RequestBody @Valid RunMigrationApiRequest request,
+            Principal principal
+    ) {
+        if (migrationOrchestrator == null) {
+            throw new IllegalStateException("ApprovedMigrationOrchestrator is not configured");
+        }
+        UUID userId = resolveUserId(request.userId(), principal);
+        ApprovedMigrationExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
+        MigrationExecutionSummary summary = migrationOrchestrator.executeApprovedMigration(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
+    }
+
+    /**
+     * Convenience endpoint to execute an approved migration end-to-end by review session ID (Phase 11H).
+     */
+    @PostMapping("/run/{sessionId}")
+    public ResponseEntity<MigrationExecutionResponse> runApprovedMigrationBySessionId(
+            @PathVariable UUID sessionId,
+            Principal principal
+    ) {
+        if (migrationOrchestrator == null) {
+            throw new IllegalStateException("ApprovedMigrationOrchestrator is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        ApprovedMigrationExecutionRequest domainReq = ApprovedMigrationExecutionRequest.of(sessionId, userId);
+        MigrationExecutionSummary summary = migrationOrchestrator.executeApprovedMigration(domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
     }
 
     private UUID resolveUserId(UUID requestedUserId, Principal principal) {

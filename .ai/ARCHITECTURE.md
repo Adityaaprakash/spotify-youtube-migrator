@@ -391,3 +391,34 @@ Controllers MUST NOT:
     - Strictly synchronous execution triggered via explicit REST API.
     - Zero mutations or retries issued during reconciliation.
     - Zero modifications to frozen Phase 5–10 production code.
+
+## End-to-End Migration Orchestration & Subsystem Freeze (Phase 11H — Complete & Frozen)
+
+- Packages:
+  - Application Service & Facade: `com.spotifyyoutube.migrator.migration.application.execution`
+  - Contracts & DTOs: `com.spotifyyoutube.migrator.migration.application.execution.contract`, `com.spotifyyoutube.migrator.migration.api.dto`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.mapper`
+  - Persistence & Repositories: `com.spotifyyoutube.migrator.migration.execution.domain`, `com.spotifyyoutube.migrator.migration.execution.repository`
+- Architecture Decisions: ADR-030 (Phase 11 End-to-End Migration Orchestration, Production Hardening & Subsystem Freeze)
+- Purpose: High-level orchestration facade coordinating the entire Phase 11 approved migration lifecycle into a unified, safe, auditable synchronous workflow, with formal freeze of the Phase 11 subsystem.
+- Architecture Rules:
+  - **Thin Orchestration Facade**:
+    - `ApprovedMigrationOrchestrator` / `DefaultApprovedMigrationOrchestrator` coordinates existing domain services (`ApprovedMigrationExecutionService`, `DestinationPlaylistCreationService`, `MigrationExecutionStateService`).
+    - Does not duplicate or reimplement validation, playlist creation, track insertion, or reconciliation rules.
+  - **Orchestration Execution Invariants**:
+    - Gated Validation: Pre-mutation validation (Phase 11B) must succeed before any destination writes.
+    - Idempotent Execution: If an execution is already `COMPLETED`, returns the existing summary without redundant mutations.
+    - Active Run Protection: Fails fast with `InvalidStateException` (HTTP 409 Conflict) if an execution is already `RUNNING`.
+    - Uncertainty Protection: Fails fast with `InvalidStateException` (HTTP 409 Conflict) if an execution is in `RECOVERY_REQUIRED`, requiring reconciliation before resume.
+  - **Complete Execution State Machine**:
+    - 8 execution statuses: `INITIALIZED`, `RUNNING`, `PARTIALLY_COMPLETED`, `COMPLETED`, `FAILED`, `RECOVERY_REQUIRED`, `ROLLED_BACK`, `PARTIALLY_ROLLED_BACK`.
+    - 8 track statuses: `PENDING`, `ADDING`, `ADDED`, `FAILED`, `SKIPPED`, `UNCERTAIN`, `ROLLING_BACK`, `ROLLED_BACK`.
+    - All state transitions guarded by pre-condition checks; terminal states (`COMPLETED`, `ROLLED_BACK`) are immutable.
+  - **Audit Retention Invariants**:
+    - `execution_rollback_records` (V8) and `execution_reconciliation_records` (V9) enforce `ON DELETE RESTRICT` foreign keys, preventing parent execution deletion from erasing audit history.
+  - **Capacity & Quota Bounding**:
+    - YouTube Data API quota modeled across 50, 100, 500, and 1,000 track playlists.
+    - Standard 10,000 units/day quota accommodates complete migration of playlists up to 100 tracks in a single window.
+  - **Formal Subsystem Freeze**:
+    - Phase 11 is complete, verified, and **FROZEN**.
+    - Strict boundary with Phase 12: Zero asynchronous workers, message queues, scheduled tasks, SSE, or WebSockets in Phase 11.

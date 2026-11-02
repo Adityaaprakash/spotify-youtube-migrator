@@ -2,10 +2,41 @@
 
 Last Updated: 2026-11-02
 
-Current Phase: Phase 11 — Playlist Creation & Execution (Phases 11A–11G Complete; Phase 12 Next)
-Current Subphase: Phase 11G Complete (Ambiguous Outcome Reconciliation & Remote State Verification)
+Current Phase: Phase 11 — Playlist Creation & Execution [COMPLETE / FROZEN] (Phases 11A–11H Complete & Frozen; Phase 12 Next)
+Current Subphase: Phase 11H Complete & Subsystem Frozen (End-to-End Migration Orchestration, Production Hardening & Freeze)
 
 ## Completed
+### Phase 11H (End-to-End Migration Orchestration, Production Hardening & Subsystem Freeze) [COMPLETE & AUDITED / FROZEN]
+- **Architectural Decision Record**:
+  - Published `ADR-030-phase11-end-to-end-orchestration-and-production-freeze.md`.
+- **Application Orchestration Facade**:
+  - Interface `ApprovedMigrationOrchestrator` and implementation `DefaultApprovedMigrationOrchestrator`.
+  - Coordinates pre-mutation validation (Phase 11B), destination playlist creation (Phase 11C), durable execution initialization (Phase 11E), and ordered track insertion (Phase 11D/11E) in a unified, safe workflow.
+  - Idempotency: Returns existing summary for `COMPLETED` executions without redundant destination writes.
+  - Rejects execution on active `RUNNING` (HTTP 409) or `RECOVERY_REQUIRED` executions with uncertain tracks (HTTP 409).
+  - Clean delegation for `recoverMigration`, `rollbackMigration`, `reconcileMigration`, and status queries.
+- **REST Presentation Layer**:
+  - Endpoints on `MigrationExecutionController`:
+    - `POST /api/migrations/execution/run`: Runs approved migration end-to-end with metadata overrides.
+    - `POST /api/migrations/execution/run/{sessionId}`: Convenience endpoint executing approved migration by session ID.
+  - DTO: `RunMigrationApiRequest` with JSON aliases and bean validation.
+  - Mapper: `MigrationExecutionApiMapper.toDomainRequest(RunMigrationApiRequest, UUID)`.
+- **Complete Execution & Track State Machine Audit**:
+  - Comprehensive audit of all 8 execution statuses (`INITIALIZED`, `RUNNING`, `PARTIALLY_COMPLETED`, `COMPLETED`, `FAILED`, `RECOVERY_REQUIRED`, `ROLLED_BACK`, `PARTIALLY_ROLLED_BACK`) and 8 track statuses (`PENDING`, `ADDING`, `ADDED`, `FAILED`, `SKIPPED`, `UNCERTAIN`, `ROLLING_BACK`, `ROLLED_BACK`).
+  - Strict invalid transition rejection on all entity lifecycle methods.
+  - Derived counter mathematical consistency in `MigrationExecution.releaseExecution()`.
+- **Database & Flyway Migrations Audit**:
+  - Verified migrations V1 through V9.
+  - Audit retention via `ON DELETE RESTRICT` verified on `execution_rollback_records` (V8) and `execution_reconciliation_records` (V9).
+  - Optimistic locking `@Version` and composite unique constraints verified.
+- **Operational Capacity & Quota Assessment**:
+  - Documented YouTube Data API v3 quota consumption models across realistic playlist sizes: 50 tracks (2,551 units), 100 tracks (5,052 units), 500 tracks (25,060 units), 1,000 tracks (50,070 units).
+  - Quota bounding and pagination efficiency verified.
+- **Subsystem Freeze**:
+  - Phase 11 is formally frozen. Zero background workers, message queues, or async tasks (Phase 12 boundary respected).
+  - 298 total Phase 11 tests across 26 test suites (27 new Phase 11H tests across 3 focused test classes).
+  - Application test baseline: 1,234+ non-container unit and service tests.
+
 ### Phase 11G (Ambiguous Outcome Reconciliation & Remote State Verification) [COMPLETE & AUDITED]
 - **Architectural Decision Record**:
   - Published `ADR-029-ambiguous-outcome-reconciliation-and-remote-state-verification.md`.

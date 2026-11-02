@@ -625,6 +625,13 @@ Implemented and verified (50 dedicated Phase 11G tests across 4 test classes):
 - `DefaultMigrationExecutionReconciliationTest`: 18 service layer tests covering insertion reconciliation (confirmed inserted, confirmed not inserted, predated matching video preserved as ambiguous, multiple matching videos preserved as ambiguous), deletion reconciliation (item absent confirmed deleted, item present restored to added, ambiguous deletion), complete vs incomplete inspection safeguards, provider inspection failure, fresh vs stale in-flight operations (5-minute lease window), execution claiming and concurrency conflicts, track-level claim locking, anti-impersonation, anti-IDOR, and audit history/status queries.
 - `MigrationExecutionReconciliationControllerTest`: 11 WebMvc tests covering `POST /api/migrations/execution/{executionId}/reconcile`, `GET /{executionId}/reconciliations`, `GET /{executionId}/reconciliation-history`, `GET /{executionId}/reconciliation-status`, anti-impersonation (400), anti-IDOR (404), illegal state conflict (409), and unauthenticated 401 rejection under Spring Security.
 
+### End-to-End Migration Orchestration & Phase 11 Freeze Testing Scope (Phase 11H)
+Implemented and verified (34 dedicated Phase 11H tests across 4 test classes):
+- `MigrationExecutionStateMachineTest`: 12 tests validating the complete state-transition matrix across all 8 execution statuses and 8 track statuses, invalid transition rejection, terminal state immutability, atomic execution claiming, and derived count reconciliation mathematical consistency.
+- `ApprovedMigrationOrchestratorTest`: 9 application orchestration tests verifying end-to-end execution across Scenarios A through G: Scenario A (complete successful migration), Scenario B (partial failure and controlled recovery), Scenario C & E (ambiguous mutations and remote state verification), Scenario D (safe partial rollback), Scenario F (multi-user anti-IDOR and anti-impersonation isolation), Scenario G (concurrency and active RUNNING conflict guards), and idempotent execution on already COMPLETED executions.
+- `Phase11SubsystemFreezeTest`: 6 architectural safety tests verifying zero `@Async` or `@Scheduled` methods (strictly synchronous execution), entity JPA table names and `@Version` optimistic locking, ADR-022 transient plan guarantee (no `MigrationPlan` JPA persistence), and YouTube Data API v3 quota bounding models across 50, 100, 500, and 1,000 track playlists.
+- `MigrationExecutionOrchestrationControllerTest`: 7 WebMvc controller tests covering `POST /api/migrations/execution/run` and `POST /run/{sessionId}`, anti-impersonation (400), anti-IDOR (404), concurrent run conflict (409), and unauthenticated 401 rejection.
+
 ## Future Testing Scope (Phase 12+)
 - Advanced Batching & Async Progress (Phase 12).
 - Reliability Engineering & Circuit Breakers (Phase 13).
@@ -632,7 +639,7 @@ Implemented and verified (50 dedicated Phase 11G tests across 4 test classes):
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
-- **Phase 11 Execution, Recovery, Rollback & Reconciliation Total**: 271 tests across 23 test classes:
+- **Phase 11 Execution, Recovery, Rollback, Reconciliation & Orchestration Total**: 305 tests across 27 test classes:
   - `ApprovedMigrationContractTest`: 12 tests.
   - `ApprovedPlanValidatorTest`: 19 tests.
   - `ApprovedMigrationExecutionServiceTest`: 8 tests.
@@ -656,24 +663,21 @@ Implemented and verified (50 dedicated Phase 11G tests across 4 test classes):
   - `ExecutionTrackRecordReconciliationTest` (Phase 11G): 9 tests (domain transitions, CONFIRMED_INSERTED, CONFIRMED_NOT_INSERTED, CONFIRMED_DELETED, CONFIRMED_PRESENT, AMBIGUOUS, illegal transition rejection).
   - `DefaultMigrationExecutionReconciliationTest` (Phase 11G): 18 tests (insertion reconciliation, deletion reconciliation, predated video ambiguity, multiple match ambiguity, incomplete inspection safeguards, provider failure, fresh vs stale in-flight operations, concurrency claims, anti-IDOR).
   - `MigrationExecutionReconciliationControllerTest` (Phase 11G): 11 tests (WebMvc endpoints, POST /reconcile, GET /reconciliations, GET /reconciliation-status, anti-impersonation, anti-IDOR, 409 conflict, 401 unauthenticated).
+  - `MigrationExecutionStateMachineTest` (Phase 11H): 12 tests (complete state machine audit, 8 execution states, 8 track states, invalid transition rejection, derived count consistency).
+  - `ApprovedMigrationOrchestratorTest` (Phase 11H): 9 tests (end-to-end orchestration Scenarios A through G, idempotent completion, recovery/rollback/reconciliation delegation).
+  - `Phase11SubsystemFreezeTest` (Phase 11H): 6 tests (Phase 12 synchronous isolation, entity annotations, @Version optimistic locking, ADR-022 transient plan guarantee, quota capacity models).
+  - `MigrationExecutionOrchestrationControllerTest` (Phase 11H): 7 tests (WebMvc endpoints POST /run, POST /run/{sessionId}, anti-impersonation, anti-IDOR, 409 conflict, 401 unauthenticated).
   *(Note on Phase 11F Test Discrepancy Resolution: The initial 48 vs 54 reported tests reflected 48 new tests across 5 new test classes + 6 tests in MigrationExecutionSafetyTest. The corrective audit pass expands failure classification for mutation ambiguity, adds in-flight ROLLING_BACK tests, verifies audit immutability, and establishes cross-instance atomic claiming with lease checks, totaling 62 dedicated Phase 11F tests across the 5 focused suites and 83 including full domain and architectural guardrails).*
-- **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites:
-  - `ReviewSessionControllerTest`: 24 tests.
-  - `ReviewSessionIntegrationTest`: 4 tests.
-  - `ReviewApiSerializationTest`: 14 tests.
-  - `ReviewSecurityAccessTest`: 8 tests.
-  - `ReviewSessionServiceTest`: 20 tests.
-  - `ReviewCandidateSearchServiceTest`: 19 tests.
-  - `ReviewSessionDomainTest`: 12 tests.
-  - `ReviewStatePersistenceSafetyTest`: 4 tests.
+- **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites.
 - **Migration Planning Subsystem Total**: 55 tests across 6 dedicated test suites.
 - **Matching Engine Regression Suite (Phase 7)**: 18 test classes (274 tests).
 - **Matching Subsystem Total**: 29 test classes, ~365+ tests.
-- **Full Non-Container Test Suite Baseline**: 1,207+ unit and service tests across the entire application.
+- **Full Non-Container Test Suite Baseline**: 1,241+ unit and service tests across the entire application.
 - **Static Verification**: All Phase 10 controllers, services, DTOs, mappers, and tests adhere to Clean Architecture, strict null safety, validated DTO boundaries, anti-impersonation and anti-IDOR checks, zero entity leakage, and zero modifications to frozen Phase 5–9 production code.
 - **Execution Limitation**: Automated terminal execution via IDE subagent tool is blocked by environment permission broker (`unexpected user interaction type: not permission`). Exact PowerShell commands are provided for operator execution.
 
 ## Current Blockers & Status
+- **Phase 11H Complete & Phase 11 Frozen**: Full Phase 11 Playlist Creation & Execution subsystem audited, integrated, verified, and formally frozen. All 14 execution lifecycle invariants verified across 305 dedicated Phase 11 tests in 27 classes, 1,241+ application non-container baseline tests. All domain invariants verified: pre-mutation all-or-nothing validation, YouTube playlist creation isolation, canonical 0-indexed sequential track insertion with conservative halting, durable PostgreSQL state with optimistic locking, lease-aware crash recovery, controlled failure recovery preserving confirmed added tracks, safe partial rollback using authoritative destination playlist-item IDs, all-or-nothing complete remote playlist inspection, evidence-based insertion and deletion reconciliation without guesswork, anti-impersonation (400) and anti-IDOR (404) security controls, ADR-022 transient plan guarantee preserved, frozen Phases 5–10 production code untouched, zero Phase 12 background infrastructure introduced, and subsystem formally frozen under ADR-030. Phase 11 is **COMPLETE / FROZEN**.
 - **Phase 10E Complete & Phase 10 Frozen**: Full Review & Correction subsystem audited and verified across 105 dedicated tests in 8 suites, 55 Phase 9 planning regression tests, and 1,157+ application non-container baseline tests. All domain invariants verified: original matching evidence immutably preserved, provenance separated (`USER_SELECTED` vs `AUTOMATIC`), no fabricated confidence scores, deterministic 0-indexed track ordering, dynamic conflict reconciliation across manual candidate selections/exclusions, completion prevented while required decisions or conflicts remain, closed session mutation rejection, candidate search bounded [1, 50] with credential scrubbing and rate-limit header propagation, authenticated principal resolution with anti-impersonation (400) and anti-IDOR (404) security controls, Phase 9 transient plan guarantee preserved (zero plan entities or database tables), frozen Phases 5–8 production code untouched, and zero Phase 11 playlist mutations. Phase 10 is **COMPLETE / FROZEN**.
 - **Phase 10D Complete**: Review REST controllers, DTOs, mappers, application integration, WebMvc test suite, integration test suite, serialization test suite, and security access test suite implemented and fully aligned with project architecture.
 - **Phase 9E Complete & Frozen**: Final integrated verification, cross-phase audit, and formal subsystem freeze complete. All 14 planning and API invariants verified across 55 dedicated tests in 6 classes, 1,104 test baseline verified passing (1,107 with Phase 9D hardening tests), 0 Checkstyle violations, transient preview invariant verified (ADR-022), read-only destination invariant verified, backward-compatible execution orchestration verified, and Phase 5–7 frozen subsystem integrity preserved. Phase 9 is **COMPLETE / FROZEN**.

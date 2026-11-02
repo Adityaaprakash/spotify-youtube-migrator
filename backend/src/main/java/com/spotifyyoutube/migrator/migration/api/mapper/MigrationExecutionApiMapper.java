@@ -10,6 +10,7 @@ import com.spotifyyoutube.migrator.migration.api.dto.ExecutionValidationResponse
 import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.PlaylistTrackInsertionResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.RunMigrationApiRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.TrackInsertionOutcomeResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
@@ -52,6 +53,22 @@ public final class MigrationExecutionApiMapper {
     }
 
     public static ApprovedMigrationExecutionRequest toDomainRequest(CreateDestinationPlaylistRequest dto, UUID authenticatedUserId) {
+        if (dto == null) {
+            return null;
+        }
+        return new ApprovedMigrationExecutionRequest(
+                dto.reviewSessionId(),
+                dto.userId() != null ? dto.userId() : authenticatedUserId,
+                dto.sourcePlaylistId(),
+                null,
+                dto.targetPlaylistTitle(),
+                dto.targetPlaylistDescription(),
+                dto.isPrivate(),
+                null
+        );
+    }
+
+    public static ApprovedMigrationExecutionRequest toDomainRequest(RunMigrationApiRequest dto, UUID authenticatedUserId) {
         if (dto == null) {
             return null;
         }
