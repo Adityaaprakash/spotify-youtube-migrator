@@ -283,6 +283,90 @@ public class ExecutionTrackRecord extends BaseEntity {
         this.completedAt = null;
     }
 
+    /**
+     * Confirms that an uncertain insertion was applied by the remote provider (Phase 11G).
+     * Transitions track from UNCERTAIN or ADDING to ADDED with verified playlist item ID.
+     */
+    public void reconcileConfirmedAdded(String playlistItemId, String reason) {
+        if (status != ExecutionTrackStatus.UNCERTAIN && status != ExecutionTrackStatus.ADDING) {
+            throw new InvalidStateException(String.format(
+                    "Cannot reconcile track at position %d as ADDED; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        if (playlistItemId == null || playlistItemId.isBlank()) {
+            throw new IllegalArgumentException("playlistItemId must not be blank on confirmed insertion reconciliation");
+        }
+        this.status = ExecutionTrackStatus.ADDED;
+        this.destinationPlaylistItemId = playlistItemId.trim();
+        this.errorMessage = null;
+        this.completedAt = Instant.now();
+    }
+
+    /**
+     * Confirms that an uncertain insertion was NOT applied by the remote provider (Phase 11G).
+     * Transitions track from UNCERTAIN or ADDING to FAILED so it can be recovered safely via Phase 11F recovery.
+     */
+    public void reconcileConfirmedNotInserted(String reason) {
+        if (status != ExecutionTrackStatus.UNCERTAIN && status != ExecutionTrackStatus.ADDING) {
+            throw new InvalidStateException(String.format(
+                    "Cannot reconcile track at position %d as NOT_INSERTED; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.FAILED;
+        this.errorMessage = reason != null ? reason : "Reconciled: confirmed absent from destination playlist";
+        this.completedAt = Instant.now();
+    }
+
+    /**
+     * Confirms that an uncertain rollback deletion succeeded on the remote provider (Phase 11G).
+     * Transitions track from UNCERTAIN or ROLLING_BACK to ROLLED_BACK.
+     */
+    public void reconcileConfirmedDeleted(String reason) {
+        if (status != ExecutionTrackStatus.UNCERTAIN && status != ExecutionTrackStatus.ROLLING_BACK) {
+            throw new InvalidStateException(String.format(
+                    "Cannot reconcile track at position %d as DELETED; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.ROLLED_BACK;
+        this.errorMessage = reason != null ? reason : "Reconciled: confirmed absent from destination playlist (rollback verified)";
+        this.completedAt = Instant.now();
+    }
+
+    /**
+     * Confirms that an item targeted for rollback is still present on the remote provider (Phase 11G).
+     * Transitions track from UNCERTAIN or ROLLING_BACK back to ADDED, allowing future rollback retry.
+     */
+    public void reconcileConfirmedPresent(String reason) {
+        if (status != ExecutionTrackStatus.UNCERTAIN && status != ExecutionTrackStatus.ROLLING_BACK) {
+            throw new InvalidStateException(String.format(
+                    "Cannot reconcile track at position %d as PRESENT; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.ADDED;
+        this.errorMessage = reason != null ? reason : "Reconciled: item confirmed still present in destination playlist (rollback not applied)";
+        this.completedAt = Instant.now();
+    }
+
+    /**
+     * Records that reconciliation evidence is ambiguous or provider inspection failed (Phase 11G).
+     * Preserves UNCERTAIN status and updates diagnostic error message.
+     */
+    public void reconcileAmbiguous(String reason) {
+        if (status != ExecutionTrackStatus.UNCERTAIN && status != ExecutionTrackStatus.ADDING && status != ExecutionTrackStatus.ROLLING_BACK) {
+            throw new InvalidStateException(String.format(
+                    "Cannot record ambiguity for track at position %d; current status is %s",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.UNCERTAIN;
+        this.errorMessage = reason != null ? reason : "Reconciliation inconclusive: insufficient evidence";
+        this.completedAt = Instant.now();
+    }
+
     // Getters
 
     public MigrationExecution getExecution() {

@@ -26,6 +26,17 @@ import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution
 import com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionRollbackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistInspection;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItemDetails;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationStatusDto;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconciliationRecordDto;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackReconciliationOutcomeDto;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionReconciliationRecord;
+import com.spotifyyoutube.migrator.migration.execution.domain.ReconciliationOutcome;
+import com.spotifyyoutube.migrator.migration.execution.domain.ReconciliationType;
+import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionReconciliationRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
@@ -68,6 +79,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     private final MigrationExecutionRepository executionRepository;
     private final ExecutionTrackRecordRepository trackRecordRepository;
     private final ExecutionRollbackRecordRepository rollbackRecordRepository;
+    private final ExecutionReconciliationRecordRepository reconciliationRecordRepository;
     private final ReviewSessionRepository reviewSessionRepository;
     private final ApprovedMigrationExecutionService executionService;
     private final MusicDestination musicDestination;
@@ -78,6 +90,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             MigrationExecutionRepository executionRepository,
             ExecutionTrackRecordRepository trackRecordRepository,
             ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
             ReviewSessionRepository reviewSessionRepository,
             ApprovedMigrationExecutionService executionService,
             MusicDestination musicDestination,
@@ -87,6 +100,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         this.executionRepository = Objects.requireNonNull(executionRepository, "MigrationExecutionRepository must not be null");
         this.trackRecordRepository = Objects.requireNonNull(trackRecordRepository, "ExecutionTrackRecordRepository must not be null");
         this.rollbackRecordRepository = rollbackRecordRepository;
+        this.reconciliationRecordRepository = reconciliationRecordRepository;
         this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
         this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
         this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
@@ -101,9 +115,22 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             ReviewSessionRepository reviewSessionRepository,
             ApprovedMigrationExecutionService executionService,
             MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
             TransactionTemplate transactionTemplate
     ) {
-        this(executionRepository, trackRecordRepository, rollbackRecordRepository, reviewSessionRepository, executionService, musicDestination, new ExecutionFailureClassifier(), transactionTemplate);
+        this(executionRepository, trackRecordRepository, rollbackRecordRepository, null, reviewSessionRepository, executionService, musicDestination, failureClassifier, transactionTemplate);
+    }
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            TransactionTemplate transactionTemplate
+    ) {
+        this(executionRepository, trackRecordRepository, rollbackRecordRepository, null, reviewSessionRepository, executionService, musicDestination, new ExecutionFailureClassifier(), transactionTemplate);
     }
 
     public DefaultMigrationExecutionStateService(
@@ -114,10 +141,34 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             MusicDestination musicDestination,
             TransactionTemplate transactionTemplate
     ) {
-        this(executionRepository, trackRecordRepository, null, reviewSessionRepository, executionService, musicDestination, new ExecutionFailureClassifier(), transactionTemplate);
+        this(executionRepository, trackRecordRepository, null, null, reviewSessionRepository, executionService, musicDestination, new ExecutionFailureClassifier(), transactionTemplate);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
+            PlatformTransactionManager transactionManager
+    ) {
+        this(
+                executionRepository,
+                trackRecordRepository,
+                rollbackRecordRepository,
+                reconciliationRecordRepository,
+                reviewSessionRepository,
+                executionService,
+                musicDestination,
+                failureClassifier,
+                new TransactionTemplate(Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null"))
+        );
+    }
+
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,
             ExecutionTrackRecordRepository trackRecordRepository,
@@ -132,6 +183,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 executionRepository,
                 trackRecordRepository,
                 rollbackRecordRepository,
+                null,
                 reviewSessionRepository,
                 executionService,
                 musicDestination,
@@ -151,6 +203,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         this(
                 executionRepository,
                 trackRecordRepository,
+                null,
                 null,
                 reviewSessionRepository,
                 executionService,
@@ -1059,5 +1112,414 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             return "null";
         }
         return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+    }
+
+    @Override
+    public ExecutionReconciliationSummary reconcileExecution(UUID executionId, UUID authenticatedUserId) {
+        return reconcileExecution(executionId, ReconcileExecutionRequest.allTracks(authenticatedUserId, null), authenticatedUserId);
+    }
+
+    @Override
+    public ExecutionReconciliationSummary reconcileExecution(
+            UUID executionId,
+            ReconcileExecutionRequest request,
+            UUID authenticatedUserId
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+        if (request != null && request.userId() != null && !authenticatedUserId.equals(request.userId())) {
+            throw new IllegalArgumentException("Authenticated user does not match the requested user ID");
+        }
+
+        // 1. Claim execution and identify target tracks in a short transaction
+        record ClaimedReconciliationContext(
+                List<ExecutionTrackRecordDto> targets,
+                String destinationPlaylistId,
+                MigrationExecutionStatus previousExecutionStatus
+        ) {}
+
+        ClaimedReconciliationContext claimedContext = transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            MigrationExecutionStatus priorStatus = execution.getStatus();
+
+            // Reconcile stale in-flight state (5 min lease) before checking eligibility
+            execution.reconcileStaleCrashState();
+
+            List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+            Instant cutoff = Instant.now().minus(MigrationExecution.DEFAULT_STALE_THRESHOLD);
+
+            List<ExecutionTrackRecord> eligible;
+            if (request != null && request.targetPosition() != null) {
+                int targetPos = request.targetPosition();
+                ExecutionTrackRecord track = allTracks.stream()
+                        .filter(t -> t.getTargetPosition() == targetPos)
+                        .findFirst()
+                        .orElseThrow(() -> new ResourceNotFoundException("Track record not found at position: " + targetPos));
+
+                boolean isEligible = track.getStatus() == ExecutionTrackStatus.UNCERTAIN
+                        || (track.getStatus() == ExecutionTrackStatus.ADDING && track.isStaleInFlight(cutoff))
+                        || (track.getStatus() == ExecutionTrackStatus.ROLLING_BACK && track.isStaleInFlight(cutoff));
+
+                if (!isEligible) {
+                    throw new InvalidStateException(String.format(
+                            "Track at position %d is not eligible for reconciliation (current status: %s)",
+                            targetPos, track.getStatus()
+                    ));
+                }
+                eligible = List.of(track);
+            } else {
+                eligible = allTracks.stream()
+                        .filter(t -> t.getStatus() == ExecutionTrackStatus.UNCERTAIN
+                                || (t.getStatus() == ExecutionTrackStatus.ADDING && t.isStaleInFlight(cutoff))
+                                || (t.getStatus() == ExecutionTrackStatus.ROLLING_BACK && t.isStaleInFlight(cutoff)))
+                        .toList();
+
+                if (eligible.isEmpty()) {
+                    throw new InvalidStateException("No uncertain or stale in-flight tracks available for reconciliation in execution: " + executionId);
+                }
+            }
+
+            // Execution claiming with optimistic version check
+            Set<MigrationExecutionStatus> eligibleStatuses = Set.of(
+                    MigrationExecutionStatus.RECOVERY_REQUIRED,
+                    MigrationExecutionStatus.PARTIALLY_COMPLETED,
+                    MigrationExecutionStatus.FAILED,
+                    MigrationExecutionStatus.PARTIALLY_ROLLED_BACK
+            );
+
+            long expectedVersion = execution.getVersion() != null ? execution.getVersion() : 0L;
+            int claimed = executionRepository.claimExecutionRunningWithVersion(
+                    executionId,
+                    eligibleStatuses,
+                    expectedVersion,
+                    Instant.now()
+            );
+
+            if (claimed == 0) {
+                throw new InvalidStateException("Migration execution could not be claimed for reconciliation: " +
+                        "execution is either already in progress, in an invalid state, or was modified concurrently");
+            }
+            execution.setStatus(MigrationExecutionStatus.RUNNING);
+
+            return new ClaimedReconciliationContext(
+                    eligible.stream().map(ExecutionTrackRecordDto::from).toList(),
+                    execution.getDestinationPlaylistId(),
+                    priorStatus
+            );
+        });
+
+        // 2. Perform Remote Inspection OUTSIDE database transactions
+        Instant inspectionStartedAt = Instant.now();
+        DestinationPlaylistInspection inspection;
+        try {
+            inspection = musicDestination.inspectPlaylist(authenticatedUserId, claimedContext.destinationPlaylistId());
+            if (inspection == null) {
+                inspection = DestinationPlaylistInspection.failed(
+                        claimedContext.destinationPlaylistId(),
+                        "Destination provider returned null inspection snapshot",
+                        inspectionStartedAt
+                );
+            }
+        } catch (Exception ex) {
+            String sanitizedErr = sanitize(ex.getMessage());
+            log.error("Destination playlist inspection threw exception for execution {}: {}", executionId, sanitizedErr);
+            inspection = DestinationPlaylistInspection.failed(
+                    claimedContext.destinationPlaylistId(),
+                    sanitizedErr,
+                    inspectionStartedAt
+            );
+        }
+        Instant inspectionCompletedAt = Instant.now();
+
+        // 3. Process Evidence and Apply Transitions in a short transaction
+        final DestinationPlaylistInspection finalInspection = inspection;
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId).orElseThrow();
+            List<ExecutionTrackRecord> allRecords = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+
+            // Collect all playlist item IDs already confirmed and assigned to ADDED tracks
+            Set<String> assignedPlaylistItemIds = new java.util.HashSet<>();
+            for (ExecutionTrackRecord r : allRecords) {
+                if (r.getStatus() == ExecutionTrackStatus.ADDED && r.getDestinationPlaylistItemId() != null && !r.getDestinationPlaylistItemId().isBlank()) {
+                    assignedPlaylistItemIds.add(r.getDestinationPlaylistItemId().trim());
+                }
+            }
+
+            List<TrackReconciliationOutcomeDto> outcomes = new ArrayList<>();
+            int confirmedInserted = 0;
+            int confirmedNotInserted = 0;
+            int confirmedDeleted = 0;
+            int confirmedPresent = 0;
+            int ambiguous = 0;
+            int inspectionFailed = 0;
+
+            for (ExecutionTrackRecordDto targetDto : claimedContext.targets()) {
+                ExecutionTrackRecord track = allRecords.stream()
+                        .filter(r -> r.getId().equals(targetDto.id()))
+                        .findFirst()
+                        .orElseThrow(() -> new IllegalStateException("Track record missing: " + targetDto.id()));
+
+                ExecutionTrackStatus prevStatus = track.getStatus();
+                ExecutionTrackStatus resolvedStatus = prevStatus;
+                ReconciliationOutcome outcome;
+                String evidenceSummary;
+                String sanitizedError = null;
+
+                // Determine ReconciliationType
+                ReconciliationType recType;
+                if (prevStatus == ExecutionTrackStatus.ROLLING_BACK) {
+                    recType = ReconciliationType.STALE_IN_FLIGHT_ROLLING_BACK;
+                } else if (prevStatus == ExecutionTrackStatus.ADDING) {
+                    recType = ReconciliationType.STALE_IN_FLIGHT_ADDING;
+                } else if (track.getDestinationPlaylistItemId() != null && !track.getDestinationPlaylistItemId().isBlank()) {
+                    recType = ReconciliationType.DELETION;
+                } else {
+                    recType = ReconciliationType.INSERTION;
+                }
+
+                if (!finalInspection.complete()) {
+                    outcome = ReconciliationOutcome.INSPECTION_FAILED;
+                    sanitizedError = sanitize(finalInspection.failureReason());
+                    evidenceSummary = "Remote playlist inspection incomplete or failed: " + sanitizedError;
+                    track.reconcileAmbiguous(evidenceSummary);
+                    resolvedStatus = track.getStatus();
+                    inspectionFailed++;
+                } else if (recType == ReconciliationType.DELETION || recType == ReconciliationType.STALE_IN_FLIGHT_ROLLING_BACK) {
+                    // Deletion / Rollback Reconciliation
+                    String targetPlaylistItemId = track.getDestinationPlaylistItemId();
+                    if (targetPlaylistItemId == null || targetPlaylistItemId.isBlank()) {
+                        outcome = ReconciliationOutcome.AMBIGUOUS;
+                        evidenceSummary = "Ambiguous rollback: missing destinationPlaylistItemId on track record";
+                        track.reconcileAmbiguous(evidenceSummary);
+                        resolvedStatus = track.getStatus();
+                        ambiguous++;
+                    } else {
+                        boolean itemPresent = finalInspection.items().stream()
+                                .anyMatch(item -> targetPlaylistItemId.equals(item.playlistItemId()));
+
+                        if (!itemPresent) {
+                            // Item is absent from complete inspection -> confirmed deleted!
+                            outcome = ReconciliationOutcome.CONFIRMED_DELETED;
+                            evidenceSummary = "Verified absence of playlistItemId " + targetPlaylistItemId + " in complete inspection (" + finalInspection.totalItemCount() + " items)";
+                            track.reconcileConfirmedDeleted(evidenceSummary);
+                            resolvedStatus = track.getStatus();
+                            confirmedDeleted++;
+                        } else {
+                            // Item is still present -> rollback did not happen or failed
+                            outcome = ReconciliationOutcome.CONFIRMED_PRESENT;
+                            evidenceSummary = "Verified presence of playlistItemId " + targetPlaylistItemId + " in remote playlist";
+                            track.reconcileConfirmedPresent(evidenceSummary);
+                            resolvedStatus = track.getStatus();
+                            confirmedPresent++;
+                        }
+                    }
+                } else {
+                    // Insertion Reconciliation
+                    String expectedVideoId = track.getDestinationTrackId();
+                    List<DestinationPlaylistItemDetails> matchingItems = finalInspection.items().stream()
+                            .filter(item -> expectedVideoId != null && expectedVideoId.equals(item.destinationTrackId()))
+                            .toList();
+
+                    // Filter out items already claimed by OTHER ADDED tracks
+                    List<DestinationPlaylistItemDetails> unassignedItems = matchingItems.stream()
+                            .filter(item -> !assignedPlaylistItemIds.contains(item.playlistItemId())
+                                    || item.playlistItemId().equals(track.getDestinationPlaylistItemId()))
+                            .toList();
+
+                    if (unassignedItems.isEmpty()) {
+                        // Confirmed absent from complete playlist
+                        outcome = ReconciliationOutcome.CONFIRMED_NOT_INSERTED;
+                        evidenceSummary = "Verified complete absence of unassigned video " + expectedVideoId + " across " + finalInspection.totalItemCount() + " playlist items";
+                        track.reconcileConfirmedNotInserted(evidenceSummary);
+                        resolvedStatus = track.getStatus();
+                        confirmedNotInserted++;
+                    } else if (unassignedItems.size() == 1) {
+                        DestinationPlaylistItemDetails candidate = unassignedItems.get(0);
+                        boolean timestampValid = true;
+                        if (candidate.publishedAt() != null && track.getStartedAt() != null) {
+                            // If candidate was added before attempt started (with 30s clock skew tolerance)
+                            if (candidate.publishedAt().isBefore(track.getStartedAt().minusSeconds(30))) {
+                                timestampValid = false;
+                            }
+                        }
+
+                        if (!timestampValid) {
+                            // Item pre-dates insertion attempt -> cannot prove this execution inserted it
+                            outcome = ReconciliationOutcome.AMBIGUOUS;
+                            evidenceSummary = "Ambiguous insertion: matching item " + candidate.playlistItemId() + " publishedAt (" + candidate.publishedAt() + ") pre-dates attempt startedAt (" + track.getStartedAt() + ")";
+                            track.reconcileAmbiguous(evidenceSummary);
+                            resolvedStatus = track.getStatus();
+                            ambiguous++;
+                        } else {
+                            // Confirmed inserted!
+                            outcome = ReconciliationOutcome.CONFIRMED_INSERTED;
+                            evidenceSummary = "Verified single matching item " + candidate.playlistItemId() + " (position=" + candidate.position() + ", publishedAt=" + candidate.publishedAt() + ")";
+                            track.reconcileConfirmedAdded(candidate.playlistItemId(), evidenceSummary);
+                            assignedPlaylistItemIds.add(candidate.playlistItemId());
+                            resolvedStatus = track.getStatus();
+                            confirmedInserted++;
+                        }
+                    } else {
+                        // Multiple unassigned items found with same video ID
+                        outcome = ReconciliationOutcome.AMBIGUOUS;
+                        evidenceSummary = "Ambiguous insertion: found " + unassignedItems.size() + " unassigned matching items for video " + expectedVideoId + "; cannot disambiguate";
+                        track.reconcileAmbiguous(evidenceSummary);
+                        resolvedStatus = track.getStatus();
+                        ambiguous++;
+                    }
+                }
+
+                trackRecordRepository.saveAndFlush(track);
+
+                // Save Audit Record
+                if (reconciliationRecordRepository != null) {
+                    ExecutionReconciliationRecord auditRecord = new ExecutionReconciliationRecord(
+                            execution,
+                            track,
+                            recType,
+                            prevStatus,
+                            resolvedStatus,
+                            outcome,
+                            claimedContext.destinationPlaylistId(),
+                            track.getDestinationPlaylistItemId(),
+                            track.getDestinationTrackId(),
+                            evidenceSummary,
+                            Instant.now(),
+                            inspectionStartedAt,
+                            inspectionCompletedAt,
+                            outcome.name(),
+                            sanitizedError
+                    );
+                    reconciliationRecordRepository.save(auditRecord);
+                }
+
+                outcomes.add(new TrackReconciliationOutcomeDto(
+                        track.getTargetPosition(),
+                        track.getSourceTrackId(),
+                        track.getDestinationTrackId(),
+                        track.getDestinationPlaylistItemId(),
+                        recType,
+                        prevStatus,
+                        resolvedStatus,
+                        outcome,
+                        evidenceSummary,
+                        sanitizedError,
+                        Instant.now()
+                ));
+            }
+
+            // Reconcile Execution State & Derived Counts
+            execution.releaseExecution();
+            MigrationExecution savedExecution = executionRepository.saveAndFlush(execution);
+
+            boolean fullyResolved = savedExecution.getUncertainInsertions() == 0
+                    && savedExecution.getStatus() != MigrationExecutionStatus.RECOVERY_REQUIRED;
+
+            return new ExecutionReconciliationSummary(
+                    executionId,
+                    claimedContext.previousExecutionStatus(),
+                    savedExecution.getStatus(),
+                    claimedContext.targets().size(),
+                    outcomes.size(),
+                    confirmedInserted,
+                    confirmedNotInserted,
+                    confirmedDeleted,
+                    confirmedPresent,
+                    ambiguous,
+                    inspectionFailed,
+                    outcomes,
+                    fullyResolved
+            );
+        });
+    }
+
+    @Override
+    public List<ReconciliationRecordDto> getReconciliationHistory(UUID executionId, UUID authenticatedUserId) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (reconciliationRecordRepository == null) {
+                return Collections.emptyList();
+            }
+
+            return reconciliationRecordRepository.findByExecutionIdOrderByCreatedAtAsc(executionId).stream()
+                    .map(ReconciliationRecordDto::from)
+                    .toList();
+        });
+    }
+
+    @Override
+    public ExecutionReconciliationStatusDto getReconciliationStatus(UUID executionId, UUID authenticatedUserId) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            // Evaluate stale state
+            execution.reconcileStaleCrashState();
+
+            List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+            Instant cutoff = Instant.now().minus(MigrationExecution.DEFAULT_STALE_THRESHOLD);
+
+            List<ExecutionTrackRecordDto> eligible = allTracks.stream()
+                    .filter(t -> t.getStatus() == ExecutionTrackStatus.UNCERTAIN
+                            || (t.getStatus() == ExecutionTrackStatus.ADDING && t.isStaleInFlight(cutoff))
+                            || (t.getStatus() == ExecutionTrackStatus.ROLLING_BACK && t.isStaleInFlight(cutoff)))
+                    .map(ExecutionTrackRecordDto::from)
+                    .toList();
+
+            long staleInFlightCount = allTracks.stream()
+                    .filter(t -> (t.getStatus() == ExecutionTrackStatus.ADDING || t.getStatus() == ExecutionTrackStatus.ROLLING_BACK) && t.isStaleInFlight(cutoff))
+                    .count();
+
+            boolean required = execution.getStatus() == MigrationExecutionStatus.RECOVERY_REQUIRED
+                    || execution.getUncertainInsertions() > 0
+                    || !eligible.isEmpty();
+
+            return new ExecutionReconciliationStatusDto(
+                    execution.getId(),
+                    execution.getStatus(),
+                    execution.getTotalApprovedTracks(),
+                    execution.getSuccessfulInsertions(),
+                    execution.getFailedInsertions(),
+                    execution.getUncertainInsertions(),
+                    execution.getRolledBackInsertions(),
+                    (int) staleInFlightCount,
+                    required,
+                    eligible
+            );
+        });
     }
 }

@@ -24,9 +24,18 @@ import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistIte
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistListResponseDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistSnippetDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistStatusDto;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistInspection;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItemDetails;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistItemListResponseDto;
 import org.springframework.stereotype.Service;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -304,6 +313,141 @@ public class YouTubePlaylistService {
                     "Unexpected verification failure: " + e.getMessage(),
                     null
             );
+        }
+    }
+
+    public static final int MAX_INSPECTION_PAGES = 100;
+
+    public YouTubePlaylistItemListResponseDto getPlaylistItems(UUID userId, String playlistId, int maxResults, String pageToken) {
+        if (userId == null) {
+            throw new IllegalArgumentException("User ID must not be null");
+        }
+        if (playlistId == null || playlistId.isBlank()) {
+            throw new IllegalArgumentException("Playlist ID must not be blank");
+        }
+
+        OAuthConnection connection = tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.GOOGLE);
+        if (connection == null || connection.getStatus() != ConnectionStatus.CONNECTED) {
+            throw new InvalidStateException("Google account is not connected or requires reauthorization.");
+        }
+
+        String accessToken = connection.getAccessToken();
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new InvalidStateException("Google access token is not available. Please reconnect your Google account.");
+        }
+
+        return youTubeClient.getPlaylistItems(accessToken, playlistId.trim(), maxResults, pageToken);
+    }
+
+    public DestinationPlaylistInspection inspectPlaylist(UUID userId, String playlistId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("User ID must not be null");
+        }
+        if (playlistId == null || playlistId.isBlank()) {
+            throw new IllegalArgumentException("Playlist ID must not be blank");
+        }
+
+        String trimmedPlaylistId = playlistId.trim();
+        Instant startedAt = Instant.now();
+
+        OAuthConnection connection;
+        try {
+            connection = tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.GOOGLE);
+        } catch (Exception ex) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Failed to resolve Google credentials: " + ex.getMessage(), startedAt);
+        }
+
+        if (connection == null || connection.getStatus() != ConnectionStatus.CONNECTED) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Google account is not connected or requires reauthorization.", startedAt);
+        }
+
+        String accessToken = connection.getAccessToken();
+        if (accessToken == null || accessToken.isBlank()) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Google access token is not available. Please reconnect your Google account.", startedAt);
+        }
+
+        Set<String> seenPageTokens = new HashSet<>();
+        String currentPageToken = null;
+        List<DestinationPlaylistItemDetails> allItems = new ArrayList<>();
+        int pageCount = 0;
+        boolean completedCleanly = false;
+
+        try {
+            while (pageCount < MAX_INSPECTION_PAGES) {
+                pageCount++;
+                YouTubePlaylistItemListResponseDto responseDto = youTubeClient.getPlaylistItems(accessToken, trimmedPlaylistId, 50, currentPageToken);
+                if (responseDto == null) {
+                    return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Provider returned null response on page " + pageCount, startedAt);
+                }
+
+                List<YouTubePlaylistItemDto> items = responseDto.items();
+                if (items != null) {
+                    for (YouTubePlaylistItemDto item : items) {
+                        if (item == null || item.id() == null || item.id().isBlank()) {
+                            continue;
+                        }
+                        String playlistItemId = item.id().trim();
+                        String videoId = null;
+                        Integer position = null;
+                        Instant publishedAt = null;
+                        String title = null;
+
+                        if (item.snippet() != null) {
+                            if (item.snippet().resourceId() != null && item.snippet().resourceId().videoId() != null) {
+                                videoId = item.snippet().resourceId().videoId().trim();
+                            }
+                            position = item.snippet().position();
+                            title = item.snippet().title();
+                            if (item.snippet().publishedAt() != null && !item.snippet().publishedAt().isBlank()) {
+                                try {
+                                    publishedAt = Instant.parse(item.snippet().publishedAt().trim());
+                                } catch (Exception ignored) {
+                                    // Non-standard format or unparseable; leave null
+                                }
+                            }
+                        }
+
+                        allItems.add(new DestinationPlaylistItemDetails(
+                                playlistItemId,
+                                trimmedPlaylistId,
+                                videoId,
+                                position,
+                                publishedAt,
+                                title
+                        ));
+                    }
+                }
+
+                String nextPageToken = responseDto.nextPageToken();
+                if (nextPageToken == null || nextPageToken.isBlank()) {
+                    completedCleanly = true;
+                    break;
+                }
+
+                if (seenPageTokens.contains(nextPageToken)) {
+                    return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Cycle detected in provider pagination token: " + nextPageToken, startedAt);
+                }
+
+                seenPageTokens.add(nextPageToken);
+                currentPageToken = nextPageToken;
+            }
+
+            if (!completedCleanly) {
+                return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Inspection exceeded maximum pagination limit of " + MAX_INSPECTION_PAGES + " pages", startedAt);
+            }
+
+            return DestinationPlaylistInspection.complete(trimmedPlaylistId, allItems, startedAt);
+
+        } catch (ResourceNotFoundException ex) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Playlist not found: " + ex.getMessage(), startedAt);
+        } catch (ExternalProviderException ex) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Provider error HTTP " + ex.getProviderStatusCode() + ": " + ex.getMessage(), startedAt);
+        } catch (ResourceAccessException ex) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Connection timeout during playlist inspection: " + ex.getMessage(), startedAt);
+        } catch (RestClientException ex) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Provider communication failure: " + ex.getMessage(), startedAt);
+        } catch (Exception ex) {
+            return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Unexpected inspection failure: " + ex.getMessage(), startedAt);
         }
     }
 }

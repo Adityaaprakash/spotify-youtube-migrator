@@ -11,6 +11,7 @@ import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistIns
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistListResponseDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeResourceIdDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeSearchListResponseDto;
+import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubePlaylistItemListResponseDto;
 import com.spotifyyoutube.migrator.youtube.infrastructure.dto.YouTubeVideoListResponseDto;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -284,5 +285,53 @@ public class YouTubeClient {
                     throw new ExternalProviderException("Failed to remove video from YouTube playlist", statusCode, retryAfter);
                 })
                 .toBodilessEntity();
+    }
+
+    public YouTubePlaylistItemListResponseDto getPlaylistItems(String accessToken, String playlistId, int maxResults, String pageToken) {
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new IllegalArgumentException("Access token must not be blank");
+        }
+        if (playlistId == null || playlistId.isBlank()) {
+            throw new IllegalArgumentException("Playlist ID must not be blank");
+        }
+        if (maxResults <= 0) {
+            throw new IllegalArgumentException("maxResults must be greater than 0");
+        }
+
+        return restClient.get()
+                .uri(uriBuilder -> {
+                    var builder = uriBuilder.path("/playlistItems")
+                            .queryParam("part", "snippet")
+                            .queryParam("playlistId", playlistId.trim())
+                            .queryParam("maxResults", maxResults);
+                    if (pageToken != null && !pageToken.isBlank()) {
+                        builder.queryParam("pageToken", pageToken.trim());
+                    }
+                    return builder.build();
+                })
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .onStatus(status -> status.isError(), (req, res) -> {
+                    int statusCode = res.getStatusCode().value();
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+
+                    if (statusCode == 404) {
+                        throw new ResourceNotFoundException("YouTube playlist not found: " + playlistId.trim());
+                    }
+                    if (statusCode == 401) {
+                        throw new ExternalProviderException("YouTube API authentication failed: invalid or expired access token", 401);
+                    }
+                    if (statusCode == 403) {
+                        throw new ExternalProviderException("YouTube API request forbidden: insufficient permissions or quota exceeded", 403, retryAfter);
+                    }
+                    if (statusCode == 429) {
+                        throw new ExternalProviderException("YouTube API rate limit exceeded", 429, retryAfter);
+                    }
+                    if (statusCode == 400) {
+                        throw new ExternalProviderException("YouTube API request invalid", 400);
+                    }
+                    throw new ExternalProviderException("Failed to retrieve YouTube playlist items", statusCode, retryAfter);
+                })
+                .body(YouTubePlaylistItemListResponseDto.class);
     }
 }

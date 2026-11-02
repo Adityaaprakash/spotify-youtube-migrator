@@ -12,9 +12,17 @@ import com.spotifyyoutube.migrator.migration.api.dto.MigrationExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.PlaylistTrackInsertionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RecoverExecutionApiRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionApiRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.ExecutionReconciliationStatusResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.ReconcileExecutionApiRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.ReconcileExecutionResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.ReconciliationRecordResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RollbackRecordResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationStatusDto;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconciliationRecordDto;
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationExecutionApiMapper;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
@@ -322,6 +330,61 @@ public class MigrationExecutionController {
                 .map(MigrationExecutionApiMapper::toRollbackRecordResponse)
                 .toList();
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Reconciles uncertain track outcomes for an execution against the remote destination playlist (Phase 11G).
+     * Inspects destination playlist, verifies remote mutations, updates state, and persists audit records.
+     */
+    @PostMapping("/{executionId}/reconcile")
+    public ResponseEntity<ReconcileExecutionResponse> reconcileExecution(
+            @PathVariable UUID executionId,
+            @RequestBody(required = false) ReconcileExecutionApiRequest request,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID requestedUserId = request != null ? request.userId() : null;
+        UUID userId = resolveUserId(requestedUserId, principal);
+        ReconcileExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
+        ExecutionReconciliationSummary summary = executionStateService.reconcileExecution(executionId, domainReq, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toReconcileResponse(summary));
+    }
+
+    /**
+     * Retrieves the audit history of all reconciliation attempts for an execution (Phase 11G).
+     */
+    @GetMapping({"/{executionId}/reconciliations", "/{executionId}/reconciliation-history"})
+    public ResponseEntity<List<ReconciliationRecordResponse>> getReconciliationHistory(
+            @PathVariable UUID executionId,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        List<ReconciliationRecordDto> records = executionStateService.getReconciliationHistory(executionId, userId);
+        List<ReconciliationRecordResponse> response = records.stream()
+                .map(MigrationExecutionApiMapper::toReconciliationRecordResponse)
+                .toList();
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Retrieves the current reconciliation status and eligible uncertain tracks for an execution (Phase 11G).
+     */
+    @GetMapping("/{executionId}/reconciliation-status")
+    public ResponseEntity<ExecutionReconciliationStatusResponse> getReconciliationStatus(
+            @PathVariable UUID executionId,
+            Principal principal
+    ) {
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+        UUID userId = resolveUserId(null, principal);
+        ExecutionReconciliationStatusDto status = executionStateService.getReconciliationStatus(executionId, userId);
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toReconciliationStatusResponse(status));
     }
 
     private UUID resolveUserId(UUID requestedUserId, Principal principal) {

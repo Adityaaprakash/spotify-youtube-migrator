@@ -340,5 +340,54 @@ Controllers MUST NOT:
     - Optimistic locking `@Version` on `migration_executions` and `execution_track_records`.
   - **Strict Boundaries**:
     - Zero background threads, queues, or scheduled tasks (Phase 12 boundary).
-    - Zero ambiguous mutation reconciliation (Phase 11G boundary).
+    - Ambiguous mutation reconciliation completed in Phase 11G.
+    - Zero modifications to frozen Phase 5–10 production code.
+
+## Execution Reconciliation Layer (Phase 11G — Complete & Audited)
+
+- Packages:
+  - Persistence & Domain: `com.spotifyyoutube.migrator.migration.execution.domain`, `com.spotifyyoutube.migrator.migration.execution.repository`
+  - Application Service & Contracts: `com.spotifyyoutube.migrator.migration.application.execution`, `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Destination Adapters: `com.spotifyyoutube.migrator.migration.application.destination`, `com.spotifyyoutube.migrator.migration.application.destination.model`, `com.spotifyyoutube.migrator.youtube.infrastructure`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.api.mapper`
+- Architecture Decisions: ADR-029 (Ambiguous Outcome Reconciliation & Remote State Verification)
+- Database Migrations:
+  - `V9__phase11g_reconciliation_schema.sql`: Table `execution_reconciliation_records` with `ON DELETE RESTRICT` foreign keys referencing `migration_executions` and `execution_track_records`, with performance indexes.
+- Purpose: Safe, auditable reconciliation subsystem comparing local execution records with actual destination YouTube playlist state, resolving ambiguous remote mutations where sufficient evidence exists without guesswork.
+- Architecture Rules:
+  - **Core Engineering Principle**:
+    - Reconciliation is evidence-driven state resolution, not retry logic.
+    - Never infer that an insertion succeeded simply because an item with the same video ID exists.
+    - Never infer that a mutation failed because an API request timed out.
+    - Never interpret an incomplete remote playlist response as proof of absence.
+    - When evidence is insufficient, preserve `UNCERTAIN` and require further investigation.
+  - **Remote Playlist Inspection**:
+    - `MusicDestination.inspectPlaylist` and `YouTubePlaylistService.inspectPlaylist` traverse remote playlist items using YouTube Data API v3 (`GET /playlistItems`).
+    - Defensive traversal: 50-item pages, cycle detection on `pageToken`, and a maximum limit of 100 pages (5,000 items).
+    - All-or-Nothing Completeness: If any page fails (HTTP error, timeout, malformed payload), `complete = false` and items are discarded. An incomplete response is NEVER treated as a full playlist snapshot.
+  - **Evidence-Driven Insertion Reconciliation**:
+    - `CONFIRMED_INSERTED`: Unassigned remote item exists with matching `destinationTrackId` and `publishedAt >= track.startedAt - 30s`. Transitions track to `ADDED` and records playlist-item ID.
+    - `CONFIRMED_NOT_INSERTED`: Inspection completed 100% successfully and zero matching video items exist. Transitions track to `FAILED` (enabling subsequent safe Phase 11F recovery).
+    - `AMBIGUOUS`: Matching item predates the execution attempt (already in playlist) or multiple unassigned matches exist. Preserves `UNCERTAIN` and `RECOVERY_REQUIRED`.
+    - `INSPECTION_FAILED`: Provider inspection failed or was incomplete. Preserves `UNCERTAIN` and `RECOVERY_REQUIRED`.
+  - **Evidence-Driven Deletion / Rollback Reconciliation**:
+    - Uses exact `destinationPlaylistItemId` as authoritative identity.
+    - `CONFIRMED_DELETED`: Exact item ID is absent from a complete, successful remote inspection. Transitions track to `ROLLED_BACK`.
+    - `CONFIRMED_PRESENT`: Exact item ID is present in the remote playlist. Transitions track to `ADDED` (enabling subsequent safe rollback).
+    - `AMBIGUOUS` / `INSPECTION_FAILED`: Incomplete snapshot or missing item ID preserves `UNCERTAIN`.
+  - **Lease-Aware Stale In-Flight Reconciliation**:
+    - Active operations within the 5-minute lease threshold are protected and untouched.
+    - Stale operations exceeding 5 minutes in `ADDING` or `ROLLING_BACK` are safely reconciled via insertion or deletion inspection rules.
+  - **Distributed Concurrency & Transaction Boundaries**:
+    - Short Transaction #1: Claim execution via `claimExecutionRunningWithVersion` and identify target tracks.
+    - External Inspection: Out-of-transaction external HTTP call to YouTube Data API.
+    - Short Transaction #2: Apply domain transitions, persist `ExecutionReconciliationRecord` audit rows, reconcile aggregate counters via `releaseExecution()`.
+    - Track-level claim: `claimTrackReconciling`.
+  - **Security & Authorization**:
+    - Anti-impersonation: verifies caller-supplied `userId` matches authenticated `Principal`.
+    - Anti-IDOR: verifies execution ownership before any reconciliation inspection or status retrieval.
+  - **Strict Boundaries**:
+    - Zero background threads, workers, queues, or scheduled tasks (Phase 12 boundary).
+    - Strictly synchronous execution triggered via explicit REST API.
+    - Zero mutations or retries issued during reconciliation.
     - Zero modifications to frozen Phase 5–10 production code.

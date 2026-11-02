@@ -114,4 +114,47 @@ public interface MigrationExecutionStateService {
      * @return list of rollback audit records
      */
     java.util.List<com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackRecordDto> getRollbackHistory(UUID executionId, UUID authenticatedUserId);
+
+    /**
+     * Reconciles uncertain track outcomes against the remote destination playlist state (Phase 11G).
+     * Inspects destination playlist, applies evidence-driven state resolution, updates execution state,
+     * and persists audit records.
+     *
+     * @param executionId execution identifier
+     * @param request reconciliation request specifying target parameters
+     * @param authenticatedUserId ID of the authenticated user
+     * @return reconciliation operation summary with itemized outcomes
+     */
+    com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary reconcileExecution(
+            UUID executionId,
+            com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest request,
+            UUID authenticatedUserId
+    );
+
+    /**
+     * Reconciles all eligible uncertain track outcomes for an execution against the remote destination (Phase 11G).
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @return reconciliation operation summary with itemized outcomes
+     */
+    com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary reconcileExecution(UUID executionId, UUID authenticatedUserId);
+
+    /**
+     * Retrieves the audit history of all reconciliation attempts for an execution (Phase 11G).
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @return list of reconciliation audit records
+     */
+    java.util.List<com.spotifyyoutube.migrator.migration.application.execution.contract.ReconciliationRecordDto> getReconciliationHistory(UUID executionId, UUID authenticatedUserId);
+
+    /**
+     * Retrieves the current reconciliation status and eligible uncertain tracks for an execution (Phase 11G).
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @return reconciliation status and eligible tracks
+     */
+    com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationStatusDto getReconciliationStatus(UUID executionId, UUID authenticatedUserId);
 }

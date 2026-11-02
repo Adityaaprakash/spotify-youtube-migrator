@@ -618,13 +618,21 @@ Implemented and verified (39 dedicated Phase 11E tests):
 - `MigrationExecutionSafetyTest`: 4 tests validating architectural guardrails: zero pipeline dependencies on matching/discovery, strictly synchronous execution (no `@Async`, `@Scheduled`, `CompletableFuture`), JPA entity annotations with optimistic locking `@Version`, and ADR-022 transient plan guarantee (no `MigrationPlan` entity persistence).
 - `MigrationExecutionControllerTest`: 10 dedicated Phase 11E tests covering endpoints `POST /initialize`, `GET /{id}`, `GET /session/{id}`, `POST /{id}/resume`, anti-impersonation (400), not found (404), concurrency conflict (409), and unauthenticated access rejections (401/403).
 
-## Future Testing Scope (Phase 11G+)
-- End-to-End Migration Orchestration Testing (Phase 11G).
+### Ambiguous Outcome Reconciliation & Remote State Verification Testing Scope (Phase 11G)
+Implemented and verified (50 dedicated Phase 11G tests across 4 test classes):
+- `YouTubeClientInspectionTest`: 12 tests using `MockRestServiceServer` validating `GET /playlistItems`, single-page responses, multi-page traversal, empty playlist responses, parameter encoding, timeout handling, and HTTP error mapping (400, 401, 403, 404, 429 rate limit with Retry-After, 500, parsing exceptions).
+- `ExecutionTrackRecordReconciliationTest`: 9 domain unit tests validating legal transitions (`CONFIRMED_INSERTED` -> `ADDED`, `CONFIRMED_NOT_INSERTED` -> `FAILED`, `CONFIRMED_DELETED` -> `ROLLED_BACK`, `CONFIRMED_PRESENT` -> `ADDED`, `AMBIGUOUS` preserving `UNCERTAIN`), audit reasons, and strict rejection of illegal state transitions.
+- `DefaultMigrationExecutionReconciliationTest`: 18 service layer tests covering insertion reconciliation (confirmed inserted, confirmed not inserted, predated matching video preserved as ambiguous, multiple matching videos preserved as ambiguous), deletion reconciliation (item absent confirmed deleted, item present restored to added, ambiguous deletion), complete vs incomplete inspection safeguards, provider inspection failure, fresh vs stale in-flight operations (5-minute lease window), execution claiming and concurrency conflicts, track-level claim locking, anti-impersonation, anti-IDOR, and audit history/status queries.
+- `MigrationExecutionReconciliationControllerTest`: 11 WebMvc tests covering `POST /api/migrations/execution/{executionId}/reconcile`, `GET /{executionId}/reconciliations`, `GET /{executionId}/reconciliation-history`, `GET /{executionId}/reconciliation-status`, anti-impersonation (400), anti-IDOR (404), illegal state conflict (409), and unauthenticated 401 rejection under Spring Security.
+
+## Future Testing Scope (Phase 12+)
 - Advanced Batching & Async Progress (Phase 12).
+- Reliability Engineering & Circuit Breakers (Phase 13).
+- Migration History & Auditing Presentation (Phase 14).
 - Full End-to-End User Journeys.
 
 ## Test Execution Status
-- **Phase 11 Execution, Recovery & Rollback Total**: 221 tests across 19 test classes:
+- **Phase 11 Execution, Recovery, Rollback & Reconciliation Total**: 271 tests across 23 test classes:
   - `ApprovedMigrationContractTest`: 12 tests.
   - `ApprovedPlanValidatorTest`: 19 tests.
   - `ApprovedMigrationExecutionServiceTest`: 8 tests.
@@ -644,6 +652,10 @@ Implemented and verified (39 dedicated Phase 11E tests):
   - `DefaultMigrationExecutionRollbackTest` (Phase 11F): 14 tests (partial rollback, in-flight claiming, idempotency, 404 handling, timeout ambiguity, audit trail, concurrent execution claims, concurrent track claims, stale version conflict).
   - `MigrationExecutionRecoveryAndRollbackControllerTest` (Phase 11F): 12 tests (WebMvc endpoints, anti-impersonation, anti-IDOR, 409 conflict on state invalidity and optimistic locking).
   - `YouTubeClientRollbackTest` (Phase 11F): 8 tests (HTTP DELETE playlistItems, 204, 404, 401, 403, 429, 503).
+  - `YouTubeClientInspectionTest` (Phase 11G): 12 tests (HTTP GET playlistItems, pagination, loop prevention, 400, 401, 403, 404, 429, 500, network timeouts).
+  - `ExecutionTrackRecordReconciliationTest` (Phase 11G): 9 tests (domain transitions, CONFIRMED_INSERTED, CONFIRMED_NOT_INSERTED, CONFIRMED_DELETED, CONFIRMED_PRESENT, AMBIGUOUS, illegal transition rejection).
+  - `DefaultMigrationExecutionReconciliationTest` (Phase 11G): 18 tests (insertion reconciliation, deletion reconciliation, predated video ambiguity, multiple match ambiguity, incomplete inspection safeguards, provider failure, fresh vs stale in-flight operations, concurrency claims, anti-IDOR).
+  - `MigrationExecutionReconciliationControllerTest` (Phase 11G): 11 tests (WebMvc endpoints, POST /reconcile, GET /reconciliations, GET /reconciliation-status, anti-impersonation, anti-IDOR, 409 conflict, 401 unauthenticated).
   *(Note on Phase 11F Test Discrepancy Resolution: The initial 48 vs 54 reported tests reflected 48 new tests across 5 new test classes + 6 tests in MigrationExecutionSafetyTest. The corrective audit pass expands failure classification for mutation ambiguity, adds in-flight ROLLING_BACK tests, verifies audit immutability, and establishes cross-instance atomic claiming with lease checks, totaling 62 dedicated Phase 11F tests across the 5 focused suites and 83 including full domain and architectural guardrails).*
 - **Review Subsystem Total (Phase 10)**: 105 tests across 8 test suites:
   - `ReviewSessionControllerTest`: 24 tests.
@@ -657,7 +669,7 @@ Implemented and verified (39 dedicated Phase 11E tests):
 - **Migration Planning Subsystem Total**: 55 tests across 6 dedicated test suites.
 - **Matching Engine Regression Suite (Phase 7)**: 18 test classes (274 tests).
 - **Matching Subsystem Total**: 29 test classes, ~365+ tests.
-- **Full Non-Container Test Suite Baseline**: 1,157+ unit and service tests across the entire application.
+- **Full Non-Container Test Suite Baseline**: 1,207+ unit and service tests across the entire application.
 - **Static Verification**: All Phase 10 controllers, services, DTOs, mappers, and tests adhere to Clean Architecture, strict null safety, validated DTO boundaries, anti-impersonation and anti-IDOR checks, zero entity leakage, and zero modifications to frozen Phase 5–9 production code.
 - **Execution Limitation**: Automated terminal execution via IDE subagent tool is blocked by environment permission broker (`unexpected user interaction type: not permission`). Exact PowerShell commands are provided for operator execution.
 

@@ -1,11 +1,50 @@
 # Current State
 
-Last Updated: 2026-11-01
+Last Updated: 2026-11-02
 
-Current Phase: Phase 11 — Playlist Creation & Execution (Phase 11A, 11B, 11C, 11D, 11E & 11F Complete; Phase 11G Next)
-Current Subphase: Phase 11F Complete (Failure Recovery & Partial Rollback)
+Current Phase: Phase 11 — Playlist Creation & Execution (Phases 11A–11G Complete; Phase 12 Next)
+Current Subphase: Phase 11G Complete (Ambiguous Outcome Reconciliation & Remote State Verification)
 
 ## Completed
+### Phase 11G (Ambiguous Outcome Reconciliation & Remote State Verification) [COMPLETE & AUDITED]
+- **Architectural Decision Record**:
+  - Published `ADR-029-ambiguous-outcome-reconciliation-and-remote-state-verification.md`.
+- **Database Persistence Schema**:
+  - Flyway migration `V9__phase11g_reconciliation_schema.sql` creating table `execution_reconciliation_records` with `ON DELETE RESTRICT` foreign keys referencing `migration_executions` and `execution_track_records`.
+  - Performance indexes on `execution_id`, `execution_track_record_id`, and `created_at`.
+- **Remote Destination Playlist Inspection**:
+  - Domain records: `DestinationPlaylistItemDetails` (immutable representation of remote playlist item including `playlistItemId`, `playlistId`, `destinationTrackId`, `position`, `publishedAt`, `title`) and `DestinationPlaylistInspection` (snapshot with `complete`, `failureReason`, and item list).
+  - Infrastructure DTOs: `YouTubePlaylistItemListResponseDto`, `YouTubePlaylistItemDto`, `YouTubePlaylistItemSnippetResponseDto` (capturing `publishedAt` timestamp).
+  - Provider Client: `YouTubeClient.getPlaylistItems(accessToken, playlistId, maxResults, pageToken)` handling HTTP 400, 401, 403, 404, 429, 500, network timeouts, and JSON mapping.
+  - Playlist Service: `YouTubePlaylistService.inspectPlaylist(userId, playlistId)` traversing paginated items with cycle detection on `pageToken`, maximum page threshold of 100 pages (5,000 items), and strict all-or-nothing completion semantics (discards partial list on any page failure to prevent false absence inference).
+  - Adapter: `YouTubeMusicDestinationAdapter` delegating `inspectPlaylist` from `MusicDestination`.
+- **Reconciliation Domain Model & Entities**:
+  - Entity `ExecutionReconciliationRecord`: JPA entity for append-only audit logging of all reconciliation outcomes.
+  - Enums: `ReconciliationType` (`INSERTION`, `DELETION`, `STALE_IN_FLIGHT_ADDING`, `STALE_IN_FLIGHT_ROLLING_BACK`) and `ReconciliationOutcome` (`CONFIRMED_INSERTED`, `CONFIRMED_NOT_INSERTED`, `CONFIRMED_DELETED`, `CONFIRMED_PRESENT`, `AMBIGUOUS`, `INSPECTION_FAILED`).
+  - Repository `ExecutionReconciliationRecordRepository`.
+  - Domain transitions on `ExecutionTrackRecord`: `reconcileConfirmedAdded`, `reconcileConfirmedNotInserted`, `reconcileConfirmedDeleted`, `reconcileConfirmedPresent`, and `reconcileAmbiguous`.
+- **Evidence-Driven State Resolution Engine**:
+  - **Insertion Reconciliation**: Inspects remote playlist items against track `destinationTrackId` and `startedAt`. Confirms insertion (`CONFIRMED_INSERTED` -> `ADDED`) only when an unassigned remote item exists with `publishedAt` timestamp at or after attempt start (with 30s clock skew allowance). Confirms non-insertion (`CONFIRMED_NOT_INSERTED` -> `FAILED`) only when inspection was 100% complete and zero matching items exist (allowing subsequent Phase 11F recovery). Retains `UNCERTAIN` and `RECOVERY_REQUIRED` on ambiguous evidence or predated items.
+  - **Deletion Reconciliation**: Authoritative matching on exact `destinationPlaylistItemId`. Confirms deletion (`CONFIRMED_DELETED` -> `ROLLED_BACK`) when item is absent from complete inspection. Confirms presence (`CONFIRMED_PRESENT` -> `ADDED`) when item remains present.
+  - **Lease-Aware Stale In-Flight Handling**: Active operations within the 5-minute lease threshold are protected and untouched. Abandoned operations exceeding 5 minutes in `ADDING` or `ROLLING_BACK` are safely reconciled via inspection.
+  - **Zero Guesswork / Zero Mutation**: Reconciliation is read-only inspection; it never automatically deletes duplicate-looking tracks or blindly retries mutations.
+- **Concurrency & Transaction Architecture**:
+  - Short-transaction pattern: Claim execution atomically with version check -> Perform remote inspection outside DB transactions -> Resolve state, record audit rows, reconcile derived counters, and release claim in a second short transaction.
+  - Track-level claiming: `ExecutionTrackRecordRepository.claimTrackReconciling`.
+- **REST Presentation API**:
+  - Endpoints on `MigrationExecutionController`:
+    - `POST /api/migrations/execution/{executionId}/reconcile`: Reconciles uncertain tracks.
+    - `GET /api/migrations/execution/{executionId}/reconciliations`: Retrieves audit history of reconciliation attempts (alias `/reconciliation-history`).
+    - `GET /api/migrations/execution/{executionId}/reconciliation-status`: Retrieves uncertain track counts and reconciliation eligibility.
+  - DTOs: `ReconcileExecutionApiRequest`, `ReconcileExecutionResponse`, `ReconciliationRecordResponse`, `TrackReconciliationOutcomeResponse`, `ExecutionReconciliationStatusResponse`.
+  - Mapper: `MigrationExecutionApiMapper`.
+- **Security & Architectural Guardrails**:
+  - Anti-IDOR: Validates execution ownership against authenticated principal.
+  - Anti-Impersonation: Rejects mismatched caller-supplied `userId` (HTTP 400).
+  - Unauthenticated access returns HTTP 401.
+  - Zero Phase 12 background workers or message queues introduced; execution is strictly synchronous.
+  - Zero modifications to frozen Phase 5–10 production code.
+
 ### Phase 11F (Failure Recovery & Partial Rollback) [COMPLETE & AUDITED]
 - **Architectural Decision Record**:
   - Published `ADR-028-failure-recovery-and-partial-rollback.md` (updated with V8 audit retention and mutation ambiguity rules).

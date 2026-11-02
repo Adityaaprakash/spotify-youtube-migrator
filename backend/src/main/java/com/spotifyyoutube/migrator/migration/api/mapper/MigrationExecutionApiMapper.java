@@ -373,5 +373,119 @@ public final class MigrationExecutionApiMapper {
                 dto.completedAt()
         );
     }
+
+    public static com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest toDomainRequest(
+            com.spotifyyoutube.migrator.migration.api.dto.ReconcileExecutionApiRequest request,
+            UUID resolvedUserId
+    ) {
+        if (request == null) {
+            return com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest.allTracks(resolvedUserId, null);
+        }
+        return new com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest(
+                resolvedUserId,
+                request.targetPosition(),
+                request.reason()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.ReconcileExecutionResponse toReconcileResponse(
+            com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary summary
+    ) {
+        if (summary == null) {
+            return null;
+        }
+        List<com.spotifyyoutube.migrator.migration.api.dto.TrackReconciliationOutcomeResponse> trackResponses = summary.trackOutcomes().stream()
+                .map(MigrationExecutionApiMapper::toTrackOutcomeResponse)
+                .toList();
+
+        return new com.spotifyyoutube.migrator.migration.api.dto.ReconcileExecutionResponse(
+                summary.executionId(),
+                summary.previousExecutionStatus(),
+                summary.resolvedExecutionStatus(),
+                summary.totalUncertainTracks(),
+                summary.reconciledTracksCount(),
+                summary.confirmedInsertedCount(),
+                summary.confirmedNotInsertedCount(),
+                summary.confirmedDeletedCount(),
+                summary.confirmedPresentCount(),
+                summary.ambiguousCount(),
+                summary.inspectionFailedCount(),
+                trackResponses,
+                summary.fullyResolved()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.TrackReconciliationOutcomeResponse toTrackOutcomeResponse(
+            com.spotifyyoutube.migrator.migration.application.execution.contract.TrackReconciliationOutcomeDto dto
+    ) {
+        if (dto == null) {
+            return null;
+        }
+        return new com.spotifyyoutube.migrator.migration.api.dto.TrackReconciliationOutcomeResponse(
+                dto.targetPosition(),
+                dto.sourceTrackId(),
+                dto.destinationTrackId(),
+                dto.destinationPlaylistItemId(),
+                dto.reconciliationType(),
+                dto.previousStatus(),
+                dto.resolvedStatus(),
+                dto.outcome(),
+                dto.evidenceSummary(),
+                dto.errorMessage(),
+                dto.timestamp()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.ReconciliationRecordResponse toReconciliationRecordResponse(
+            com.spotifyyoutube.migrator.migration.application.execution.contract.ReconciliationRecordDto dto
+    ) {
+        if (dto == null) {
+            return null;
+        }
+        return new com.spotifyyoutube.migrator.migration.api.dto.ReconciliationRecordResponse(
+                dto.id(),
+                dto.executionId(),
+                dto.trackRecordId(),
+                dto.targetPosition(),
+                dto.reconciliationType(),
+                dto.previousTrackStatus(),
+                dto.resolvedTrackStatus(),
+                dto.reconciliationOutcome(),
+                dto.destinationPlaylistId(),
+                dto.destinationPlaylistItemId(),
+                dto.destinationTrackId(),
+                dto.evidenceSummary(),
+                dto.evidenceTimestamp(),
+                dto.inspectionStartedAt(),
+                dto.inspectionCompletedAt(),
+                dto.failureCode(),
+                dto.sanitizedErrorMessage(),
+                dto.createdAt()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.ExecutionReconciliationStatusResponse toReconciliationStatusResponse(
+            com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationStatusDto dto
+    ) {
+        if (dto == null) {
+            return null;
+        }
+        List<com.spotifyyoutube.migrator.migration.api.dto.ExecutionTrackRecordResponse> trackResponses = dto.eligibleTracks().stream()
+                .map(MigrationExecutionApiMapper::toTrackRecordResponse)
+                .toList();
+
+        return new com.spotifyyoutube.migrator.migration.api.dto.ExecutionReconciliationStatusResponse(
+                dto.executionId(),
+                dto.executionStatus(),
+                dto.totalApprovedTracks(),
+                dto.successfulInsertions(),
+                dto.failedInsertions(),
+                dto.uncertainInsertions(),
+                dto.rolledBackInsertions(),
+                dto.staleInFlightCount(),
+                dto.reconciliationRequired(),
+                trackResponses
+        );
+    }
 }
 

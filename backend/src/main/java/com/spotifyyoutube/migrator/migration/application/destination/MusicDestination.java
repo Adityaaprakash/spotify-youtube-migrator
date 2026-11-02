@@ -4,6 +4,7 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.AddTr
 import com.spotifyyoutube.migrator.migration.application.destination.model.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistInspection;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistVerification;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationSearchResult;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackDetails;
@@ -89,4 +90,15 @@ public interface MusicDestination {
      * @return verification result with status and diagnostic details
      */
     DestinationPlaylistVerification verifyPlaylist(UUID userId, String playlistId);
+
+    /**
+     * Inspects the destination playlist, retrieving a complete snapshot of all remote playlist items (Phase 11G).
+     * Handles pagination completely until the full playlist snapshot is gathered.
+     * Protects against infinite pagination loops and marks complete=false on provider failures.
+     *
+     * @param userId user identifier possessing the destination authorization
+     * @param playlistId destination playlist identifier
+     * @return inspection result containing all remote playlist items or error details
+     */
+    DestinationPlaylistInspection inspectPlaylist(UUID userId, String playlistId);
 }

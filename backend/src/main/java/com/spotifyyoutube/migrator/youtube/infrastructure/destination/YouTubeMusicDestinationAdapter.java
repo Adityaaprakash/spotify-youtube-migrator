@@ -5,6 +5,7 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.AddTr
 import com.spotifyyoutube.migrator.migration.application.destination.model.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistInspection;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistVerification;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationSearchResult;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackCandidate;
@@ -158,6 +159,11 @@ public class YouTubeMusicDestinationAdapter implements MusicDestination {
     @Override
     public DestinationPlaylistVerification verifyPlaylist(UUID userId, String playlistId) {
         return playlistService.verifyPlaylist(userId, playlistId);
+    }
+
+    @Override
+    public DestinationPlaylistInspection inspectPlaylist(UUID userId, String playlistId) {
+        return playlistService.inspectPlaylist(userId, playlistId);
     }
 
     private DestinationPlaylist toDestinationPlaylist(YouTubePlaylistResponse response) {
