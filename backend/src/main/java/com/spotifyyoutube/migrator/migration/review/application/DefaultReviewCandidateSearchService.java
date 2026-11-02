@@ -249,7 +249,7 @@ public class DefaultReviewCandidateSearchService implements ReviewCandidateSearc
             return discoveryResult.executedQueries().get(0).query().query();
         }
         String cleanTitle = normalized != null ? normalized.cleanTitle() : "";
-        String primaryArtist = normalized != null && normalized.artistCredit() != null ? normalized.artistCredit().primaryArtist() : "";
+        String primaryArtist = normalized != null ? normalized.primaryArtist() : "";
         return (primaryArtist + " " + cleanTitle).trim();
     }
 

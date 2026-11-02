@@ -32,7 +32,7 @@ class MigrationExecutionDomainTest {
         testUser = new User("tester@example.com");
         testUser.setId(UUID.randomUUID());
 
-        testSession = new ReviewSession(UUID.randomUUID(), testUser, "sp_playlist_1", "My Spotify Playlist");
+        testSession = new ReviewSession(testUser, "sp_playlist_1", "My Spotify Playlist", UUID.randomUUID());
         testSession.setId(UUID.randomUUID());
 
         ApprovedTrack track0 = new ApprovedTrack(
@@ -44,7 +44,7 @@ class MigrationExecutionDomainTest {
                 "Song Zero (Audio)",
                 "Channel A",
                 Duration.ofMinutes(3),
-                ReviewDecisionSource.CONFIRMED_EXACT,
+                ReviewDecisionSource.AUTOMATIC,
                 0
         );
 
@@ -57,23 +57,24 @@ class MigrationExecutionDomainTest {
                 "Song One (Audio)",
                 "Channel B",
                 Duration.ofMinutes(4),
-                ReviewDecisionSource.USER_ACCEPTED,
+                ReviewDecisionSource.USER_SELECTED,
                 1
         );
 
         sampleContext = new ApprovedMigrationContext(
                 testSession.getId(),
                 UUID.randomUUID(),
+                testUser.getId(),
                 "sp_playlist_1",
                 "My Spotify Playlist",
                 "My Target Playlist",
                 "Description",
                 false,
+                List.of(track0, track1),
                 2,
                 2,
                 0,
-                Instant.now(),
-                List.of(track0, track1)
+                Instant.now()
         );
     }
 
@@ -99,7 +100,7 @@ class MigrationExecutionDomainTest {
             assertThat(execution.getDestinationPlaylistId()).isEqualTo("PL_youtube_123");
             assertThat(execution.getDestinationPlaylistUrl()).contains("https://music.youtube.com/playlist?list=PL_youtube_123");
             assertThat(execution.getSourcePlaylistTitle()).isEqualTo("My Spotify Playlist");
-            assertThat(execution.getPlanId()).contains(sampleContext.planId());
+            assertThat(execution.getPlanId()).isEqualTo(sampleContext.planId());
             assertThat(execution.getTotalApprovedTracks()).isZero();
             assertThat(execution.canResume()).isTrue();
             assertThat(execution.isTerminal()).isFalse();

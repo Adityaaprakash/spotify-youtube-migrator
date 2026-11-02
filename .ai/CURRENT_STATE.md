@@ -2,10 +2,45 @@
 
 Last Updated: 2026-11-02
 
-Current Phase: Phase 11 — Playlist Creation & Execution [COMPLETE / FROZEN] (Phases 11A–11H Complete & Frozen; Phase 12 Next)
-Current Subphase: Phase 11H Complete & Subsystem Frozen (End-to-End Migration Orchestration, Production Hardening & Freeze)
+Current Phase: Phase 10–11 Integration Audit & Corrective Engineering [COMPLETE / AUDITED] (Phase 10 & Phase 11A–11H Full Diagnostic Audit Complete; Phase 12 Next)
+Current Subphase: Phase 10–11 Full System Diagnostic & Integration Audit
 
 ## Completed
+### Phase 10–11 (Full System Diagnostics, Integration Audit & Corrective Engineering) [COMPLETE & AUDITED]
+- **Diagnostic Audit Scope**:
+  - Full-system diagnostic audit across the entire boundary between Phase 10 (Review & Correction System) and Phase 11 (Playlist Creation & Execution, 11A–11H).
+  - Validated Phase 10 review lifecycle, manual candidate override persistence, track exclusions, duplicate conflict resolution, atomic completion, and immutability invariants.
+  - Validated Phase 11 execution contracts, approved plan validation, destination playlist creation, ordered sequential track insertion, durable execution state, rollback recovery, remote outcome reconciliation, and end-to-end orchestration.
+  - Audited Flyway migrations V1 through V9, PostgreSQL schema constraints, JPA entity mappings, and `ON DELETE RESTRICT` audit retention rules.
+- **Defects Identified & Corrected**:
+  - **FINDING-01 (HIGH / Contract & Compilation Defect)**: Missing static factory overloads in `TrackInsertionOutcome` accepting raw primitive/String fields (`success`, `failed`, `uncertain`, `skipped`), causing contract callers and test suites to fail compilation. Corrected by implementing all 4 overloaded static factory methods in `TrackInsertionOutcome`.
+  - **FINDING-02 (MEDIUM / Contract Compatibility Defect)**: Missing `fullySuccessful()` alias method on `PlaylistTrackInsertionSummary`, causing contract assertions to fail. Corrected by adding `public boolean fullySuccessful() { return isFullySuccessful(); }`.
+  - **FINDING-03 (HIGH / Runtime MatchException & Invariant Violation)**: In `DefaultOrderedTrackInsertionService.toInsertionSummary`:
+    1. Enum pattern switch omitted `ROLLING_BACK` and `ROLLED_BACK`, causing runtime `java.lang.MatchException` on executions with rolled-back tracks. Corrected by mapping `ROLLING_BACK, ROLLED_BACK` to `TrackInsertionOutcome.skipped(...)`.
+    2. Constructor invocation did not account for `summary.rolledBackInsertions()`, violating `PlaylistTrackInsertionSummary` mathematical sum invariant (`sum != totalApprovedTracks`) and throwing `IllegalArgumentException`. Corrected by passing `summary.skippedInsertions() + summary.rolledBackInsertions()`.
+  - **FINDING-04 (LOW / Test Assertion Discrepancy)**: In `DefaultOrderedTrackInsertionServiceTest`, token redaction test asserted `[REDACTED_TOKEN]` instead of the standard codebase pattern `[REDACTED]`. Corrected to assert `[REDACTED]`.
+  - **FINDING-05 (BLOCKER / Checkstyle Parser Failure)**: In `DefaultMigrationExecutionStateService.java` line 328, an extra closing parenthesis `))` (`reviewSessionId));`) in `getExecutionByReviewSession` caused Checkstyle's ANTLR parser to report `323:42: mismatched input '(' expecting ';': InputMismatchException` (prematurely closing the enclosing `transactionTemplate.execute(status -> { ... })` lambda argument list). Corrected by removing the extraneous parenthesis. Added unit regression tests `getExecutionByReviewSessionSuccess` and `getExecutionByReviewSessionAntiIdor` in `DefaultMigrationExecutionStateServiceTest.QueryTests`.
+  - **FINDING-07 (BLOCKER / Missing Entity Import)**: In `MigrationExecutionRepository.java`, missing `import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;` caused 4 compilation errors (`cannot find symbol: class MigrationExecution`). Corrected by adding explicit import.
+  - **FINDING-08 (HIGH / Contract Accessor Mismatch)**: `ExecutionValidationResult` record declared component `valid` without a JavaBean accessor `isValid()`, breaking 3 production callers and 20+ test suites expecting `isValid()`. Corrected by adding `public boolean isValid() { return valid; }`.
+  - **FINDING-09 (HIGH / Optional vs Direct Type Discrepancies)**: Multiple files attempted calling `.orElse(null)` on direct `UUID` and `String` fields, or `.isPresent()` on `String`:
+    1. `MigrationExecutionApiMapper.java`: Calling `.orElse(null)` on `summary.planId()` (UUID) and `summary.destinationPlaylistUrl()` (String). Corrected to direct property access.
+    2. `DefaultDestinationPlaylistCreationService.java`: Calling `.isPresent()` on `context.targetPlaylistDescription()` (String). Corrected to direct null and blank check.
+    3. `DefaultMigrationExecutionStateService.java`: Calling `.orElse(null)` on `request.destinationPlaylistUrl()` (String). Corrected to direct property access.
+  - **FINDING-10 (HIGH / Namespace Type Confusion)**: In `DefaultApprovedMigrationOrchestrator.java`, accidentally imported `api.dto.InitializeExecutionRequest` instead of application contract `contract.InitializeExecutionRequest`, causing missing `of(...)` factory method and type incompatibility. Corrected import.
+  - **FINDING-11 (MEDIUM / Failure Analysis Accessor Defect)**: In `DefaultMigrationExecutionStateService.java`, called non-existent `analysis.httpStatusCode().orElse(0)`. Corrected to canonical `analysis.getProviderStatusCode().orElse(0)`.
+  - **FINDING-12 (MEDIUM / Ambiguous Validator Overload)**: In `DefaultApprovedPlanValidator.java`, calls passing untyped `null` to `validate(session, null, userId)` and `validateAndApprove(session, null, userId)` were ambiguous between `ApprovedMigrationExecutionRequest` and `MigrationPlan` overloads. Disambiguated with `(ApprovedMigrationExecutionRequest) null`.
+  - **FINDING-13 (MEDIUM / Domain Accessor Misalignment)**: In `DefaultReviewCandidateSearchService.java`, called non-existent `normalized.artistCredit().primaryArtist()`. Corrected to canonical `normalized.primaryArtist()`.
+  - **FINDING-14 (HIGH / Constructor Parameter Ordering & Rollback Distinction)**: In `DefaultOrderedTrackInsertionService.toInsertionSummary()`:
+    1. Arguments for `PlaylistTrackInsertionSummary` constructor were passed out of order (`startedAt, completedAt, outcomes` instead of `outcomes, startedAt, completedAt`).
+    2. Explicitly separated `ROLLED_BACK` and `ROLLING_BACK` states in the switch expression to preserve semantic distinctions between never-inserted and inserted-then-removed tracks.
+- **Regression Verification**:
+  - Added regression test `toInsertionSummaryHandlesRollbackStates` in `DefaultOrderedTrackInsertionServiceTest` verifying safe mapping and mathematical invariant preservation across all rollback track states.
+  - Added unit regression tests `getExecutionByReviewSessionSuccess` and `getExecutionByReviewSessionAntiIdor` in `DefaultMigrationExecutionStateServiceTest`.
+- **Frontend / Backend Boundary Limitation**:
+  - Confirmed repository contains only Phase 0 boilerplate frontend (`frontend/src/` has basic `fetchClient` and App placeholder). No Phase 10 or 11 UI implementation exists in the repository.
+- **Phase 12 Handoff Readiness**:
+  - Verified Phase 10–11 synchronous workflow is consistent, atomic, secure (anti-IDOR, anti-impersonation, token redaction), recoverable, and ready for Phase 12 asynchronous migration.
+
 ### Phase 11H (End-to-End Migration Orchestration, Production Hardening & Subsystem Freeze) [COMPLETE & AUDITED / FROZEN]
 - **Architectural Decision Record**:
   - Published `ADR-030-phase11-end-to-end-orchestration-and-production-freeze.md`.

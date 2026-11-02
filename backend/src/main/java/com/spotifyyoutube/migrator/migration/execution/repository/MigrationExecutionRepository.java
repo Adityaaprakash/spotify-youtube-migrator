@@ -1,5 +1,6 @@
 package com.spotifyyoutube.migrator.migration.execution.repository;
 
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;

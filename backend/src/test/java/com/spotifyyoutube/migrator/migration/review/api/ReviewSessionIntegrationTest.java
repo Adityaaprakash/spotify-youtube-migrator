@@ -77,10 +77,12 @@ public class ReviewSessionIntegrationTest {
 
     private MigrationPlan createSamplePlan(UUID planId, String playlistId) {
         DestinationTrackCandidate cand0 = new DestinationTrackCandidate(
-                "yt-0", "Bohemian Rhapsody", "Queen", (Duration) null
+                "yt-0", "Bohemian Rhapsody", "Queen", "Official Video",
+                "https://img.youtube.com/vi/yt-0/0.jpg", "2020-01-01T00:00:00Z", Duration.ofMinutes(6)
         );
         DestinationTrackCandidate cand1 = new DestinationTrackCandidate(
-                "yt-1", "Don't Stop Me Now", "Queen", (Duration) null
+                "yt-1", "Don't Stop Me Now", "Queen", "Official Video",
+                "https://img.youtube.com/vi/yt-1/0.jpg", "2020-01-01T00:00:00Z", Duration.ofMinutes(3)
         );
 
         MigrationPlanTrack track0 = new MigrationPlanTrack(
@@ -95,7 +97,7 @@ public class ReviewSessionIntegrationTest {
         );
 
         MigrationPlanSummary summary = new MigrationPlanSummary(
-                2, 1, 1, 0, 0, 0, 0, 0.5, 0.5, 0.0, 0.0, 0.0, 0.0
+                2, 1, 1, 0, 0, 0, 0
         );
 
         return new MigrationPlan(planId, playlistId, "Queen Hits", Instant.now(), List.of(track0, track1), summary);
@@ -249,7 +251,8 @@ public class ReviewSessionIntegrationTest {
         when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(session));
 
         DestinationTrackCandidate manualCand = new DestinationTrackCandidate(
-                "yt-manual-replacement", "Manual Choice Title", "Queen Channel", (Duration) null
+                "yt-manual-replacement", "Manual Choice Title", "Queen Channel",
+                "Description", "thumb.jpg", "2024-01-01", (Duration) null
         );
 
         ReviewTrack selectedTrack = reviewSessionService.selectCandidate(sessionId, 0, manualCand, "Better audio", userId);

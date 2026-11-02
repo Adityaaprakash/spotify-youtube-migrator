@@ -224,7 +224,7 @@ class YouTubeClientInspectionTest {
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
                         assertThat(e.getProviderStatusCode()).isEqualTo(429);
-                        assertThat(e.getRetryAfterSeconds()).isEqualTo(60L);
+                        assertThat(e.getRetryAfter()).isEqualTo("60");
                     });
             mockServer.verify();
         }
@@ -250,7 +250,7 @@ class YouTubeClientInspectionTest {
         void handlesNetworkTimeout() {
             mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=" + PLAYLIST_ID + "&maxResults=50"))
                     .andExpect(method(HttpMethod.GET))
-                    .andRespond(withException(new ResourceAccessException("Read timed out", new SocketTimeoutException())));
+                    .andRespond(withException(new SocketTimeoutException("Read timed out")));
 
             assertThatThrownBy(() -> youTubeClient.getPlaylistItems(ACCESS_TOKEN, PLAYLIST_ID, 50, null))
                     .isInstanceOf(ResourceAccessException.class);

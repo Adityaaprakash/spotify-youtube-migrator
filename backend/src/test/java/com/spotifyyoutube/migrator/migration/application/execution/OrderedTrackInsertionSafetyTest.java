@@ -5,6 +5,7 @@ import com.spotifyyoutube.migrator.matching.engine.TrackMatchingEngine;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizationOrchestrator;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
@@ -22,7 +23,6 @@ import com.spotifyyoutube.migrator.migration.review.repository.ReviewTrackReposi
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
 import com.spotifyyoutube.migrator.youtube.application.YouTubePlaylistService;
-import com.spotifyyoutube.migrator.youtube.dto.YouTubePlaylistDto;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -123,19 +123,18 @@ class OrderedTrackInsertionSafetyTest {
     void zeroProviderCallsOnValidationFailure() {
         ApprovedMigrationExecutionService executionService = mock(ApprovedMigrationExecutionService.class);
         MusicDestination musicDestination = mock(MusicDestination.class);
-        YouTubePlaylistService youTubePlaylistService = mock(YouTubePlaylistService.class);
 
         OrderedTrackInsertionService service = new DefaultOrderedTrackInsertionService(
-                executionService, musicDestination, youTubePlaylistService
+                executionService, musicDestination
         );
 
         UUID userId = UUID.randomUUID();
         UUID sessionId = UUID.randomUUID();
         InsertTracksExecutionRequest req = InsertTracksExecutionRequest.of(sessionId, "PL_dest_1", userId);
 
-        ExecutionValidationError error = new ExecutionValidationError(ValidationFailureCode.UNRESOLVED_DECISIONS, 0, "sp-0", "Track unresolved");
+        ExecutionValidationError error = new ExecutionValidationError(ValidationFailureCode.UNRESOLVED_TRACK, 0, "sp-0", "Track unresolved");
         ExecutionValidationResult invalidResult = ExecutionValidationResult.invalid(List.of(error));
-        when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+        when(executionService.prepareExecution(sessionId, userId))
                 .thenThrow(new MigrationExecutionValidationException(invalidResult));
 
         assertThatThrownBy(() -> service.insertApprovedTracks(req, userId))
@@ -143,7 +142,6 @@ class OrderedTrackInsertionSafetyTest {
 
         // Crucial invariant: zero provider mutations
         verifyNoInteractions(musicDestination);
-        verifyNoInteractions(youTubePlaylistService);
     }
 
     @Test
@@ -151,10 +149,9 @@ class OrderedTrackInsertionSafetyTest {
     void strictlyMonotonicSequentialInsertionOrder() {
         ApprovedMigrationExecutionService executionService = mock(ApprovedMigrationExecutionService.class);
         MusicDestination musicDestination = mock(MusicDestination.class);
-        YouTubePlaylistService youTubePlaylistService = mock(YouTubePlaylistService.class);
 
         OrderedTrackInsertionService service = new DefaultOrderedTrackInsertionService(
-                executionService, musicDestination, youTubePlaylistService
+                executionService, musicDestination
         );
 
         UUID userId = UUID.randomUUID();
@@ -172,10 +169,10 @@ class OrderedTrackInsertionSafetyTest {
                 "Migrated Title", "Desc", true, List.of(t0, t1, t2, t3), 4, 4, 0, Instant.now()
         );
 
-        when(executionService.prepareExecution(any(), eq(userId))).thenReturn(context);
+        when(executionService.prepareExecution(sessionId, userId)).thenReturn(context);
         when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
-        when(youTubePlaylistService.getPlaylist(userId, playlistId))
-                .thenReturn(new YouTubePlaylistDto(playlistId, "Title", "Desc", "private", 0L, null));
+        when(musicDestination.getPlaylist(userId, playlistId))
+                .thenReturn(new DestinationPlaylist(playlistId, "Title", "Desc", "private", "https://youtube.com/playlist?list=" + playlistId, Platform.YOUTUBE));
 
         when(musicDestination.addTrackToPlaylist(eq(userId), eq(playlistId), any()))
                 .thenReturn(new DestinationPlaylistItem("it0", playlistId, "y0", 0))

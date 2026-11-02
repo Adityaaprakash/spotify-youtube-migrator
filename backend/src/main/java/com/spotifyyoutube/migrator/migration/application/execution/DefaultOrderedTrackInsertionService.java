@@ -23,6 +23,7 @@ import org.springframework.web.client.ResourceAccessException;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -139,7 +140,9 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
         }
 
         Instant startedAt = Instant.now();
-        List<ApprovedTrack> approvedTracks = context.approvedTracks();
+        List<ApprovedTrack> approvedTracks = context.approvedTracks().stream()
+                .sorted(Comparator.comparingInt(ApprovedTrack::targetPosition))
+                .toList();
         List<TrackInsertionOutcome> outcomes = new ArrayList<>(approvedTracks.size());
 
         int successfulCount = 0;
@@ -157,7 +160,7 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
             if (stopRemaining) {
                 outcomes.add(TrackInsertionOutcome.skipped(
                         track,
-                        "Skipped due to prior insertion " + stopReason
+                        "Skipped due to prior " + stopReason
                 ));
                 skippedCount++;
                 continue;
@@ -185,7 +188,7 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
                     ));
                     failedCount++;
                     stopRemaining = true;
-                    stopReason = "failure";
+                    stopReason = "insertion failure at target position " + track.targetPosition();
                 }
             } catch (ResourceAccessException ex) {
                 // Ambiguous failure: network timeout / connection reset
@@ -194,11 +197,11 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
                         track.destinationTrackId(), trimmedPlaylistId, sanitizedMsg);
                 outcomes.add(TrackInsertionOutcome.uncertain(
                         track,
-                        "Insertion timed out; remote outcome is uncertain: " + sanitizedMsg
+                        "Remote outcome uncertain due to network timeout or connection reset: " + sanitizedMsg
                 ));
                 uncertainCount++;
                 stopRemaining = true;
-                stopReason = "timeout (uncertain outcome)";
+                stopReason = "uncertain outcome at target position " + track.targetPosition();
             } catch (ExternalProviderException ex) {
                 String sanitizedMsg = sanitize(ex.getMessage());
                 log.error("Destination provider rejected track insertion for track {} in playlist {}: {}",
@@ -206,7 +209,7 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
                 outcomes.add(TrackInsertionOutcome.failed(track, sanitizedMsg));
                 failedCount++;
                 stopRemaining = true;
-                stopReason = "provider rejection";
+                stopReason = "insertion failure at target position " + track.targetPosition();
             } catch (Exception ex) {
                 String sanitizedMsg = sanitize(ex.getMessage());
                 log.error("Unexpected error inserting track {} in playlist {}: {}",
@@ -214,7 +217,7 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
                 outcomes.add(TrackInsertionOutcome.failed(track, "Unexpected insertion error: " + sanitizedMsg));
                 failedCount++;
                 stopRemaining = true;
-                stopReason = "unexpected error";
+                stopReason = "insertion failure at target position " + track.targetPosition();
             }
         }
 
@@ -294,6 +297,24 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
                                 tr.destinationTrackId(),
                                 tr.errorMessage() != null ? tr.errorMessage() : "Uncertain outcome"
                         );
+                        case ROLLED_BACK -> TrackInsertionOutcome.skipped(
+                                tr.targetPosition(),
+                                tr.sourcePosition(),
+                                tr.sourceTrackId(),
+                                tr.sourceTitle(),
+                                tr.sourceArtist(),
+                                tr.destinationTrackId(),
+                                tr.errorMessage() != null ? tr.errorMessage() : "Track was rolled back from destination playlist"
+                        );
+                        case ROLLING_BACK -> TrackInsertionOutcome.skipped(
+                                tr.targetPosition(),
+                                tr.sourcePosition(),
+                                tr.sourceTrackId(),
+                                tr.sourceTitle(),
+                                tr.sourceArtist(),
+                                tr.destinationTrackId(),
+                                tr.errorMessage() != null ? tr.errorMessage() : "Track is rolling back from destination playlist"
+                        );
                         case SKIPPED, PENDING, ADDING -> TrackInsertionOutcome.skipped(
                                 tr.targetPosition(),
                                 tr.sourcePosition(),
@@ -309,7 +330,7 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
 
         return new PlaylistTrackInsertionSummary(
                 summary.reviewSessionId(),
-                summary.planId().orElse(null),
+                summary.planId(),
                 summary.userId(),
                 summary.destinationPlatform(),
                 summary.destinationPlaylistId(),
@@ -317,10 +338,10 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
                 summary.successfulInsertions(),
                 summary.failedInsertions(),
                 summary.uncertainInsertions(),
-                summary.skippedInsertions(),
+                summary.skippedInsertions() + summary.rolledBackInsertions(),
+                outcomes,
                 summary.startedAt() != null ? summary.startedAt() : Instant.now(),
-                summary.completedAt() != null ? summary.completedAt() : Instant.now(),
-                outcomes
+                summary.completedAt() != null ? summary.completedAt() : Instant.now()
         );
     }
 }

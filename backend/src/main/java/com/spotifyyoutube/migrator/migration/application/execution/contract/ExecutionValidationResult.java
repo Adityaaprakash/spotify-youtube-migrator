@@ -59,6 +59,10 @@ public record ExecutionValidationResult(
         return !errors.isEmpty();
     }
 
+    public boolean isValid() {
+        return valid;
+    }
+
     public String firstErrorMessage() {
         return errors.isEmpty() ? "" : errors.getFirst().message();
     }

@@ -5,18 +5,22 @@ import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionTrackRecordDto;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.InsertTracksExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackInsertionOutcome;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackInsertionStatus;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
-import com.spotifyyoutube.migrator.youtube.application.YouTubePlaylistService;
-import com.spotifyyoutube.migrator.youtube.dto.YouTubePlaylistDto;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -38,6 +42,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -53,9 +58,6 @@ class DefaultOrderedTrackInsertionServiceTest {
 
     @Mock
     private MusicDestination musicDestination;
-
-    @Mock
-    private YouTubePlaylistService youTubePlaylistService;
 
     @InjectMocks
     private DefaultOrderedTrackInsertionService insertionService;
@@ -99,8 +101,8 @@ class DefaultOrderedTrackInsertionServiceTest {
     }
 
     private void mockPlaylistExists() {
-        when(youTubePlaylistService.getPlaylist(userId, playlistId))
-                .thenReturn(new YouTubePlaylistDto(playlistId, "Migrated Playlist", "Description", "private", 0L, null));
+        when(musicDestination.getPlaylist(userId, playlistId))
+                .thenReturn(new DestinationPlaylist(playlistId, "Migrated Playlist", "Description", "private", "https://youtube.com/playlist?list=" + playlistId, Platform.YOUTUBE));
     }
 
     @Nested
@@ -111,16 +113,16 @@ class DefaultOrderedTrackInsertionServiceTest {
         @DisplayName("Rejects null execution request")
         void rejectsNullRequest() {
             assertThatThrownBy(() -> insertionService.insertApprovedTracks(null, userId))
-                    .isInstanceOf(NullPointerException.class)
-                    .hasMessageContaining("request must not be null");
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Execution request must not be null");
         }
 
         @Test
         @DisplayName("Rejects null authenticated userId")
         void rejectsNullUserId() {
             assertThatThrownBy(() -> insertionService.insertApprovedTracks(request, null))
-                    .isInstanceOf(NullPointerException.class)
-                    .hasMessageContaining("authenticatedUserId must not be null");
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Authenticated user ID must not be null");
         }
 
         @Test
@@ -131,19 +133,17 @@ class DefaultOrderedTrackInsertionServiceTest {
 
             assertThatThrownBy(() -> insertionService.insertApprovedTracks(maliciousReq, userId))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("does not match authenticated user ID");
+                    .hasMessageContaining("does not match authenticated user");
 
             verifyNoInteractions(musicDestination);
-            verifyNoInteractions(youTubePlaylistService);
         }
 
         @Test
         @DisplayName("Rejects when destination playlist is not accessible or not found")
         void destinationPlaylistNotFound() {
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(validContext);
-            when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
-            when(youTubePlaylistService.getPlaylist(userId, playlistId))
+            when(musicDestination.getPlaylist(userId, playlistId))
                     .thenThrow(new ResourceNotFoundException("Playlist not found"));
 
             assertThatThrownBy(() -> insertionService.insertApprovedTracks(request, userId))
@@ -156,7 +156,7 @@ class DefaultOrderedTrackInsertionServiceTest {
         @Test
         @DisplayName("Rejects non-YouTube destination platform")
         void rejectsNonYouTubePlatform() {
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(validContext);
             when(musicDestination.getPlatform()).thenReturn(Platform.SPOTIFY);
 
@@ -164,7 +164,6 @@ class DefaultOrderedTrackInsertionServiceTest {
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("Only YOUTUBE destination platform is supported");
 
-            verifyNoInteractions(youTubePlaylistService);
             verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }
 
@@ -177,14 +176,13 @@ class DefaultOrderedTrackInsertionServiceTest {
                     List.of(), 3, 0, 3, Instant.now()
             );
 
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(emptyContext);
 
             assertThatThrownBy(() -> insertionService.insertApprovedTracks(request, userId))
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("no approved tracks available for insertion");
 
-            verifyNoInteractions(youTubePlaylistService);
             verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }
     }
@@ -196,7 +194,7 @@ class DefaultOrderedTrackInsertionServiceTest {
         @Test
         @DisplayName("Successfully inserts tracks sequentially in ascending targetPosition order with InOrder verification")
         void insertsTracksInCanonicalOrder() {
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(validContext);
             when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
             mockPlaylistExists();
@@ -238,13 +236,13 @@ class DefaultOrderedTrackInsertionServiceTest {
         @DisplayName("Preserves targetPosition ordering even if context list order is unordered")
         void preservesOrderRegardlessOfContextListOrder() {
             // Unordered list in context: track 2, track 0, track 1
-            ApprovedMigrationContext scrambledContext = new ApprovedMigrationContext(
-                    sessionId, planId, userId, "sp-pl-1", "Source Playlist",
-                    "Migrated - Source Playlist", "Migrated description", true,
-                    List.of(track2, track0, track1), 3, 3, 0, Instant.now()
-            );
+            ApprovedMigrationContext scrambledContext = mock(ApprovedMigrationContext.class);
+            when(scrambledContext.reviewSessionId()).thenReturn(sessionId);
+            when(scrambledContext.planId()).thenReturn(planId);
+            when(scrambledContext.hasApprovedTracks()).thenReturn(true);
+            when(scrambledContext.approvedTracks()).thenReturn(List.of(track2, track0, track1));
 
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(scrambledContext);
             when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
             mockPlaylistExists();
@@ -275,7 +273,7 @@ class DefaultOrderedTrackInsertionServiceTest {
         @Test
         @DisplayName("Confirmed provider rejection stops subsequent insertions and marks them SKIPPED")
         void confirmedFailureStopsSubsequentTracks() {
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(validContext);
             when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
             mockPlaylistExists();
@@ -312,7 +310,7 @@ class DefaultOrderedTrackInsertionServiceTest {
         @Test
         @DisplayName("Ambiguous timeout marks current track UNCERTAIN and stops subsequent insertions as SKIPPED")
         void ambiguousTimeoutStopsSubsequentTracks() {
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(validContext);
             when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
             mockPlaylistExists();
@@ -348,7 +346,7 @@ class DefaultOrderedTrackInsertionServiceTest {
         @Test
         @DisplayName("First track failure results in FAILED execution status and all remaining SKIPPED")
         void firstTrackFailureMarksExecutionFailed() {
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(validContext);
             when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
             mockPlaylistExists();
@@ -371,7 +369,7 @@ class DefaultOrderedTrackInsertionServiceTest {
         @Test
         @DisplayName("Sensitive Bearer and OAuth tokens in provider error message are scrubbed")
         void sanitizesSensitiveTokens() {
-            when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+            when(executionService.prepareExecution(sessionId, userId))
                     .thenReturn(validContext);
             when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
             mockPlaylistExists();
@@ -383,7 +381,66 @@ class DefaultOrderedTrackInsertionServiceTest {
 
             assertThat(summary.trackOutcomes().get(0).message())
                     .doesNotContain("ya29.")
-                    .contains("[REDACTED_TOKEN]");
+                    .contains("[REDACTED]");
+        }
+
+        @Test
+        @DisplayName("toInsertionSummary safely maps executions containing ROLLING_BACK and ROLLED_BACK tracks")
+        void toInsertionSummaryHandlesRollbackStates() {
+            MigrationExecutionStateService stateService = mock(MigrationExecutionStateService.class);
+            DefaultOrderedTrackInsertionService service = new DefaultOrderedTrackInsertionService(
+                    executionService, musicDestination, stateService
+            );
+
+            when(executionService.prepareExecution(sessionId, userId)).thenReturn(validContext);
+
+            UUID executionId = UUID.randomUUID();
+            Instant now = Instant.now();
+
+            ExecutionTrackRecordDto tr0 = new ExecutionTrackRecordDto(
+                    UUID.randomUUID(), 0, 0, "sp-0", "Song 0", "Artist 0",
+                    "yt-0", "item-0", ExecutionTrackStatus.ADDED, null, 1, now, now
+            );
+            ExecutionTrackRecordDto tr1 = new ExecutionTrackRecordDto(
+                    UUID.randomUUID(), 1, 1, "sp-1", "Song 1", "Artist 1",
+                    "yt-1", "item-1", ExecutionTrackStatus.ROLLED_BACK, "Rolled back", 1, now, now
+            );
+            ExecutionTrackRecordDto tr2 = new ExecutionTrackRecordDto(
+                    UUID.randomUUID(), 2, 2, "sp-2", "Song 2", "Artist 2",
+                    "yt-2", null, ExecutionTrackStatus.ROLLING_BACK, "In-flight rollback", 1, now, null
+            );
+
+            MigrationExecutionSummary execSummary = new MigrationExecutionSummary(
+                    executionId, sessionId, planId, userId,
+                    Platform.YOUTUBE, playlistId, null, "Source Playlist",
+                    MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
+                    3, // totalApprovedTracks
+                    1, // successfulInsertions
+                    0, // failedInsertions
+                    0, // uncertainInsertions
+                    0, // skippedInsertions
+                    2, // rolledBackInsertions
+                    false, false, false, now, now,
+                    List.of(tr0, tr1, tr2)
+            );
+
+            when(stateService.initializeExecution(any(InitializeExecutionRequest.class), eq(userId)))
+                    .thenReturn(execSummary);
+            when(stateService.executeTrackInsertion(eq(executionId), eq(userId)))
+                    .thenReturn(execSummary);
+
+            PlaylistTrackInsertionSummary summary = service.insertApprovedTracks(request, userId);
+
+            assertThat(summary).isNotNull();
+            assertThat(summary.totalApprovedTracks()).isEqualTo(3);
+            assertThat(summary.successfulInsertions()).isEqualTo(1);
+            assertThat(summary.failedInsertions()).isEqualTo(0);
+            assertThat(summary.uncertainInsertions()).isEqualTo(0);
+            assertThat(summary.skippedInsertions()).isEqualTo(2); // 0 skipped + 2 rolledBack
+            assertThat(summary.trackOutcomes()).hasSize(3);
+            assertThat(summary.trackOutcomes().get(0).status()).isEqualTo(TrackInsertionStatus.SUCCESS);
+            assertThat(summary.trackOutcomes().get(1).status()).isEqualTo(TrackInsertionStatus.SKIPPED);
+            assertThat(summary.trackOutcomes().get(2).status()).isEqualTo(TrackInsertionStatus.SKIPPED);
         }
     }
 }

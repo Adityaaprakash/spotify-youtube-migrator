@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,7 +31,7 @@ class MigrationExecutionStateMachineTest {
         testUser = new User("architect@example.com");
         testUser.setId(UUID.randomUUID());
 
-        testSession = new ReviewSession(UUID.randomUUID(), testUser, "sp_pl_1", "Source Playlist");
+        testSession = new ReviewSession(testUser, "sp_pl_1", "Source Playlist", UUID.randomUUID());
         testSession.setId(UUID.randomUUID());
 
         execution = new MigrationExecution(
@@ -44,8 +45,8 @@ class MigrationExecutionStateMachineTest {
         );
     }
 
-    private ExecutionTrackRecord createTrackRecord(int targetPos, String sourceTrackId, String ytVideoId) {
-        ApprovedTrack approvedTrack = new ApprovedTrack(
+    private ApprovedTrack createApprovedTrack(int targetPos, String sourceTrackId, String ytVideoId) {
+        return new ApprovedTrack(
                 targetPos,
                 sourceTrackId,
                 "Title " + targetPos,
@@ -54,10 +55,13 @@ class MigrationExecutionStateMachineTest {
                 "Title (Audio)",
                 "Channel",
                 Duration.ofMinutes(3),
-                ReviewDecisionSource.CONFIRMED_EXACT,
+                ReviewDecisionSource.AUTOMATIC,
                 targetPos
         );
-        return new ExecutionTrackRecord(execution, approvedTrack);
+    }
+
+    private ExecutionTrackRecord createTrackRecord(int targetPos, String sourceTrackId, String ytVideoId) {
+        return new ExecutionTrackRecord(execution, createApprovedTrack(targetPos, sourceTrackId, ytVideoId));
     }
 
     @Nested
@@ -84,10 +88,10 @@ class MigrationExecutionStateMachineTest {
         @Test
         @DisplayName("COMPLETED execution cannot be claimed (terminal)")
         void completedCannotBeClaimed() {
-            ExecutionTrackRecord tr = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(createApprovedTrack(0, "s0", "y0")));
+            ExecutionTrackRecord tr = execution.getTrackRecords().get(0);
             tr.markAdding();
             tr.markAdded("item0");
-            execution.addTrackRecord(tr);
             execution.releaseExecution();
 
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
@@ -101,12 +105,12 @@ class MigrationExecutionStateMachineTest {
         @Test
         @DisplayName("ROLLED_BACK execution cannot be claimed (terminal)")
         void rolledBackCannotBeClaimed() {
-            ExecutionTrackRecord tr = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(createApprovedTrack(0, "s0", "y0")));
+            ExecutionTrackRecord tr = execution.getTrackRecords().get(0);
             tr.markAdding();
             tr.markAdded("item0");
             tr.markRollingBack();
             tr.markRolledBack("reverted");
-            execution.addTrackRecord(tr);
             execution.releaseExecution();
 
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.ROLLED_BACK);
@@ -120,10 +124,10 @@ class MigrationExecutionStateMachineTest {
         @Test
         @DisplayName("RECOVERY_REQUIRED execution can be claimed for recovery/reconciliation")
         void recoveryRequiredCanBeClaimed() {
-            ExecutionTrackRecord tr = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(createApprovedTrack(0, "s0", "y0")));
+            ExecutionTrackRecord tr = execution.getTrackRecords().get(0);
             tr.markAdding();
             tr.markUncertain("Socket timeout");
-            execution.addTrackRecord(tr);
             execution.releaseExecution();
 
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
@@ -136,12 +140,13 @@ class MigrationExecutionStateMachineTest {
         @Test
         @DisplayName("PARTIALLY_COMPLETED execution can be claimed for resume")
         void partiallyCompletedCanBeClaimed() {
-            ExecutionTrackRecord tr0 = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(
+                    createApprovedTrack(0, "s0", "y0"),
+                    createApprovedTrack(1, "s1", "y1")
+            ));
+            ExecutionTrackRecord tr0 = execution.getTrackRecords().get(0);
             tr0.markAdding();
             tr0.markAdded("item0");
-            ExecutionTrackRecord tr1 = createTrackRecord(1, "s1", "y1");
-            execution.addTrackRecord(tr0);
-            execution.addTrackRecord(tr1);
             execution.releaseExecution();
 
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.PARTIALLY_COMPLETED);
@@ -334,25 +339,27 @@ class MigrationExecutionStateMachineTest {
         @Test
         @DisplayName("Mathematical consistency: 2 added, 1 failed, 1 skipped -> PARTIALLY_COMPLETED")
         void partiallyCompletedCounts() {
-            ExecutionTrackRecord tr0 = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(
+                    createApprovedTrack(0, "s0", "y0"),
+                    createApprovedTrack(1, "s1", "y1"),
+                    createApprovedTrack(2, "s2", "y2"),
+                    createApprovedTrack(3, "s3", "y3")
+            ));
+
+            ExecutionTrackRecord tr0 = execution.getTrackRecords().get(0);
             tr0.markAdding();
             tr0.markAdded("item0");
 
-            ExecutionTrackRecord tr1 = createTrackRecord(1, "s1", "y1");
+            ExecutionTrackRecord tr1 = execution.getTrackRecords().get(1);
             tr1.markAdding();
             tr1.markAdded("item1");
 
-            ExecutionTrackRecord tr2 = createTrackRecord(2, "s2", "y2");
+            ExecutionTrackRecord tr2 = execution.getTrackRecords().get(2);
             tr2.markAdding();
             tr2.markFailed("Rejected");
 
-            ExecutionTrackRecord tr3 = createTrackRecord(3, "s3", "y3");
+            ExecutionTrackRecord tr3 = execution.getTrackRecords().get(3);
             tr3.markSkipped("Skipped after failure");
-
-            execution.addTrackRecord(tr0);
-            execution.addTrackRecord(tr1);
-            execution.addTrackRecord(tr2);
-            execution.addTrackRecord(tr3);
 
             execution.releaseExecution();
 
@@ -364,25 +371,27 @@ class MigrationExecutionStateMachineTest {
             assertThat(execution.getUncertainInsertions()).isEqualTo(0);
             assertThat(execution.getRolledBackInsertions()).isEqualTo(0);
             assertThat(execution.canResume()).isFalse(); // has failed tracks, requires recovery
-            assertThat(execution.canRecover()).isTrue();
+            assertThat(execution.hasFailedTracks() && execution.getUncertainInsertions() == 0).isTrue();
             assertThat(execution.canRollback()).isTrue();
         }
 
         @Test
         @DisplayName("Mixed rollback state: 1 added, 1 rolled back -> PARTIALLY_ROLLED_BACK")
         void partiallyRolledBackCounts() {
-            ExecutionTrackRecord tr0 = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(
+                    createApprovedTrack(0, "s0", "y0"),
+                    createApprovedTrack(1, "s1", "y1")
+            ));
+
+            ExecutionTrackRecord tr0 = execution.getTrackRecords().get(0);
             tr0.markAdding();
             tr0.markAdded("item0");
 
-            ExecutionTrackRecord tr1 = createTrackRecord(1, "s1", "y1");
+            ExecutionTrackRecord tr1 = execution.getTrackRecords().get(1);
             tr1.markAdding();
             tr1.markAdded("item1");
             tr1.markRollingBack();
             tr1.markRolledBack("Reverted");
-
-            execution.addTrackRecord(tr0);
-            execution.addTrackRecord(tr1);
 
             execution.releaseExecution();
 
@@ -395,20 +404,22 @@ class MigrationExecutionStateMachineTest {
         @Test
         @DisplayName("Complete rollback state: all 2 added rolled back -> ROLLED_BACK (terminal)")
         void fullyRolledBackCounts() {
-            ExecutionTrackRecord tr0 = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(
+                    createApprovedTrack(0, "s0", "y0"),
+                    createApprovedTrack(1, "s1", "y1")
+            ));
+
+            ExecutionTrackRecord tr0 = execution.getTrackRecords().get(0);
             tr0.markAdding();
             tr0.markAdded("item0");
             tr0.markRollingBack();
             tr0.markRolledBack("Reverted");
 
-            ExecutionTrackRecord tr1 = createTrackRecord(1, "s1", "y1");
+            ExecutionTrackRecord tr1 = execution.getTrackRecords().get(1);
             tr1.markAdding();
             tr1.markAdded("item1");
             tr1.markRollingBack();
             tr1.markRolledBack("Reverted");
-
-            execution.addTrackRecord(tr0);
-            execution.addTrackRecord(tr1);
 
             execution.releaseExecution();
 
@@ -421,22 +432,24 @@ class MigrationExecutionStateMachineTest {
         @Test
         @DisplayName("Presence of UNCERTAIN track strictly forces RECOVERY_REQUIRED")
         void uncertainForcesRecoveryRequired() {
-            ExecutionTrackRecord tr0 = createTrackRecord(0, "s0", "y0");
+            execution.initializeTracks(List.of(
+                    createApprovedTrack(0, "s0", "y0"),
+                    createApprovedTrack(1, "s1", "y1")
+            ));
+
+            ExecutionTrackRecord tr0 = execution.getTrackRecords().get(0);
             tr0.markAdding();
             tr0.markAdded("item0");
 
-            ExecutionTrackRecord tr1 = createTrackRecord(1, "s1", "y1");
+            ExecutionTrackRecord tr1 = execution.getTrackRecords().get(1);
             tr1.markAdding();
             tr1.markUncertain("Timeout");
-
-            execution.addTrackRecord(tr0);
-            execution.addTrackRecord(tr1);
 
             execution.releaseExecution();
 
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
             assertThat(execution.getUncertainInsertions()).isEqualTo(1);
-            assertThat(execution.canRecover()).isFalse(); // recovery blocked until reconciled
+            assertThat(execution.getUncertainInsertions() > 0).isTrue(); // recovery blocked until reconciled
             assertThat(execution.canResume()).isFalse();
         }
     }

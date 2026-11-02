@@ -14,6 +14,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.MigrationExec
 import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationStatusDto;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionTrackRecordDto;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconciliationRecordDto;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackReconciliationOutcomeDto;
@@ -102,36 +103,39 @@ class MigrationExecutionReconciliationControllerTest {
         @DisplayName("200 OK: Successfully reconciles eligible uncertain tracks")
         void reconcilesSuccessfully() throws Exception {
             TrackReconciliationOutcomeDto outcomeDto = new TrackReconciliationOutcomeDto(
-                    trackId,
+                    0,
                     "spotify_t1",
                     "yt_video_1",
+                    "yt_item_1",
                     ReconciliationType.INSERTION,
-                    ReconciliationOutcome.CONFIRMED_INSERTED,
                     ExecutionTrackStatus.UNCERTAIN,
                     ExecutionTrackStatus.ADDED,
-                    "yt_item_1",
+                    ReconciliationOutcome.CONFIRMED_INSERTED,
                     "Verified remote playlist item inserted after start timestamp",
-                    null
+                    null,
+                    Instant.now()
             );
 
             ExecutionReconciliationSummary summary = new ExecutionReconciliationSummary(
                     executionId,
-                    userId,
-                    "yt_pl_target",
+                    MigrationExecutionStatus.RECOVERY_REQUIRED,
                     MigrationExecutionStatus.COMPLETED,
                     1,
                     1,
+                    1,
                     0,
+                    0,
+                    1,
                     0,
                     0,
                     List.of(outcomeDto),
-                    Instant.now()
+                    true
             );
 
             when(executionStateService.reconcileExecution(eq(executionId), any(ReconcileExecutionRequest.class), eq(userId)))
                     .thenReturn(summary);
 
-            ReconcileExecutionApiRequest request = new ReconcileExecutionApiRequest(null, null, userId);
+            ReconcileExecutionApiRequest request = new ReconcileExecutionApiRequest(userId, null, null);
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/reconcile", executionId)
                             .with(csrf())
@@ -139,15 +143,14 @@ class MigrationExecutionReconciliationControllerTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.executionId").value(executionId.toString()))
-                    .andExpect(jsonPath("$.destinationPlaylistId").value("yt_pl_target"))
-                    .andExpect(jsonPath("$.resultingExecutionStatus").value("COMPLETED"))
-                    .andExpect(jsonPath("$.reconciledCount").value(1))
+                    .andExpect(jsonPath("$.resolvedExecutionStatus").value("COMPLETED"))
+                    .andExpect(jsonPath("$.reconciledTracksCount").value(1))
                     .andExpect(jsonPath("$.confirmedInsertedCount").value(1))
                     .andExpect(jsonPath("$.ambiguousCount").value(0))
-                    .andExpect(jsonPath("$.outcomes[0].trackRecordId").value(trackId.toString()))
-                    .andExpect(jsonPath("$.outcomes[0].outcome").value("CONFIRMED_INSERTED"))
-                    .andExpect(jsonPath("$.outcomes[0].resolvedTrackStatus").value("ADDED"))
-                    .andExpect(jsonPath("$.outcomes[0].resolvedPlaylistItemId").value("yt_item_1"));
+                    .andExpect(jsonPath("$.trackOutcomes[0].targetPosition").value(0))
+                    .andExpect(jsonPath("$.trackOutcomes[0].outcome").value("CONFIRMED_INSERTED"))
+                    .andExpect(jsonPath("$.trackOutcomes[0].resolvedStatus").value("ADDED"))
+                    .andExpect(jsonPath("$.trackOutcomes[0].destinationPlaylistItemId").value("yt_item_1"));
         }
 
         @Test
@@ -155,7 +158,7 @@ class MigrationExecutionReconciliationControllerTest {
         @DisplayName("400 Bad Request: Anti-impersonation rejects caller-supplied userId mismatch")
         void rejectsCallerUserIdMismatch() throws Exception {
             UUID differentUserId = UUID.randomUUID();
-            ReconcileExecutionApiRequest request = new ReconcileExecutionApiRequest(null, null, differentUserId);
+            ReconcileExecutionApiRequest request = new ReconcileExecutionApiRequest(differentUserId, null, null);
 
             mockMvc.perform(post("/api/migrations/execution/{executionId}/reconcile", executionId)
                             .with(csrf())
@@ -216,6 +219,7 @@ class MigrationExecutionReconciliationControllerTest {
                     recordId,
                     executionId,
                     trackId,
+                    0,
                     ReconciliationType.DELETION,
                     ExecutionTrackStatus.UNCERTAIN,
                     ExecutionTrackStatus.ROLLED_BACK,
@@ -285,16 +289,33 @@ class MigrationExecutionReconciliationControllerTest {
         @WithMockUser(username = "tester@example.com")
         @DisplayName("200 OK: Successfully retrieves reconciliation status")
         void retrievesStatusSuccessfully() throws Exception {
+            ExecutionTrackRecordDto trackRecordDto = new ExecutionTrackRecordDto(
+                    trackId,
+                    0,
+                    0,
+                    "sp_1",
+                    "Track 1",
+                    "Artist 1",
+                    "yt_1",
+                    "yt_item_1",
+                    ExecutionTrackStatus.UNCERTAIN,
+                    "Timeout",
+                    1,
+                    Instant.now(),
+                    Instant.now()
+            );
+
             ExecutionReconciliationStatusDto statusDto = new ExecutionReconciliationStatusDto(
                     executionId,
-                    userId,
                     MigrationExecutionStatus.RECOVERY_REQUIRED,
-                    "yt_pl_target",
-                    true,
                     1,
                     0,
+                    0,
                     1,
-                    List.of(trackId)
+                    0,
+                    0,
+                    true,
+                    List.of(trackRecordDto)
             );
 
             when(executionStateService.getReconciliationStatus(executionId, userId))
@@ -305,8 +326,8 @@ class MigrationExecutionReconciliationControllerTest {
                     .andExpect(jsonPath("$.executionId").value(executionId.toString()))
                     .andExpect(jsonPath("$.executionStatus").value("RECOVERY_REQUIRED"))
                     .andExpect(jsonPath("$.reconciliationRequired").value(true))
-                    .andExpect(jsonPath("$.uncertainTrackCount").value(1))
-                    .andExpect(jsonPath("$.eligibleTrackIds[0]").value(trackId.toString()));
+                    .andExpect(jsonPath("$.uncertainInsertions").value(1))
+                    .andExpect(jsonPath("$.eligibleTracks[0].id").value(trackId.toString()));
         }
 
         @Test

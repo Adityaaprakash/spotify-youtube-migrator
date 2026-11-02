@@ -11,6 +11,7 @@ import com.spotifyyoutube.migrator.migration.application.plan.MigrationPlanSumma
 import com.spotifyyoutube.migrator.migration.application.plan.MigrationPlanTrack;
 import com.spotifyyoutube.migrator.migration.application.plan.PlanTrackClassification;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
+import com.spotifyyoutube.migrator.migration.review.domain.ReviewProgressSummary;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrack;

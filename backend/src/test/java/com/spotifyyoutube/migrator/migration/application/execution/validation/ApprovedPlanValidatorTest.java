@@ -437,7 +437,7 @@ class ApprovedPlanValidatorTest {
             ReviewSession session = createCompletedSession("sp-1", "Title");
             session.addTrack(createAcceptedTrack(0, "sp-0", "Song 0", "Artist 0", "yt-SAME"));
             session.addTrack(createAcceptedTrack(1, "sp-1", "Song 1", "Artist 1", "yt-SAME"));
-            session.complete(new ReviewProgressSummary(2, 0, 2, 0, 0, 0, true));
+            session.complete(new ReviewProgressSummary(2, 0, 2, 0, 0, 0, 0, true));
 
             ExecutionValidationResult result = validator.validate(session, userId);
             assertThat(result.isValid()).isFalse();

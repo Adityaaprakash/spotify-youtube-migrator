@@ -142,8 +142,8 @@ class TrackInsertionContractsTest {
             PlaylistTrackInsertionSummary summary = new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     2, 2, 0, 0, 0,
-                    now.minusSeconds(2), now,
-                    List.of(o0, o1)
+                    List.of(o0, o1),
+                    now.minusSeconds(2), now
             );
 
             assertThat(summary.reviewSessionId()).isEqualTo(sessionId);
@@ -169,8 +169,8 @@ class TrackInsertionContractsTest {
             PlaylistTrackInsertionSummary summary = new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     3, 1, 1, 0, 1,
-                    now.minusSeconds(2), now,
-                    List.of(o0, o1, o2)
+                    List.of(o0, o1, o2),
+                    now.minusSeconds(2), now
             );
 
             assertThat(summary.fullySuccessful()).isFalse();
@@ -186,8 +186,8 @@ class TrackInsertionContractsTest {
             PlaylistTrackInsertionSummary summary = new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     2, 1, 0, 1, 0,
-                    now.minusSeconds(2), now,
-                    List.of(o0, o1)
+                    List.of(o0, o1),
+                    now.minusSeconds(2), now
             );
 
             assertThat(summary.fullySuccessful()).isFalse();
@@ -202,8 +202,8 @@ class TrackInsertionContractsTest {
             PlaylistTrackInsertionSummary summary = new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     1, 0, 1, 0, 0,
-                    now.minusSeconds(2), now,
-                    List.of(o0)
+                    List.of(o0),
+                    now.minusSeconds(2), now
             );
 
             assertThat(summary.fullySuccessful()).isFalse();
@@ -218,10 +218,10 @@ class TrackInsertionContractsTest {
             assertThatThrownBy(() -> new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     3, 1, 0, 0, 0, // 1 != 3
-                    now.minusSeconds(2), now,
-                    List.of(o0)
+                    List.of(o0),
+                    now.minusSeconds(2), now
             )).isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Track count reconciliation failed");
+                    .hasMessageContaining("does not match totalApprovedTracks");
         }
 
         @Test
@@ -232,10 +232,10 @@ class TrackInsertionContractsTest {
             assertThatThrownBy(() -> new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     2, 2, 0, 0, 0, // total says 2, but list has 1
-                    now.minusSeconds(2), now,
-                    List.of(o0)
+                    List.of(o0),
+                    now.minusSeconds(2), now
             )).isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("Track outcomes size (1) does not match total approved tracks (2)");
+                    .hasMessageContaining("trackOutcomes size (1) does not match totalApprovedTracks (2)");
         }
 
         @Test
@@ -247,10 +247,10 @@ class TrackInsertionContractsTest {
             assertThatThrownBy(() -> new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     2, 2, 0, 0, 0,
-                    now.minusSeconds(2), now,
-                    List.of(o1, o0) // inverted order!
+                    List.of(o1, o0), // inverted order!
+                    now.minusSeconds(2), now
             )).isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("strictly ordered by targetPosition");
+                    .hasMessageContaining("out-of-sequence targetPosition");
         }
 
         @Test
@@ -263,8 +263,8 @@ class TrackInsertionContractsTest {
             PlaylistTrackInsertionSummary summary = new PlaylistTrackInsertionSummary(
                     sessionId, planId, userId, Platform.YOUTUBE, "PL_dest_1",
                     1, 1, 0, 0, 0,
-                    now.minusSeconds(2), now,
-                    list
+                    list,
+                    now.minusSeconds(2), now
             );
 
             assertThatThrownBy(() -> summary.trackOutcomes().add(o0))
@@ -284,7 +284,7 @@ class TrackInsertionContractsTest {
             assertThat(req.reviewSessionId()).isEqualTo(sessionId);
             assertThat(req.destinationPlaylistId()).isEqualTo("PL_dest_999");
             assertThat(req.userId()).isEqualTo(userId);
-            assertThat(req.hasExplicitUser()).isTrue();
+            assertThat(req.getUserId()).contains(userId);
         }
 
         @Test
@@ -293,7 +293,7 @@ class TrackInsertionContractsTest {
             InsertTracksExecutionRequest req = InsertTracksExecutionRequest.of(sessionId, "PL_dest_999");
 
             assertThat(req.userId()).isNull();
-            assertThat(req.hasExplicitUser()).isFalse();
+            assertThat(req.getUserId()).isEmpty();
         }
 
         @Test

@@ -16,6 +16,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackI
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -99,23 +100,24 @@ class MigrationExecutionOrchestrationControllerTest {
         void runsApprovedMigrationSuccessfully() throws Exception {
             MigrationExecutionSummary summary = new MigrationExecutionSummary(
                     executionId,
-                    UUID.randomUUID(),
                     sessionId,
+                    UUID.randomUUID(),
                     userId,
+                    Platform.YOUTUBE,
                     "yt_pl_target",
+                    "https://music.youtube.com/playlist?list=yt_pl_target",
+                    "Source Playlist",
                     MigrationExecutionStatus.COMPLETED,
                     2,
                     2,
                     0,
                     0,
                     0,
-                    0,
-                    0,
-                    Collections.emptyList(),
                     true,
                     false,
                     Instant.now(),
-                    Instant.now()
+                    Instant.now(),
+                    Collections.emptyList()
             );
 
             when(migrationOrchestrator.executeApprovedMigration(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
@@ -163,7 +165,7 @@ class MigrationExecutionOrchestrationControllerTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isBadRequest());
 
-            verify(migrationOrchestrator, never()).executeApprovedMigration(any(), any());
+            verify(migrationOrchestrator, never()).executeApprovedMigration(any(ApprovedMigrationExecutionRequest.class), any(UUID.class));
         }
 
         @Test
@@ -234,23 +236,24 @@ class MigrationExecutionOrchestrationControllerTest {
         void runsApprovedMigrationBySessionIdSuccessfully() throws Exception {
             MigrationExecutionSummary summary = new MigrationExecutionSummary(
                     executionId,
-                    UUID.randomUUID(),
                     sessionId,
+                    UUID.randomUUID(),
                     userId,
+                    Platform.YOUTUBE,
                     "yt_pl_target",
+                    "https://music.youtube.com/playlist?list=yt_pl_target",
+                    "Source Playlist",
                     MigrationExecutionStatus.COMPLETED,
                     1,
                     1,
                     0,
                     0,
                     0,
-                    0,
-                    0,
-                    Collections.emptyList(),
                     true,
                     false,
                     Instant.now(),
-                    Instant.now()
+                    Instant.now(),
+                    Collections.emptyList()
             );
 
             when(migrationOrchestrator.executeApprovedMigration(any(ApprovedMigrationExecutionRequest.class), eq(userId)))

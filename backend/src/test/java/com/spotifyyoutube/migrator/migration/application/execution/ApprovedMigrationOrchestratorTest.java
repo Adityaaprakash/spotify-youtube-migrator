@@ -2,7 +2,7 @@ package com.spotifyyoutube.migrator.migration.application.execution;
 
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
-import com.spotifyyoutube.migrator.migration.api.dto.InitializeExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
@@ -19,6 +19,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Roll
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -77,16 +78,20 @@ class ApprovedMigrationOrchestratorTest {
 
         ApprovedTrack track0 = new ApprovedTrack(
                 0, "sp0", "Title 0", "Artist", "yt0", "Title 0 (Audio)", "Channel",
-                Duration.ofMinutes(3), ReviewDecisionSource.CONFIRMED_EXACT, 0
+                Duration.ofMinutes(3), ReviewDecisionSource.AUTOMATIC, 0
         );
         ApprovedTrack track1 = new ApprovedTrack(
                 1, "sp1", "Title 1", "Artist", "yt1", "Title 1 (Audio)", "Channel",
-                Duration.ofMinutes(4), ReviewDecisionSource.USER_ACCEPTED, 1
+                Duration.ofMinutes(4), ReviewDecisionSource.USER_SELECTED, 1
         );
 
         validContext = new ApprovedMigrationContext(
-                sessionId, UUID.randomUUID(), "sp_pl_1", "Source Playlist",
-                "Target Playlist", "Description", true, 2, 2, 0, Instant.now(), List.of(track0, track1)
+                sessionId, UUID.randomUUID(), userId,
+                "sp_pl_1", "Source Playlist",
+                "Target Playlist", "Description", true,
+                List.of(track0, track1),
+                2, 2, 0,
+                Instant.now()
         );
     }
 
@@ -106,26 +111,30 @@ class ApprovedMigrationOrchestratorTest {
                     .thenThrow(new ResourceNotFoundException("Not found"));
 
             // Step 3: Playlist created
-            DestinationPlaylistCreationResult playlistResult = DestinationPlaylistCreationResult.success(
-                    "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Target Playlist", 2, true
+            DestinationPlaylistCreationResult playlistResult = new DestinationPlaylistCreationResult(
+                    sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target",
+                    "Target Playlist", "Description", true, 2, Instant.now()
             );
             when(playlistCreationService.createDestinationPlaylist(request, userId))
                     .thenReturn(playlistResult);
 
             // Step 4: Durable execution initialized
             MigrationExecutionSummary initSummary = new MigrationExecutionSummary(
-                    executionId, UUID.randomUUID(), sessionId, userId, "yt_pl_target",
-                    MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0, 0, 0,
-                    Collections.emptyList(), false, false, Instant.now(), null
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                    false, false, Instant.now(), null, Collections.emptyList()
             );
             when(executionStateService.initializeExecution(any(InitializeExecutionRequest.class), eq(userId)))
                     .thenReturn(initSummary);
 
             // Step 5: Ordered track insertion completes
             MigrationExecutionSummary finalSummary = new MigrationExecutionSummary(
-                    executionId, UUID.randomUUID(), sessionId, userId, "yt_pl_target",
-                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0, 0, 0,
-                    Collections.emptyList(), true, false, Instant.now(), Instant.now()
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                    true, false, Instant.now(), Instant.now(), Collections.emptyList()
             );
             when(executionStateService.executeTrackInsertion(executionId, userId))
                     .thenReturn(finalSummary);
@@ -151,9 +160,10 @@ class ApprovedMigrationOrchestratorTest {
                     .thenReturn(ExecutionValidationResult.valid(validContext));
 
             MigrationExecutionSummary completedSummary = new MigrationExecutionSummary(
-                    executionId, UUID.randomUUID(), sessionId, userId, "yt_pl_target",
-                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0, 0, 0,
-                    Collections.emptyList(), true, false, Instant.now(), Instant.now()
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                    true, false, Instant.now(), Instant.now(), Collections.emptyList()
             );
             when(executionStateService.getExecutionByReviewSession(sessionId, userId))
                     .thenReturn(completedSummary);
@@ -161,9 +171,9 @@ class ApprovedMigrationOrchestratorTest {
             MigrationExecutionSummary result = orchestrator.executeApprovedMigration(request, userId);
 
             assertThat(result.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
-            verify(playlistCreationService, never()).createDestinationPlaylist(any(), any());
-            verify(executionStateService, never()).initializeExecution(any(), any());
-            verify(executionStateService, never()).executeTrackInsertion(any(), any());
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
+            verify(executionStateService, never()).initializeExecution(any(InitializeExecutionRequest.class), any());
+            verify(executionStateService, never()).executeTrackInsertion(any(UUID.class), any());
         }
     }
 
@@ -184,19 +194,20 @@ class ApprovedMigrationOrchestratorTest {
                     .isInstanceOf(MigrationExecutionValidationException.class)
                     .hasMessageContaining("validation failed");
 
-            verify(playlistCreationService, never()).createDestinationPlaylist(any(), any());
-            verify(executionStateService, never()).initializeExecution(any(), any());
-            verify(executionStateService, never()).executeTrackInsertion(any(), any());
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
+            verify(executionStateService, never()).initializeExecution(any(InitializeExecutionRequest.class), any());
+            verify(executionStateService, never()).executeTrackInsertion(any(UUID.class), any());
         }
 
         @Test
         @DisplayName("Delegates recovery for eligible failed tracks via recoverMigration")
         void orchestratesRecovery() {
-            RecoverExecutionRequest recoverReq = RecoverExecutionRequest.allFailedTracks(userId);
+            RecoverExecutionRequest recoverReq = new RecoverExecutionRequest(null, null, userId);
             MigrationExecutionSummary recoveredSummary = new MigrationExecutionSummary(
-                    executionId, UUID.randomUUID(), sessionId, userId, "yt_pl_target",
-                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0, 0, 0,
-                    Collections.emptyList(), true, false, Instant.now(), Instant.now()
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                    true, false, Instant.now(), Instant.now(), Collections.emptyList()
             );
 
             when(executionStateService.recoverExecution(executionId, recoverReq, userId))
@@ -221,9 +232,10 @@ class ApprovedMigrationOrchestratorTest {
                     .thenReturn(ExecutionValidationResult.valid(validContext));
 
             MigrationExecutionSummary uncertainSummary = new MigrationExecutionSummary(
-                    executionId, UUID.randomUUID(), sessionId, userId, "yt_pl_target",
-                    MigrationExecutionStatus.RECOVERY_REQUIRED, 2, 1, 0, 1, 0, 0, 0,
-                    Collections.emptyList(), false, false, Instant.now(), null
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.RECOVERY_REQUIRED, 2, 1, 0, 1, 0,
+                    false, false, Instant.now(), null, Collections.emptyList()
             );
             when(executionStateService.getExecutionByReviewSession(sessionId, userId))
                     .thenReturn(uncertainSummary);
@@ -232,7 +244,7 @@ class ApprovedMigrationOrchestratorTest {
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("requires reconciliation or recovery");
 
-            verify(executionStateService, never()).executeTrackInsertion(any(), any());
+            verify(executionStateService, never()).executeTrackInsertion(any(UUID.class), any());
         }
 
         @Test
@@ -240,8 +252,12 @@ class ApprovedMigrationOrchestratorTest {
         void orchestratesReconciliation() {
             ReconcileExecutionRequest reconcileReq = ReconcileExecutionRequest.allTracks(userId, null);
             ExecutionReconciliationSummary reconcileSummary = new ExecutionReconciliationSummary(
-                    executionId, userId, "yt_pl_target", MigrationExecutionStatus.COMPLETED,
-                    1, 1, 0, 0, 0, Collections.emptyList(), Instant.now()
+                    executionId,
+                    MigrationExecutionStatus.RECOVERY_REQUIRED,
+                    MigrationExecutionStatus.COMPLETED,
+                    1, 1, 1, 0, 0, 1, 0, 0,
+                    Collections.emptyList(),
+                    true
             );
 
             when(executionStateService.reconcileExecution(executionId, reconcileReq, userId))
@@ -249,7 +265,7 @@ class ApprovedMigrationOrchestratorTest {
 
             ExecutionReconciliationSummary result = orchestrator.reconcileMigration(executionId, reconcileReq, userId);
 
-            assertThat(result.resultingExecutionStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            assertThat(result.resolvedExecutionStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
             assertThat(result.confirmedInsertedCount()).isEqualTo(1);
             verify(executionStateService).reconcileExecution(executionId, reconcileReq, userId);
         }
@@ -262,11 +278,12 @@ class ApprovedMigrationOrchestratorTest {
         @Test
         @DisplayName("Delegates partial rollback via rollbackMigration")
         void orchestratesRollback() {
-            RollbackExecutionRequest rollbackReq = RollbackExecutionRequest.allAddedTracks(userId);
+            RollbackExecutionRequest rollbackReq = new RollbackExecutionRequest(Collections.emptyList(), userId);
             MigrationExecutionSummary updatedExec = new MigrationExecutionSummary(
-                    executionId, UUID.randomUUID(), sessionId, userId, "yt_pl_target",
-                    MigrationExecutionStatus.ROLLED_BACK, 2, 0, 0, 0, 0, 2, 0,
-                    Collections.emptyList(), false, false, Instant.now(), Instant.now()
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.ROLLED_BACK, 2, 0, 0, 0, 0, 2,
+                    false, false, false, Instant.now(), Instant.now(), Collections.emptyList()
             );
 
             ExecutionRollbackSummary rollbackSummary = new ExecutionRollbackSummary(
@@ -279,7 +296,7 @@ class ApprovedMigrationOrchestratorTest {
             ExecutionRollbackSummary result = orchestrator.rollbackMigration(executionId, rollbackReq, userId);
 
             assertThat(result.overallStatus()).isEqualTo(RollbackExecutionStatus.SUCCESS);
-            assertThat(result.successfulRollbacks()).isEqualTo(2);
+            assertThat(result.successfullyRolledBack()).isEqualTo(2);
             assertThat(result.updatedExecution().status()).isEqualTo(MigrationExecutionStatus.ROLLED_BACK);
             verify(executionStateService).rollbackExecution(executionId, rollbackReq, userId);
         }
@@ -320,9 +337,10 @@ class ApprovedMigrationOrchestratorTest {
                     .thenReturn(ExecutionValidationResult.valid(validContext));
 
             MigrationExecutionSummary runningSummary = new MigrationExecutionSummary(
-                    executionId, UUID.randomUUID(), sessionId, userId, "yt_pl_target",
-                    MigrationExecutionStatus.RUNNING, 2, 0, 0, 0, 0, 0, 0,
-                    Collections.emptyList(), false, false, Instant.now(), null
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.RUNNING, 2, 0, 0, 0, 0,
+                    false, false, Instant.now(), null, Collections.emptyList()
             );
             when(executionStateService.getExecutionByReviewSession(sessionId, userId))
                     .thenReturn(runningSummary);
@@ -331,7 +349,7 @@ class ApprovedMigrationOrchestratorTest {
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("currently in progress");
 
-            verify(executionStateService, never()).executeTrackInsertion(any(), any());
+            verify(executionStateService, never()).executeTrackInsertion(any(UUID.class), any());
         }
     }
 }

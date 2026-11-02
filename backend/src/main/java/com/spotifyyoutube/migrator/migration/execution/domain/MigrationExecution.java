@@ -356,7 +356,7 @@ public class MigrationExecution extends BaseEntity {
     }
 
     public boolean canResume() {
-        return this.status.canResume() && (hasPendingTracks() || this.status == MigrationExecutionStatus.RECOVERY_REQUIRED);
+        return this.status.canResume() && (hasPendingTracks() || this.status == MigrationExecutionStatus.INITIALIZED);
     }
 
     public boolean isTerminal() {

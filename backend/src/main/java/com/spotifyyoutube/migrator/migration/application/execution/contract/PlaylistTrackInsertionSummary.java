@@ -114,6 +114,10 @@ public record PlaylistTrackInsertionSummary(
                 && skippedInsertions == 0;
     }
 
+    public boolean fullySuccessful() {
+        return isFullySuccessful();
+    }
+
     public boolean hasFailures() {
         return failedInsertions > 0;
     }
@@ -129,6 +133,12 @@ public record PlaylistTrackInsertionSummary(
     public String getExecutionStatus() {
         if (isFullySuccessful()) {
             return "COMPLETED";
+        }
+        if (hasUncertain()) {
+            return "STOPPED_ON_UNCERTAIN_OUTCOME";
+        }
+        if (hasFailures() && successfulInsertions > 0) {
+            return "PARTIALLY_FAILED";
         }
         if (successfulInsertions > 0) {
             return "PARTIALLY_COMPLETED";

@@ -2,7 +2,7 @@ package com.spotifyyoutube.migrator.migration.application.execution;
 
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
-import com.spotifyyoutube.migrator.migration.api.dto.InitializeExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary;

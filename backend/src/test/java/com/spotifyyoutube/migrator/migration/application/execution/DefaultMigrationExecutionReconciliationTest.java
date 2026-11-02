@@ -107,30 +107,32 @@ class DefaultMigrationExecutionReconciliationTest {
         );
 
         userId = UUID.randomUUID();
-        user = new User("user@example.com", "Test User");
+        user = new User("user@example.com");
+        user.setDisplayName("Test User");
         try {
             var idField = com.spotifyyoutube.migrator.common.domain.BaseEntity.class.getDeclaredField("id");
             idField.setAccessible(true);
             idField.set(user, userId);
         } catch (Exception ignored) {}
 
-        session = new ReviewSession(user, "sp_pl_1", "Source Playlist");
+        session = new ReviewSession(user, "sp_pl_1", "Source Playlist", UUID.randomUUID());
         ApprovedTrack track1 = new ApprovedTrack(0, "sp_1", "Track One", "Artist", "yt_vid_1", "Title 1", "Channel", Duration.ofSeconds(200), ReviewDecisionSource.AUTOMATIC, 0);
         ApprovedTrack track2 = new ApprovedTrack(1, "sp_2", "Track Two", "Artist", "yt_vid_2", "Title 2", "Channel", Duration.ofSeconds(180), ReviewDecisionSource.AUTOMATIC, 1);
 
         ApprovedMigrationContext context = new ApprovedMigrationContext(
                 session.getId(),
                 UUID.randomUUID(),
+                userId,
                 "sp_pl_1",
                 "Source Playlist",
                 "Target Playlist",
                 "Desc",
                 false,
+                List.of(track1, track2),
                 2,
                 2,
                 0,
-                Instant.now(),
-                List.of(track1, track2)
+                Instant.now()
         );
 
         execution = new MigrationExecution(user, session, context, DEST_PLAYLIST_ID, "https://youtube.com/playlist?list=" + DEST_PLAYLIST_ID);

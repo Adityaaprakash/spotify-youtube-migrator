@@ -71,6 +71,28 @@ public record TrackInsertionOutcome(
         );
     }
 
+    public static TrackInsertionOutcome success(
+            int targetPosition,
+            int sourcePosition,
+            String sourceTrackId,
+            String sourceTitle,
+            String sourceArtist,
+            String destinationTrackId,
+            String destinationPlaylistItemId
+    ) {
+        return new TrackInsertionOutcome(
+                targetPosition,
+                sourcePosition,
+                sourceTrackId,
+                sourceTitle,
+                sourceArtist,
+                destinationTrackId,
+                destinationPlaylistItemId != null ? destinationPlaylistItemId.trim() : null,
+                TrackInsertionStatus.SUCCESS,
+                "Successfully added to destination playlist"
+        );
+    }
+
     public static TrackInsertionOutcome failed(
             ApprovedTrack track,
             String errorMessage
@@ -83,6 +105,28 @@ public record TrackInsertionOutcome(
                 track.sourceTitle(),
                 track.sourceArtist(),
                 track.destinationTrackId(),
+                null,
+                TrackInsertionStatus.FAILED,
+                errorMessage != null && !errorMessage.isBlank() ? errorMessage : "Track insertion failed"
+        );
+    }
+
+    public static TrackInsertionOutcome failed(
+            int targetPosition,
+            int sourcePosition,
+            String sourceTrackId,
+            String sourceTitle,
+            String sourceArtist,
+            String destinationTrackId,
+            String errorMessage
+    ) {
+        return new TrackInsertionOutcome(
+                targetPosition,
+                sourcePosition,
+                sourceTrackId,
+                sourceTitle,
+                sourceArtist,
+                destinationTrackId,
                 null,
                 TrackInsertionStatus.FAILED,
                 errorMessage != null && !errorMessage.isBlank() ? errorMessage : "Track insertion failed"
@@ -109,6 +153,30 @@ public record TrackInsertionOutcome(
         );
     }
 
+    public static TrackInsertionOutcome uncertain(
+            int targetPosition,
+            int sourcePosition,
+            String sourceTrackId,
+            String sourceTitle,
+            String sourceArtist,
+            String destinationTrackId,
+            String diagnosticMessage
+    ) {
+        return new TrackInsertionOutcome(
+                targetPosition,
+                sourcePosition,
+                sourceTrackId,
+                sourceTitle,
+                sourceArtist,
+                destinationTrackId,
+                null,
+                TrackInsertionStatus.UNCERTAIN,
+                diagnosticMessage != null && !diagnosticMessage.isBlank()
+                        ? diagnosticMessage
+                        : "Insertion timed out; remote outcome is uncertain"
+        );
+    }
+
     public static TrackInsertionOutcome skipped(
             ApprovedTrack track,
             String reason
@@ -121,6 +189,28 @@ public record TrackInsertionOutcome(
                 track.sourceTitle(),
                 track.sourceArtist(),
                 track.destinationTrackId(),
+                null,
+                TrackInsertionStatus.SKIPPED,
+                reason != null && !reason.isBlank() ? reason : "Skipped due to prior failure"
+        );
+    }
+
+    public static TrackInsertionOutcome skipped(
+            int targetPosition,
+            int sourcePosition,
+            String sourceTrackId,
+            String sourceTitle,
+            String sourceArtist,
+            String destinationTrackId,
+            String reason
+    ) {
+        return new TrackInsertionOutcome(
+                targetPosition,
+                sourcePosition,
+                sourceTrackId,
+                sourceTitle,
+                sourceArtist,
+                destinationTrackId,
                 null,
                 TrackInsertionStatus.SKIPPED,
                 reason != null && !reason.isBlank() ? reason : "Skipped due to prior failure"

@@ -103,15 +103,12 @@ public class DefaultDestinationPlaylistCreationService implements DestinationPla
         }
 
         String trimmedDescription = null;
-        if (context.targetPlaylistDescription().isPresent()) {
-            String desc = context.targetPlaylistDescription().get();
-            if (desc != null) {
-                trimmedDescription = desc.trim();
-                if (trimmedDescription.length() > YouTubePlaylistService.MAX_DESCRIPTION_LENGTH) {
-                    throw new IllegalArgumentException(
-                            "Playlist description exceeds maximum length of " + YouTubePlaylistService.MAX_DESCRIPTION_LENGTH + " characters"
-                    );
-                }
+        if (context.targetPlaylistDescription() != null && !context.targetPlaylistDescription().isBlank()) {
+            trimmedDescription = context.targetPlaylistDescription().trim();
+            if (trimmedDescription.length() > YouTubePlaylistService.MAX_DESCRIPTION_LENGTH) {
+                throw new IllegalArgumentException(
+                        "Playlist description exceeds maximum length of " + YouTubePlaylistService.MAX_DESCRIPTION_LENGTH + " characters"
+                );
             }
         }
 

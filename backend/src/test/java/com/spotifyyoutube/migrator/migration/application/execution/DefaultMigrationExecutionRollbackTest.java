@@ -16,8 +16,8 @@ import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackR
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
-import com.spotifyyoutube.migrator.migration.execution.domain.RollbackExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionRollbackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
@@ -108,9 +108,9 @@ class DefaultMigrationExecutionRollbackTest {
         testUser.setId(userId);
 
         sessionId = UUID.randomUUID();
-        reviewSession = new ReviewSession(UUID.randomUUID(), testUser, "sp_pl_rb", "Rollback Test Playlist");
+        reviewSession = new ReviewSession(testUser, "sp_pl_rb", "Rollback Test Playlist", UUID.randomUUID());
         reviewSession.setId(sessionId);
-        reviewSession.setStatus(ReviewSessionStatus.APPROVED);
+        reviewSession.setStatus(ReviewSessionStatus.COMPLETED);
 
         ApprovedTrack track0 = new ApprovedTrack(
                 0,
@@ -121,7 +121,7 @@ class DefaultMigrationExecutionRollbackTest {
                 "Song One (Audio)",
                 "Channel A",
                 Duration.ofMinutes(3),
-                ReviewDecisionSource.CONFIRMED_EXACT,
+                ReviewDecisionSource.AUTOMATIC,
                 0
         );
 
@@ -134,7 +134,7 @@ class DefaultMigrationExecutionRollbackTest {
                 "Song Two (Audio)",
                 "Channel B",
                 Duration.ofMinutes(4),
-                ReviewDecisionSource.USER_ACCEPTED,
+                ReviewDecisionSource.USER_SELECTED,
                 1
         );
 
@@ -552,10 +552,10 @@ class DefaultMigrationExecutionRollbackTest {
             RollbackExecutionRequest request = RollbackExecutionRequest.all();
             ExecutionRollbackSummary summary = service.rollbackExecution(executionId, request, userId);
 
-            assertThat(summary.status()).isEqualTo(RollbackExecutionStatus.FAILED);
-            assertThat(summary.failedCount()).isEqualTo(1);
-            assertThat(summary.outcomes()).hasSize(1);
-            assertThat(summary.outcomes().get(0).errorMessage()).contains("concurrently claimed");
+            assertThat(summary.overallStatus()).isEqualTo(RollbackExecutionStatus.FAILED);
+            assertThat(summary.failedRollbacks()).isEqualTo(1);
+            assertThat(summary.trackOutcomes()).hasSize(1);
+            assertThat(summary.trackOutcomes().get(0).message()).contains("concurrently claimed");
 
             // CRITICAL: remote provider MUST NOT be called!
             verify(musicDestination, never()).removeTrackFromPlaylist(any(), any());

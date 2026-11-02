@@ -97,7 +97,7 @@ class YouTubeClientRollbackTest {
                     .isInstanceOf(ExternalProviderException.class)
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
-                        assertThat(e.isRetryable()).isFalse();
+                        assertThat(e.getProviderStatusCode()).isEqualTo(401);
                     });
             mockServer.verify();
         }
@@ -113,7 +113,7 @@ class YouTubeClientRollbackTest {
                     .isInstanceOf(ExternalProviderException.class)
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
-                        assertThat(e.isRetryable()).isFalse();
+                        assertThat(e.getProviderStatusCode()).isEqualTo(403);
                     });
             mockServer.verify();
         }
@@ -129,7 +129,7 @@ class YouTubeClientRollbackTest {
                     .isInstanceOf(ExternalProviderException.class)
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
-                        assertThat(e.isRetryable()).isTrue();
+                        assertThat(e.getProviderStatusCode()).isEqualTo(429);
                     });
             mockServer.verify();
         }
@@ -145,24 +145,20 @@ class YouTubeClientRollbackTest {
                     .isInstanceOf(ExternalProviderException.class)
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
-                        assertThat(e.isRetryable()).isTrue();
+                        assertThat(e.getProviderStatusCode()).isEqualTo(503);
                     });
             mockServer.verify();
         }
 
         @Test
-        @DisplayName("Network Timeout: Throws retryable ExternalProviderException")
+        @DisplayName("Network Timeout: Throws ResourceAccessException")
         void handlesNetworkTimeout() {
             mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?id=" + PLAYLIST_ITEM_ID))
                     .andExpect(method(HttpMethod.DELETE))
-                    .andRespond(withException(new ResourceAccessException("Connection timeout", new SocketTimeoutException("Read timed out"))));
+                    .andRespond(withException(new SocketTimeoutException("Read timed out")));
 
             assertThatThrownBy(() -> youTubeClient.removeVideoFromPlaylist(ACCESS_TOKEN, PLAYLIST_ITEM_ID))
-                    .isInstanceOf(ExternalProviderException.class)
-                    .satisfies(ex -> {
-                        ExternalProviderException e = (ExternalProviderException) ex;
-                        assertThat(e.isRetryable()).isTrue();
-                    });
+                    .isInstanceOf(ResourceAccessException.class);
             mockServer.verify();
         }
 

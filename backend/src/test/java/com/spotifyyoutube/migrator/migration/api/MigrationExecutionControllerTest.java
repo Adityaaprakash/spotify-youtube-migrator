@@ -239,7 +239,7 @@ class MigrationExecutionControllerTest {
                     .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                     .andExpect(jsonPath("$.message").value("Authenticated user does not match the requested user ID"));
 
-            verify(executionService, never()).validateExecution(any(), any());
+            verify(executionService, never()).validateExecution(any(ApprovedMigrationExecutionRequest.class), any(UUID.class));
         }
     }
 
@@ -377,7 +377,7 @@ class MigrationExecutionControllerTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
 
-            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any(UUID.class));
         }
 
         @Test
@@ -484,8 +484,8 @@ class MigrationExecutionControllerTest {
             return new PlaylistTrackInsertionSummary(
                     sessionId, UUID.randomUUID(), userId, Platform.YOUTUBE, playlistId,
                     2, 2, 0, 0, 0,
-                    Instant.now().minusSeconds(1), Instant.now(),
-                    List.of(o0, o1)
+                    List.of(o0, o1),
+                    Instant.now().minusSeconds(1), Instant.now()
             );
         }
 
@@ -576,7 +576,7 @@ class MigrationExecutionControllerTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
 
-            verify(trackInsertionService, never()).insertApprovedTracks(any(), any());
+            verify(trackInsertionService, never()).insertApprovedTracks(any(InsertTracksExecutionRequest.class), any(UUID.class));
         }
 
         @Test

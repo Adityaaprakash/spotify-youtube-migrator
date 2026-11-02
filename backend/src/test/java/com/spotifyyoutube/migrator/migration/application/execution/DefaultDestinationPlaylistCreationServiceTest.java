@@ -190,7 +190,7 @@ class DefaultDestinationPlaylistCreationServiceTest {
         @Test
         @DisplayName("Rejects null request before destination mutation")
         void rejectsNullRequest() {
-            assertThatThrownBy(() -> playlistCreationService.createDestinationPlaylist(null, userId))
+            assertThatThrownBy(() -> playlistCreationService.createDestinationPlaylist((ApprovedMigrationExecutionRequest) null, userId))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Execution request must not be null");
 

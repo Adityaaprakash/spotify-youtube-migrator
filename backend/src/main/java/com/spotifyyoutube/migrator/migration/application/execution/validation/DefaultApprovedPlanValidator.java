@@ -227,18 +227,7 @@ public class DefaultApprovedPlanValidator implements ApprovedPlanValidator {
                 continue; // Excluded track must not appear in approved selection
             }
 
-            // Case B: Unresolved / Awaiting Review Track
-            if (track.getReviewStatus() == ReviewTrackStatus.AWAITING_REVIEW || track.isUnresolved()) {
-                errors.add(ExecutionValidationError.trackLevel(
-                        ValidationFailureCode.UNRESOLVED_TRACK,
-                        track.getPosition(), track.getSourceTrackId(),
-                        String.format("Track at position %d ('%s') is unresolved or awaiting review and cannot be executed",
-                                i, track.getSourceTitle())
-                ));
-                continue;
-            }
-
-            // Case C: Unresolved Duplicate Conflict
+            // Case B: Unresolved Duplicate Conflict
             if (track.hasConflict()) {
                 String conflictMsg = track.getConflictReason() != null ? track.getConflictReason() : "duplicate destination candidate";
                 errors.add(ExecutionValidationError.trackLevel(
@@ -246,6 +235,17 @@ public class DefaultApprovedPlanValidator implements ApprovedPlanValidator {
                         track.getPosition(), track.getSourceTrackId(),
                         String.format("Track at position %d ('%s') has an unresolved conflict: %s",
                                 i, track.getSourceTitle(), conflictMsg)
+                ));
+                continue;
+            }
+
+            // Case C: Unresolved / Awaiting Review Track
+            if (track.getReviewStatus() == ReviewTrackStatus.AWAITING_REVIEW || track.isUnresolved()) {
+                errors.add(ExecutionValidationError.trackLevel(
+                        ValidationFailureCode.UNRESOLVED_TRACK,
+                        track.getPosition(), track.getSourceTrackId(),
+                        String.format("Track at position %d ('%s') is unresolved or awaiting review and cannot be executed",
+                                i, track.getSourceTitle())
                 ));
                 continue;
             }
@@ -382,7 +382,7 @@ public class DefaultApprovedPlanValidator implements ApprovedPlanValidator {
 
     @Override
     public ExecutionValidationResult validate(ReviewSession session, UUID authenticatedUserId) {
-        return validate(session, null, authenticatedUserId);
+        return validate(session, (ApprovedMigrationExecutionRequest) null, authenticatedUserId);
     }
 
     @Override
@@ -409,7 +409,7 @@ public class DefaultApprovedPlanValidator implements ApprovedPlanValidator {
 
     @Override
     public ApprovedMigrationContext validateAndApprove(ReviewSession session, UUID authenticatedUserId) {
-        return validateAndApprove(session, null, authenticatedUserId);
+        return validateAndApprove(session, (ApprovedMigrationExecutionRequest) null, authenticatedUserId);
     }
 
     @Override

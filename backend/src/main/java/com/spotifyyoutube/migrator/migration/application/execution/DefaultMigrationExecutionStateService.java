@@ -272,7 +272,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             }
 
             User user = session.getUser();
-            String playlistUrl = request.destinationPlaylistUrl().orElse(null);
+            String playlistUrl = request.destinationPlaylistUrl();
 
             MigrationExecution execution = new MigrationExecution(user, session, context, playlistId, playlistUrl);
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
@@ -325,7 +325,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found for review session: " + reviewSessionId));
 
             if (!execution.getUser().getId().equals(authenticatedUserId)) {
-                throw new ResourceNotFoundException("Migration execution not found for review session: " + reviewSessionId));
+                throw new ResourceNotFoundException("Migration execution not found for review session: " + reviewSessionId);
             }
 
             if (execution.getStatus() == MigrationExecutionStatus.RUNNING) {
@@ -993,7 +993,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 if (analysis.classification() == ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED) {
                     // Ambiguous deletion: HTTP 500 / 503 during remote DELETE
                     log.warn("Rollback server error HTTP {} for track {} (item {}). Outcome is UNCERTAIN: {}",
-                            analysis.httpStatusCode().orElse(0), videoId, playlistItemId, sanitized);
+                            analysis.getProviderStatusCode().orElse(0), videoId, playlistItemId, sanitized);
                     failedCount++;
                     outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, "UNCERTAIN: " + sanitized));
 

@@ -45,7 +45,7 @@ class ExecutionFailureClassifierTest {
                     .isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);
             assertThat(analysis.retryable()).isTrue();
             assertThat(analysis.requiresManualIntervention()).isFalse();
-            assertThat(analysis.httpStatus()).contains(429);
+            assertThat(analysis.getProviderStatusCode()).contains(429);
         }
 
         @Test
@@ -101,7 +101,7 @@ class ExecutionFailureClassifierTest {
         @Test
         @DisplayName("Classifies retryable ExternalProviderException during read as RETRYABLE_PROVIDER_REJECTION")
         void classifiesRetryableExternalProviderExceptionDuringRead() {
-            var exception = new ExternalProviderException("YouTube API quota temporary stall", true);
+            var exception = new ExternalProviderException("YouTube API quota temporary stall", 429);
             ExecutionFailureAnalysis analysis = classifier.classify(exception, "read_playlist");
 
             assertThat(analysis.classification())
@@ -129,7 +129,7 @@ class ExecutionFailureClassifierTest {
         @Test
         @DisplayName("Classifies non-retryable ExternalProviderException as NON_RETRYABLE_PROVIDER_REJECTION")
         void classifiesNonRetryableExternalProviderException() {
-            var exception = new ExternalProviderException("YouTube playlist contains maximum allowed videos", false);
+            var exception = new ExternalProviderException("YouTube playlist contains maximum allowed videos", 400);
             ExecutionFailureAnalysis analysis = classifier.classify(exception, "insert_track");
 
             assertThat(analysis.classification())
@@ -281,7 +281,7 @@ class ExecutionFailureClassifierTest {
 
             assertThat(analysis.classification())
                     .isEqualTo(ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED);
-            assertThat(analysis.errorMessage()).isEqualTo("Unknown failure (null exception)");
+            assertThat(analysis.reason()).isEqualTo("Unknown failure (null exception)");
         }
     }
 }

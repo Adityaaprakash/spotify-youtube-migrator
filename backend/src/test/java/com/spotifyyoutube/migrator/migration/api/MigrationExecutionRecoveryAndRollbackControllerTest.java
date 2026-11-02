@@ -20,9 +20,10 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Reco
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackRecordDto;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackTrackOutcomeDto;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
-import com.spotifyyoutube.migrator.migration.execution.domain.RollbackExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -106,20 +107,21 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                     UUID.randomUUID(),
                     UUID.randomUUID(),
                     userId,
+                    Platform.YOUTUBE,
                     "yt_pl_target",
+                    "https://youtube.com/playlist?list=yt_pl_target",
+                    "Source Playlist",
                     MigrationExecutionStatus.COMPLETED,
                     2,
                     2,
                     0,
                     0,
                     0,
-                    0,
-                    0,
-                    Collections.emptyList(),
                     true,
                     false,
                     Instant.now(),
-                    Instant.now()
+                    Instant.now(),
+                    Collections.emptyList()
             );
 
             when(executionStateService.recoverExecution(eq(executionId), any(RecoverExecutionRequest.class), eq(userId)))
@@ -205,7 +207,10 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                     UUID.randomUUID(),
                     UUID.randomUUID(),
                     userId,
+                    Platform.YOUTUBE,
                     "yt_pl_target",
+                    "https://youtube.com/playlist?list=yt_pl_target",
+                    "Source Playlist",
                     MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
                     2,
                     1,
@@ -213,12 +218,12 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                     0,
                     0,
                     1,
-                    0,
-                    Collections.emptyList(),
                     false,
                     true,
+                    true,
                     Instant.now(),
-                    null
+                    null,
+                    Collections.emptyList()
             );
 
             ExecutionRollbackSummary summary = new ExecutionRollbackSummary(

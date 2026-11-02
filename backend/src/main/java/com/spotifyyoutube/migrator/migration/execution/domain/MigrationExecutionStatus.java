@@ -59,7 +59,7 @@ public enum MigrationExecutionStatus {
      * Returns true if this execution can safely be resumed to process pending tracks.
      */
     public boolean canResume() {
-        return this == INITIALIZED || this == PARTIALLY_COMPLETED || this == RECOVERY_REQUIRED || this == PARTIALLY_ROLLED_BACK;
+        return this == INITIALIZED || this == PARTIALLY_COMPLETED || this == PARTIALLY_ROLLED_BACK;
     }
 
     /**

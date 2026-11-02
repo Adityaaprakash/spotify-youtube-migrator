@@ -4,6 +4,7 @@ import com.spotifyyoutube.migrator.matching.discovery.CandidateDiscoveryService;
 import com.spotifyyoutube.migrator.matching.engine.TrackMatchingEngine;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizationOrchestrator;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;

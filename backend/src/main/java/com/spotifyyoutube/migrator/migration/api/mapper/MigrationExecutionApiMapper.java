@@ -261,11 +261,11 @@ public final class MigrationExecutionApiMapper {
         return new MigrationExecutionResponse(
                 summary.executionId(),
                 summary.reviewSessionId(),
-                summary.planId().orElse(null),
+                summary.planId(),
                 summary.userId(),
                 summary.destinationPlatform(),
                 summary.destinationPlaylistId(),
-                summary.destinationPlaylistUrl().orElse(null),
+                summary.destinationPlaylistUrl(),
                 summary.sourcePlaylistTitle(),
                 summary.status().name(),
                 summary.totalApprovedTracks(),

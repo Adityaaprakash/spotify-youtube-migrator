@@ -142,7 +142,7 @@ public class ReviewSessionControllerTest {
             MigrationPlan mockPlan = new MigrationPlan(
                     UUID.randomUUID(), "spotify-123", "Rock Classics",
                     Instant.now(), List.of(),
-                    new MigrationPlanSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                    new MigrationPlanSummary(0, 0, 0, 0, 0, 0, 0)
             );
             ReviewSession session = createSampleSession(sessionId, userId, "spotify-123");
 
@@ -174,7 +174,7 @@ public class ReviewSessionControllerTest {
             MigrationPlan mockPlan = new MigrationPlan(
                     UUID.randomUUID(), "spotify-456", "Indie Pop",
                     Instant.now(), List.of(),
-                    new MigrationPlanSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+                    new MigrationPlanSummary(0, 0, 0, 0, 0, 0, 0)
             );
             ReviewSession session = createSampleSession(sessionId, userId, "spotify-456");
 
@@ -435,7 +435,10 @@ public class ReviewSessionControllerTest {
             mockAuthenticatedUser(userId);
 
             ReviewCandidateSearchApiRequest apiReq = new ReviewCandidateSearchApiRequest("Custom Song Live", 5);
-            DestinationTrackCandidate cand = new DestinationTrackCandidate("yt-live-1", "Song Live 2024", "Artist", (Duration) null);
+            DestinationTrackCandidate cand = new DestinationTrackCandidate(
+                    "yt-live-1", "Song Live 2024", "Artist",
+                    "Live Concert", "thumb.jpg", "2024-01-01", Duration.ofSeconds(200)
+            );
             ReviewCandidateSearchResult result = new ReviewCandidateSearchResult(
                     sessionId, 1, "sp-1", "Song", "Artist",
                     "Custom Song Live", List.of(cand), true, 1
@@ -520,7 +523,7 @@ public class ReviewSessionControllerTest {
             mockAuthenticatedUser(userId);
 
             ExternalProviderException rateLimitEx = new ExternalProviderException(
-                    "YouTube rate limit exceeded", "youtube", 429, "60"
+                    "YouTube rate limit exceeded", 429, "60"
             );
             when(reviewSessionService.searchCandidates(eq(sessionId), eq(0), any(ReviewCandidateSearchRequest.class), eq(userId)))
                     .thenThrow(rateLimitEx);

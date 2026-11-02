@@ -103,9 +103,9 @@ class DefaultMigrationExecutionRecoveryTest {
         testUser.setId(userId);
 
         sessionId = UUID.randomUUID();
-        reviewSession = new ReviewSession(UUID.randomUUID(), testUser, "sp_pl_rec", "Recovery Test Playlist");
+        reviewSession = new ReviewSession(testUser, "sp_pl_rec", "Recovery Test Playlist", UUID.randomUUID());
         reviewSession.setId(sessionId);
-        reviewSession.setStatus(ReviewSessionStatus.APPROVED);
+        reviewSession.setStatus(ReviewSessionStatus.COMPLETED);
 
         ApprovedTrack track0 = new ApprovedTrack(
                 0,
@@ -116,7 +116,7 @@ class DefaultMigrationExecutionRecoveryTest {
                 "Song One (Audio)",
                 "Channel A",
                 Duration.ofMinutes(3),
-                ReviewDecisionSource.CONFIRMED_EXACT,
+                ReviewDecisionSource.AUTOMATIC,
                 0
         );
 
@@ -129,7 +129,7 @@ class DefaultMigrationExecutionRecoveryTest {
                 "Song Two (Audio)",
                 "Channel B",
                 Duration.ofMinutes(4),
-                ReviewDecisionSource.USER_ACCEPTED,
+                ReviewDecisionSource.USER_SELECTED,
                 1
         );
 
@@ -209,7 +209,8 @@ class DefaultMigrationExecutionRecoveryTest {
             assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
             assertThat(summary.successfulInsertions()).isEqualTo(2);
             assertThat(summary.failedInsertions()).isEqualTo(0);
-            assertThat(summary.pendingInsertions()).isEqualTo(0);
+            int pending = summary.totalApprovedTracks() - summary.successfulInsertions() - summary.failedInsertions() - summary.uncertainInsertions() - summary.skippedInsertions() - summary.rolledBackInsertions();
+            assertThat(pending).isEqualTo(0);
         }
 
         @Test

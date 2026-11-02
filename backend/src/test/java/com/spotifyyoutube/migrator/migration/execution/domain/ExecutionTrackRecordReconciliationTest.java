@@ -27,8 +27,11 @@ class ExecutionTrackRecordReconciliationTest {
 
     @BeforeEach
     void setUp() {
-        User user = new User("user@example.com", "User");
-        ReviewSession session = new ReviewSession(user, "sp_pl_1", "Source Playlist");
+        User user = new User("user@example.com");
+        user.setId(UUID.randomUUID());
+        user.setDisplayName("User");
+        ReviewSession session = new ReviewSession(user, "sp_pl_1", "Source Playlist", UUID.randomUUID());
+        session.setId(UUID.randomUUID());
         ApprovedTrack approvedTrack = new ApprovedTrack(
                 0,
                 "sp_track_1",
@@ -44,16 +47,17 @@ class ExecutionTrackRecordReconciliationTest {
         ApprovedMigrationContext context = new ApprovedMigrationContext(
                 session.getId(),
                 UUID.randomUUID(),
+                user.getId(),
                 "sp_pl_1",
                 "Source Playlist",
                 "Target Playlist",
                 "Description",
                 false,
+                List.of(approvedTrack),
                 1,
                 1,
                 0,
-                Instant.now(),
-                List.of(approvedTrack)
+                Instant.now()
         );
         execution = new MigrationExecution(user, session, context, "PL_dest_123", "https://youtube.com/playlist?list=PL_dest_123");
         record = execution.getTrackRecords().get(0);

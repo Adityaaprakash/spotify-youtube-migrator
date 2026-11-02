@@ -6,8 +6,8 @@ import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
-import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.InitializeExecutionRequest;
@@ -42,6 +42,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -81,6 +82,8 @@ class DefaultMigrationExecutionStateServiceTest {
             return callback.doInTransaction(mock(TransactionStatus.class));
         });
 
+        when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any())).thenReturn(1);
+
         service = new DefaultMigrationExecutionStateService(
                 executionRepository,
                 trackRecordRepository,
@@ -95,9 +98,9 @@ class DefaultMigrationExecutionStateServiceTest {
         testUser.setId(userId);
 
         sessionId = UUID.randomUUID();
-        reviewSession = new ReviewSession(UUID.randomUUID(), testUser, "sp_playlist_1", "Source Playlist");
+        reviewSession = new ReviewSession(testUser, "sp_playlist_1", "Source Playlist", UUID.randomUUID());
         reviewSession.setId(sessionId);
-        reviewSession.setStatus(ReviewSessionStatus.APPROVED);
+        reviewSession.setStatus(ReviewSessionStatus.COMPLETED);
 
         ApprovedTrack track0 = new ApprovedTrack(
                 0,
@@ -108,7 +111,7 @@ class DefaultMigrationExecutionStateServiceTest {
                 "Song Zero (Audio)",
                 "Channel A",
                 Duration.ofMinutes(3),
-                ReviewDecisionSource.CONFIRMED_EXACT,
+                ReviewDecisionSource.AUTOMATIC,
                 0
         );
 
@@ -121,23 +124,24 @@ class DefaultMigrationExecutionStateServiceTest {
                 "Song One (Audio)",
                 "Channel B",
                 Duration.ofMinutes(4),
-                ReviewDecisionSource.USER_ACCEPTED,
+                ReviewDecisionSource.USER_SELECTED,
                 1
         );
 
         approvedContext = new ApprovedMigrationContext(
                 sessionId,
                 UUID.randomUUID(),
+                userId,
                 "sp_playlist_1",
                 "Source Playlist",
                 "Target Playlist",
                 "Description",
                 false,
+                List.of(track0, track1),
                 2,
                 2,
                 0,
-                Instant.now(),
-                List.of(track0, track1)
+                Instant.now()
         );
     }
 
@@ -159,7 +163,7 @@ class DefaultMigrationExecutionStateServiceTest {
             when(executionService.prepareExecution(sessionId, userId)).thenReturn(approvedContext);
             when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(reviewSession));
             when(musicDestination.getPlaylist(userId, "PL_dest_123"))
-                    .thenReturn(new DestinationPlaylistSummary("PL_dest_123", "Target Playlist", null, Platform.YOUTUBE, false, 0));
+                    .thenReturn(new DestinationPlaylist("PL_dest_123", "Target Playlist", null, "private", "https://music.youtube.com/playlist?list=PL_dest_123", Platform.YOUTUBE));
 
             when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(inv -> {
                 MigrationExecution exec = inv.getArgument(0);
@@ -321,6 +325,52 @@ class DefaultMigrationExecutionStateServiceTest {
                     .isInstanceOf(ResourceNotFoundException.class)
                     .hasMessageContaining("Migration execution not found");
         }
+
+        @Test
+        @DisplayName("getExecutionByReviewSession returns summary for owner")
+        void getExecutionByReviewSessionSuccess() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+
+            when(executionRepository.findByReviewSessionId(sessionId)).thenReturn(Optional.of(exec));
+
+            MigrationExecutionSummary summary = service.getExecutionByReviewSession(sessionId, userId);
+
+            assertThat(summary).isNotNull();
+            assertThat(summary.executionId()).isEqualTo(execId);
+            assertThat(summary.userId()).isEqualTo(userId);
+            assertThat(summary.trackRecords()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("getExecutionByReviewSession throws ResourceNotFoundException when user does not own execution (Anti-IDOR)")
+        void getExecutionByReviewSessionAntiIdor() {
+            UUID otherUserId = UUID.randomUUID();
+            User otherUser = new User("other@example.com");
+            otherUser.setId(otherUserId);
+
+            MigrationExecution exec = new MigrationExecution(
+                    otherUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(UUID.randomUUID());
+
+            when(executionRepository.findByReviewSessionId(sessionId)).thenReturn(Optional.of(exec));
+
+            assertThatThrownBy(() -> service.getExecutionByReviewSession(sessionId, userId))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Migration execution not found for review session");
+        }
     }
 
     @Nested
@@ -354,8 +404,8 @@ class DefaultMigrationExecutionStateServiceTest {
             when(trackRecordRepository.findById(r1.getId())).thenReturn(Optional.of(r1));
 
             when(musicDestination.addTrackToPlaylist(eq(userId), eq("PL_dest_123"), any(AddTrackToDestinationPlaylistRequest.class)))
-                    .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0, Instant.now()))
-                    .thenReturn(new DestinationPlaylistItem("item_1", "PL_dest_123", "yt_t1", 1, Instant.now()));
+                    .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0))
+                    .thenReturn(new DestinationPlaylistItem("item_1", "PL_dest_123", "yt_t1", 1));
 
             MigrationExecutionSummary summary = service.executeTrackInsertion(execId, userId);
 
@@ -393,7 +443,7 @@ class DefaultMigrationExecutionStateServiceTest {
             when(trackRecordRepository.findById(r1.getId())).thenReturn(Optional.of(r1));
 
             when(musicDestination.addTrackToPlaylist(eq(userId), eq("PL_dest_123"), any(AddTrackToDestinationPlaylistRequest.class)))
-                    .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0, Instant.now()))
+                    .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0))
                     .thenThrow(new ExternalProviderException("YouTube", 403, "Quota exceeded"));
 
             MigrationExecutionSummary summary = service.executeTrackInsertion(execId, userId);
@@ -480,7 +530,7 @@ class DefaultMigrationExecutionStateServiceTest {
             when(trackRecordRepository.findById(r1.getId())).thenReturn(Optional.of(r1));
 
             when(musicDestination.addTrackToPlaylist(eq(userId), eq("PL_dest_123"), any(AddTrackToDestinationPlaylistRequest.class)))
-                    .thenReturn(new DestinationPlaylistItem("item_1", "PL_dest_123", "yt_t1", 1, Instant.now()));
+                    .thenReturn(new DestinationPlaylistItem("item_1", "PL_dest_123", "yt_t1", 1));
 
             MigrationExecutionSummary summary = service.resumeExecution(execId, userId);
 
