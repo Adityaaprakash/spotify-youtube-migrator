@@ -422,3 +422,36 @@ Controllers MUST NOT:
   - **Formal Subsystem Freeze**:
     - Phase 11 is complete, verified, and **FROZEN**.
     - Strict boundary with Phase 12: Zero asynchronous workers, message queues, scheduled tasks, SSE, or WebSockets in Phase 11.
+
+## Async Migration Architecture & Contracts (Phase 12A — Design Complete)
+
+- Packages:
+  - Async Orchestration & Dispatcher: `com.spotifyyoutube.migrator.migration.async`
+  - Application Service & Workers: `com.spotifyyoutube.migrator.migration.application.execution`
+  - Contracts & DTOs: `com.spotifyyoutube.migrator.migration.api.dto`, `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Presentation & API: `com.spotifyyoutube.migrator.migration.api`
+  - Persistence & Repositories: `com.spotifyyoutube.migrator.migration.execution.domain`, `com.spotifyyoutube.migrator.migration.execution.repository`
+- Architecture Decisions: ADR-022 (Async Migration Architecture & Contracts)
+- Purpose: Decouples long-running playlist migrations from HTTP request/response lifecycles, exposing non-blocking submission returning HTTP 202 Accepted, bounded background worker execution via Spring `ThreadPoolTaskExecutor`, and lightweight progress polling.
+- Architecture Rules:
+  - **Authoritative Domain Aggregate**:
+    - Reuses `MigrationExecution` as the single authoritative aggregate representing migration jobs.
+    - Zero duplicate `MigrationJob` entities introduced.
+    - Lifecycle extends to include `QUEUED` status: `QUEUED -> RUNNING -> COMPLETED / PARTIALLY_COMPLETED / FAILED / RECOVERY_REQUIRED`.
+  - **Bounded Worker Pool Configuration**:
+    - Spring `ThreadPoolTaskExecutor`: `corePoolSize = 2`, `maxPoolSize = 4`, `queueCapacity = 50`, `threadNamePrefix = "migration-worker-"`.
+    - Rejection policy: `AbortPolicy` mapping to HTTP 429 Too Many Requests when executor queue is saturated.
+    - Graceful shutdown: `waitForTasksToCompleteOnShutdown = true`, `awaitTerminationSeconds = 30`.
+  - **Database Connection Starvation Prevention**:
+    - Programmatic discrete transactions (`TransactionTemplate`): zero DB connections held during external YouTube HTTP calls.
+    - Workers consume database connections only for brief status updates (2–5ms).
+  - **Cross-Instance Atomic Claiming**:
+    - Row-level conditional update in PostgreSQL (`claimExecutionRunningWithVersion`): prevents duplicate worker execution across threads or cluster nodes.
+  - **Lightweight Progress Polling**:
+    - `GET /api/migrations/{id}/progress` returns lightweight snapshot DTO without loading bulky per-track collection into memory.
+    - Mathematical progress invariant: `processedTracks = addedTracks + failedTracks + uncertainTracks + skippedTracks`.
+    - `progressPercentage = (processedTracks * 100.0) / totalTracks`.
+  - **Crash and Restart Limitations**:
+    - In-memory queue tasks do not survive JVM process restarts.
+    - Database entity retains `QUEUED` or `RUNNING` status; stale in-flight operations reconciled via 5-minute lease threshold (`DEFAULT_STALE_THRESHOLD`).
+    - Durable polling dispatchers and automatic crash recovery deferred to Phase 13 Reliability Engineering.

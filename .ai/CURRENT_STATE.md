@@ -2,21 +2,41 @@
 
 Last Updated: 2026-11-02
 
-Current Phase: Phase 10–11 Post-Push Independent Code Review & Final Release Gate Repair [IN PROGRESS / BLOCKED]
-Current Subphase: Clean Build Compilation & Test Verification Audit
-Latest Pushed Commit: 68f82eab40606f3d6b3b47edda086047766fb516
+Current Phase: Phase 12 — Async Migration & Progress [IN PROGRESS]
+Current Subphase: Phase 12A — Async Migration Architecture & Contracts [COMPLETE] -> Phase 12B [NEXT]
+Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
-- **Clean Test Compilation**: PASSED (`.\mvnw.cmd clean test-compile` succeeded; 398 production + 125 test files compiled, 0 errors).
-- **Targeted Test Suite**: All targeted suites and safety suites repaired:
-  1. `DefaultMigrationExecutionStateServiceTest$InsertionAndResumeTests.executeTrackInsertionStopsOnRejection` updated to case-insensitive `containsIgnoringCase("Quota exceeded")` for provider message.
-  2. Failure A (`MigrationExecutionSafetyTest.auditRecordIsAppendOnlyWithoutVersion`): Repaired reflection assertion to strictly verify immutability (zero setters, protected JPA no-arg constructor, private fields) without conflicting with Flyway V7/V9 `@Version` schema requirement. Made `ExecutionRollbackRecord` no-arg constructor `protected`.
-  3. Failure B (`MigrationExecutionStateMachineTest$TrackStatusLifecycle.rejectsIllegalTransitions`): Updated assertions to expect canonical domain exception `InvalidStateException.class` instead of `IllegalStateException.class`.
-  Pending manual terminal verification rerun (`.\mvnw.cmd test "-Dtest=MigrationExecutionSafetyTest,MigrationExecutionStateMachineTest"` and `.\mvnw.cmd test "-Dtest=DefaultMigrationExecutionStateServiceTest,DefaultOrderedTrackInsertionServiceTest,ApprovedMigrationOrchestratorTest,ApprovedPlanValidatorTest,TrackInsertionContractsTest"`).
+- **Clean Test Compilation**: PASSED in prior release gate (`.\mvnw.cmd clean test-compile` succeeded; 398 production + 125 test files compiled, 0 errors).
 - **Checkstyle Hygiene**: PASSED (0 violations).
-- **Phase 12 (Async Migration / Background Workers / Message Queues)**: DEFERRED / BLOCKED until targeted tests and full release gate pass in terminal.
+- **Phase 11 (Execution & Playlist Creation)**: COMPLETE & FROZEN (ADR-030).
+- **Phase 12A (Async Migration Architecture & Contracts)**: COMPLETE (ADR-022 created, architecture audit completed, background worker design established, REST contracts defined, 12B-12H roadmap planned).
+- **Phase 12B (Migration Job Persistence & Queue Alignment)**: NEXT IMPLEMENTATION STEP.
 
 ## Completed
+### Phase 12A (Async Migration Architecture & Contracts) [COMPLETE & ACCEPTED]
+- **Repository Audit & Baseline**:
+  - Full architectural audit of existing Phase 11 execution flow (`ApprovedMigrationOrchestrator`, `MigrationExecutionStateService`, `DefaultOrderedTrackInsertionService`).
+  - Identified discrepancy between legacy Phase 8G `PlaylistMigrationOrchestrator.executeMigration(UUID)` and Phase 11 canonical `ApprovedMigrationOrchestrator.executeApprovedMigration(ApprovedMigrationExecutionRequest, UUID)`.
+  - Audited existing entities: `MigrationJob` (Phase 1, legacy, unversioned) vs. `MigrationExecution` (Phase 11, versioned aggregate with track records, audit tables, and atomic row-level claim queries).
+  - Explicit architectural decision: **Reuse `MigrationExecution` as the single authoritative domain aggregate**; do NOT introduce duplicate `MigrationJob` or `AsyncMigrationJob` entities.
+- **Background Worker & TaskExecutor Design**:
+  - Selected Spring `ThreadPoolTaskExecutor` bounded pool (`corePoolSize = 2`, `maxPoolSize = 4`, `queueCapacity = 50`, `threadNamePrefix = "migration-worker-"`).
+  - Configured graceful shutdown (`waitForTasksToCompleteOnShutdown = true`, `awaitTerminationSeconds = 30`) and `AbortPolicy` mapping to HTTP 429.
+  - Verified database connection pool safety: discrete short transactions (`TransactionTemplate`) ensure zero DB connections are held during external YouTube HTTP calls (~200-500ms).
+- **Job Lifecycle & State Machine**:
+  - Extended `MigrationExecutionStatus` to support `QUEUED` status: `QUEUED -> RUNNING -> COMPLETED / PARTIALLY_COMPLETED / FAILED / RECOVERY_REQUIRED`.
+  - Atomic cross-instance worker claiming via row-level conditional locking (`claimExecutionRunningWithVersion`).
+  - Documented in-memory queue limitations during process crashes and established handoff boundary to Phase 13 Reliability Engineering.
+- **Progress Tracking & REST Contracts**:
+  - Established mathematical progress invariants: `processedTracks = addedTracks + failedTracks + uncertainTracks + skippedTracks`.
+  - Defined REST submission endpoint `POST /api/migrations` returning HTTP 202 Accepted with `Location` header.
+  - Designed lightweight polling endpoint `GET /api/migrations/{id}/progress` to eliminate high-frequency JSON serialization of large track collections.
+- **Architectural Deliverables**:
+  - Published `.ai/ADR/ADR-022-async-migration-architecture.md`.
+  - Reconciled `.ai/ROADMAP.md` and `.ai/ARCHITECTURE.md`.
+  - Defined comprehensive Phase 12B–12H implementation plan.
+
 ### Phase 10–11 (Full System Diagnostics, Integration Audit & Corrective Engineering) [COMPLETE & AUDITED]
 - **Diagnostic Audit Scope**:
   - Full-system diagnostic audit across the entire boundary between Phase 10 (Review & Correction System) and Phase 11 (Playlist Creation & Execution, 11A–11H).
