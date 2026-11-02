@@ -43,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -614,6 +615,274 @@ class DefaultMigrationExecutionStateServiceTest {
             assertThat(r0.getStatus()).isEqualTo(ExecutionTrackStatus.UNCERTAIN);
             assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
             verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Phase 12B: Queue Lifecycle & Atomic Claiming Tests")
+    class QueueLifecycleAndClaimingTests {
+
+        @Test
+        @DisplayName("queueExecution transitions an INITIALIZED execution to QUEUED and persists")
+        void queueExecutionSuccess() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+
+            MigrationExecutionSummary summary = service.queueExecution(execId, userId);
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            verify(executionRepository).saveAndFlush(exec);
+        }
+
+        @Test
+        @DisplayName("queueExecution is idempotent when execution is already QUEUED")
+        void queueExecutionIdempotentWhenAlreadyQueued() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            MigrationExecutionSummary summary = service.queueExecution(execId, userId);
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            verify(executionRepository, never()).saveAndFlush(exec);
+        }
+
+        @Test
+        @DisplayName("queueExecution rejects execution in non-INITIALIZED status (e.g. RUNNING or COMPLETED)")
+        void queueExecutionRejectsNonInitialized() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.setStatus(MigrationExecutionStatus.RUNNING);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            assertThatThrownBy(() -> service.queueExecution(execId, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("Cannot queue execution")
+                    .hasMessageContaining("expected INITIALIZED");
+        }
+
+        @Test
+        @DisplayName("queueExecution enforces anti-IDOR user ownership")
+        void queueExecutionAntiIdorRejection() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            UUID attackerUserId = UUID.randomUUID();
+            assertThatThrownBy(() -> service.queueExecution(execId, attackerUserId))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Migration execution not found");
+        }
+
+        @Test
+        @DisplayName("initializeQueuedExecution creates new execution directly in QUEUED status")
+        void initializeQueuedExecutionCreatesNewQueuedExecution() {
+            InitializeExecutionRequest req = new InitializeExecutionRequest(
+                    sessionId,
+                    "PL_dest_123",
+                    "https://music.youtube.com/playlist?list=PL_dest_123",
+                    userId
+            );
+
+            when(executionRepository.findByReviewSessionId(sessionId)).thenReturn(Optional.empty());
+            when(executionService.prepareExecution(sessionId, userId)).thenReturn(approvedContext);
+            when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(reviewSession));
+            when(musicDestination.getPlaylist(userId, "PL_dest_123"))
+                    .thenReturn(new DestinationPlaylist("PL_dest_123", "PL Title", "url", 0, Instant.now()));
+
+            MigrationExecutionSummary summary = service.initializeQueuedExecution(req, userId);
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            assertThat(summary.totalApprovedTracks()).isEqualTo(2);
+            verify(executionRepository).saveAndFlush(any(MigrationExecution.class));
+        }
+
+        @Test
+        @DisplayName("initializeQueuedExecution transitions existing INITIALIZED execution to QUEUED")
+        void initializeQueuedExecutionTransitionsExistingInitialized() {
+            InitializeExecutionRequest req = new InitializeExecutionRequest(
+                    sessionId,
+                    "PL_dest_123",
+                    "https://music.youtube.com/playlist?list=PL_dest_123",
+                    userId
+            );
+
+            MigrationExecution existing = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            existing.setId(UUID.randomUUID());
+            assertThat(existing.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+
+            when(executionRepository.findByReviewSessionId(sessionId)).thenReturn(Optional.of(existing));
+
+            MigrationExecutionSummary summary = service.initializeQueuedExecution(req, userId);
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            assertThat(existing.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            verify(executionRepository).saveAndFlush(existing);
+        }
+
+        @Test
+        @DisplayName("initializeQueuedExecution returns existing QUEUED execution idempotently")
+        void initializeQueuedExecutionIdempotentWhenAlreadyQueued() {
+            InitializeExecutionRequest req = new InitializeExecutionRequest(
+                    sessionId,
+                    "PL_dest_123",
+                    "https://music.youtube.com/playlist?list=PL_dest_123",
+                    userId
+            );
+
+            MigrationExecution existing = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            existing.setId(UUID.randomUUID());
+            existing.markQueued();
+
+            when(executionRepository.findByReviewSessionId(sessionId)).thenReturn(Optional.of(existing));
+
+            MigrationExecutionSummary summary = service.initializeQueuedExecution(req, userId);
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            verify(executionRepository, never()).saveAndFlush(existing);
+        }
+
+        @Test
+        @DisplayName("executeTrackInsertion successfully claims a QUEUED execution and proceeds with insertion")
+        void executeTrackInsertionClaimsQueuedExecution() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+            assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenReturn(exec);
+
+            ExecutionTrackRecord r0 = exec.getTrackRecords().get(0);
+            r0.setId(UUID.randomUUID());
+            ExecutionTrackRecord r1 = exec.getTrackRecords().get(1);
+            r1.setId(UUID.randomUUID());
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(execId))
+                    .thenReturn(exec.getTrackRecords());
+            when(trackRecordRepository.findById(r0.getId())).thenReturn(Optional.of(r0));
+            when(trackRecordRepository.findById(r1.getId())).thenReturn(Optional.of(r1));
+
+            when(musicDestination.addTrackToPlaylist(eq(userId), eq("PL_dest_123"), any(AddTrackToDestinationPlaylistRequest.class)))
+                    .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0))
+                    .thenReturn(new DestinationPlaylistItem("item_1", "PL_dest_123", "yt_t1", 1));
+
+            MigrationExecutionSummary summary = service.executeTrackInsertion(execId, userId);
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            assertThat(summary.fullySuccessful()).isTrue();
+            assertThat(summary.successfulInsertions()).isEqualTo(2);
+            // Verify claim was executed with eligibleStatuses including QUEUED
+            verify(executionRepository).claimExecutionRunningWithVersion(
+                    eq(execId),
+                    argThat(statuses -> statuses != null && statuses.contains(MigrationExecutionStatus.QUEUED)),
+                    eq(0L),
+                    any(Instant.class)
+            );
+        }
+
+        @Test
+        @DisplayName("executeTrackInsertion rejects when atomic claim fails due to concurrent worker claiming QUEUED execution")
+        void executeTrackInsertionRejectsWhenConcurrentWorkerClaims() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            // Simulate competing worker: claim returns 0 updated rows
+            when(executionRepository.claimExecutionRunningWithVersion(eq(execId), any(), anyLong(), any()))
+                    .thenReturn(0);
+
+            assertThatThrownBy(() -> service.executeTrackInsertion(execId, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("could not be claimed");
+
+            // Verify no destination interactions occurred
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("resumeExecution rejects when execution is in QUEUED status (canResume is false)")
+        void resumeExecutionRejectsWhenQueued() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            assertThatThrownBy(() -> service.resumeExecution(execId, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("Execution cannot be resumed in current status: QUEUED");
         }
     }
 }

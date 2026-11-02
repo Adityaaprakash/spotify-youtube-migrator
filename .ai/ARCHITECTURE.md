@@ -455,3 +455,31 @@ Controllers MUST NOT:
     - In-memory queue tasks do not survive JVM process restarts.
     - Database entity retains `QUEUED` or `RUNNING` status; stale in-flight operations reconciled via 5-minute lease threshold (`DEFAULT_STALE_THRESHOLD`).
     - Durable polling dispatchers and automatic crash recovery deferred to Phase 13 Reliability Engineering.
+
+## Migration Job Persistence & Queue Alignment (Phase 12B — Complete & Audited)
+
+- Packages:
+  - Domain & State Machine: `com.spotifyyoutube.migrator.migration.execution.domain`
+  - Repositories: `com.spotifyyoutube.migrator.migration.execution.repository`
+  - Application Service: `com.spotifyyoutube.migrator.migration.application.execution`
+- Architecture Decisions: ADR-022 (Section 3: Migration Execution Model Alignment & Phase 12B Persistence)
+- Purpose: Introduces persistent queue-state lifecycle support into the existing `MigrationExecution` aggregate and application service contracts, ensuring atomic worker claiming without duplicate job models.
+- Architecture Rules:
+  - **Single Aggregate Enforcement**:
+    - Reuses `MigrationExecution` entity (`migration_executions` table) with `@Version` optimistic locking, user ownership, review session association, and child `ExecutionTrackRecord` entries.
+    - Zero new entities (`AsyncMigrationJob`, etc.) created; legacy `MigrationJob` is completely bypassed.
+  - **QUEUED State Semantics & Resume Protection**:
+    - Enum value `QUEUED` added to `MigrationExecutionStatus`.
+    - `MigrationExecutionStatus.canResume()` strictly returns `false` for `QUEUED`. A queued execution is waiting for worker dispatch, not resuming an interrupted or failed execution.
+    - `MigrationExecutionStatus.canRollback()` strictly returns `false` for `QUEUED` executions.
+    - `MigrationExecution.markQueued()` enforces valid transition from `INITIALIZED` to `QUEUED` and is idempotent if already `QUEUED`.
+  - **Queue Persistence Operations**:
+    - `MigrationExecutionStateService.queueExecution(executionId, authenticatedUserId)`: Transitions an existing `INITIALIZED` execution to `QUEUED`.
+    - `MigrationExecutionStateService.initializeQueuedExecution(request, authenticatedUserId)`: Idempotently creates or transitions an execution directly into `QUEUED` status with approved track records.
+    - Both methods enforce anti-IDOR user ownership via `ResourceNotFoundException`.
+  - **Atomic Conditional Worker Claiming**:
+    - `DefaultMigrationExecutionStateService.processInsertion` includes `MigrationExecutionStatus.QUEUED` in `eligibleStatuses`.
+    - PostgreSQL row-level conditional update in `MigrationExecutionRepository.claimExecutionRunningWithVersion(id, eligibleStatuses, expectedVersion, now)` atomically claims the execution row and increments `@Version`.
+    - If multiple workers attempt to claim the same queued execution, exactly one succeeds (returns 1); competing claims return 0 and fail fast with `InvalidStateException` before performing any external YouTube API mutations.
+  - **Schema & Flyway Compatibility**:
+    - Table column `migration_executions.status` is `VARCHAR(50) NOT NULL` (Flyway V6) without CHECK constraints. Zero Flyway DDL migrations required.

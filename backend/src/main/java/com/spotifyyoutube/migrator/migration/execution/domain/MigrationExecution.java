@@ -137,6 +137,23 @@ public class MigrationExecution extends BaseEntity {
     }
 
     public MigrationExecution(
+            User user,
+            ReviewSession reviewSession,
+            ApprovedMigrationContext context,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            MigrationExecutionStatus initialStatus
+    ) {
+        this(user, reviewSession, context, destinationPlaylistId, destinationPlaylistUrl);
+        if (initialStatus != null) {
+            if (initialStatus != MigrationExecutionStatus.INITIALIZED && initialStatus != MigrationExecutionStatus.QUEUED) {
+                throw new IllegalArgumentException("Initial execution status must be INITIALIZED or QUEUED, got: " + initialStatus);
+            }
+            this.status = initialStatus;
+        }
+    }
+
+    public MigrationExecution(
             ReviewSession reviewSession,
             User user,
             String destinationPlatform,
@@ -194,6 +211,24 @@ public class MigrationExecution extends BaseEntity {
         this.uncertainInsertions = 0;
         this.skippedInsertions = 0;
         this.rolledBackInsertions = 0;
+    }
+
+    /**
+     * Transitions this execution to QUEUED status, waiting for background worker claiming (Phase 12B).
+     * Only an execution in INITIALIZED status may transition to QUEUED.
+     * Idempotent if already in QUEUED status.
+     */
+    public void markQueued() {
+        if (this.status == MigrationExecutionStatus.QUEUED) {
+            return;
+        }
+        if (this.status != MigrationExecutionStatus.INITIALIZED) {
+            throw new InvalidStateException(String.format(
+                    "Cannot transition execution %s to QUEUED: current status is %s, expected INITIALIZED",
+                    getId(), this.status
+            ));
+        }
+        this.status = MigrationExecutionStatus.QUEUED;
     }
 
     /**
@@ -361,6 +396,10 @@ public class MigrationExecution extends BaseEntity {
 
     public boolean isTerminal() {
         return this.status.isTerminal();
+    }
+
+    public boolean isQueued() {
+        return this.status == MigrationExecutionStatus.QUEUED;
     }
 
     // Getters

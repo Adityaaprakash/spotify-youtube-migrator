@@ -28,6 +28,10 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
 
     boolean existsByReviewSessionId(UUID reviewSessionId);
 
+    List<MigrationExecution> findByStatus(MigrationExecutionStatus status);
+
+    List<MigrationExecution> findByStatusOrderByCreatedAtAsc(MigrationExecutionStatus status);
+
     /**
      * Atomically claims execution for processing if current status is in eligibleStatuses and version matches expectedVersion.
      * Safely increments version and clears the persistence context to avoid stale cached entities.

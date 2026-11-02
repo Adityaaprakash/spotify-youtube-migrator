@@ -284,6 +284,122 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     }
 
     @Override
+    public MigrationExecutionSummary queueExecution(UUID executionId, UUID authenticatedUserId) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (execution.getStatus() == MigrationExecutionStatus.QUEUED) {
+                log.info("Execution {} is already in QUEUED status", executionId);
+                return MigrationExecutionSummary.from(execution);
+            }
+
+            if (execution.getStatus() != MigrationExecutionStatus.INITIALIZED) {
+                throw new InvalidStateException(String.format(
+                        "Cannot queue execution %s: current status is %s, expected INITIALIZED",
+                        executionId, execution.getStatus()
+                ));
+            }
+
+            execution.markQueued();
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            log.info("Transitioned execution {} to QUEUED status", executionId);
+            return MigrationExecutionSummary.from(saved);
+        });
+    }
+
+    @Override
+    public MigrationExecutionSummary initializeQueuedExecution(InitializeExecutionRequest request, UUID authenticatedUserId) {
+        if (request == null) {
+            throw new IllegalArgumentException("InitializeExecutionRequest must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        // Anti-impersonation: caller-supplied userId must match authenticated principal
+        if (request.getUserId().isPresent()) {
+            UUID requestedUserId = request.getUserId().get();
+            if (!Objects.equals(requestedUserId, authenticatedUserId)) {
+                throw new IllegalArgumentException(String.format(
+                        "Requested user ID %s does not match authenticated user %s",
+                        requestedUserId, authenticatedUserId
+                ));
+            }
+        }
+
+        String playlistId = request.destinationPlaylistId().trim();
+
+        return transactionTemplate.execute(status -> {
+            // Check for existing durable execution for this review session
+            Optional<MigrationExecution> existingOpt = executionRepository.findByReviewSessionId(request.reviewSessionId());
+            if (existingOpt.isPresent()) {
+                MigrationExecution existing = existingOpt.get();
+                if (!existing.getUser().getId().equals(authenticatedUserId)) {
+                    throw new ResourceNotFoundException("Review session not found for authenticated user: " + request.reviewSessionId());
+                }
+                if (!existing.getDestinationPlaylistId().equals(playlistId)) {
+                    throw new InvalidStateException(String.format(
+                            "Review session %s is already bound to destination playlist %s, cannot reinitialize with %s",
+                            request.reviewSessionId(), existing.getDestinationPlaylistId(), playlistId
+                    ));
+                }
+                if (existing.getStatus() == MigrationExecutionStatus.INITIALIZED) {
+                    existing.markQueued();
+                    existing = executionRepository.saveAndFlush(existing);
+                    log.info("Transitioned existing execution {} from INITIALIZED to QUEUED for review session {}",
+                            existing.getId(), request.reviewSessionId());
+                } else {
+                    log.info("Found existing durable execution {} in status {} for review session {}",
+                            existing.getId(), existing.getStatus(), request.reviewSessionId());
+                }
+                return MigrationExecutionSummary.from(existing);
+            }
+
+            // Gated validation of approved migration context
+            ApprovedMigrationContext context = executionService.prepareExecution(request.reviewSessionId(), authenticatedUserId);
+
+            ReviewSession session = reviewSessionRepository.findById(request.reviewSessionId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Review session not found: " + request.reviewSessionId()));
+
+            if (!session.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Review session not found for authenticated user: " + request.reviewSessionId());
+            }
+
+            // Verify playlist existence and accessibility under user credentials
+            try {
+                musicDestination.getPlaylist(authenticatedUserId, playlistId);
+            } catch (ResourceNotFoundException ex) {
+                log.warn("Destination playlist {} not found or inaccessible for user {}", playlistId, authenticatedUserId);
+                throw new ResourceNotFoundException("Destination playlist not found or inaccessible: " + playlistId);
+            }
+
+            User user = session.getUser();
+            String playlistUrl = request.destinationPlaylistUrl();
+
+            MigrationExecution execution = new MigrationExecution(user, session, context, playlistId, playlistUrl);
+            execution.markQueued();
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+
+            log.info("Initialized durable execution {} in QUEUED status for review session {} with {} approved tracks",
+                    saved.getId(), request.reviewSessionId(), saved.getTotalApprovedTracks());
+
+            return MigrationExecutionSummary.from(saved);
+        });
+    }
+
+    @Override
     public MigrationExecutionSummary getExecution(UUID executionId, UUID authenticatedUserId) {
         if (executionId == null) {
             throw new IllegalArgumentException("Execution ID must not be null");
@@ -398,6 +514,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             // Claim execution lock with atomic conditional update
             Set<MigrationExecutionStatus> eligibleStatuses = Set.of(
                     MigrationExecutionStatus.INITIALIZED,
+                    MigrationExecutionStatus.QUEUED,
                     MigrationExecutionStatus.PARTIALLY_COMPLETED,
                     MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
                     MigrationExecutionStatus.RECOVERY_REQUIRED

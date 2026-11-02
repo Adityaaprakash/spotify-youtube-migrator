@@ -1,7 +1,7 @@
-# ADR-022: Async Migration Architecture & Contracts (Phase 12A)
+# ADR-022: Async Migration Architecture & Contracts (Phase 12A / 12B)
 
 ## Status
-**ACCEPTED FOR IMPLEMENTATION (PHASE 12)**  
+**ACCEPTED & IMPLEMENTED (PHASE 12A Architecture & Phase 12B Persistence)**  
 *(Sequential Reference Note: Chronologically succeeds ADR-030; titled ADR-022 per Phase 12 roadmap contract specification).*
 
 ---
@@ -345,6 +345,34 @@ Progress reporting is derived directly from persisted track records rather than 
   - If a job was `RUNNING` during a crash, `MigrationExecution.reconcileStaleCrashState()` uses the existing 5-minute lease threshold (`DEFAULT_STALE_THRESHOLD`) to classify abandoned `ADDING` tracks as `UNCERTAIN` and set execution status to `RECOVERY_REQUIRED`.
 - **Phase 13 Roadmap Handoff**:
   - Full automatic recovery of queued jobs across server restarts (via database job polling or scheduled startup recovery scanner) will be implemented in **Phase 13 (Reliability Engineering)**.
+
+---
+
+## Phase 12B Persistence & Atomic Claiming Implementation
+
+In Phase 12B, the persistence foundation for asynchronous execution was implemented and audited:
+
+1. **`MigrationExecutionStatus.QUEUED`**:
+   - Added as an explicit lifecycle state representing a persisted migration waiting for asynchronous dispatch.
+   - **Resume Protection**: `canResume()` was explicitly kept `false` for `QUEUED`. In Phase 11, `canResume()` governs executions halted mid-stream (`PARTIALLY_COMPLETED` or `PARTIALLY_ROLLED_BACK`) or newly initialized for immediate synchronous insertion (`INITIALIZED`). Treating `QUEUED` as resumable would erroneously trigger synchronous track insertion on the HTTP thread if resume were invoked.
+   - **Rollback Protection**: `canRollback()` was updated to return `false` for `QUEUED` executions since no destination mutations have been performed.
+2. **Queue Initialization**:
+   - `MigrationExecutionStateService.queueExecution(executionId, authenticatedUserId)`: Transitions existing `INITIALIZED` executions to `QUEUED`.
+   - `MigrationExecutionStateService.initializeQueuedExecution(request, authenticatedUserId)`: Idempotently creates or transitions an execution directly into `QUEUED` status with approved track records.
+   - Both operations enforce anti-IDOR user ownership via `ResourceNotFoundException`.
+3. **Atomic Conditional Worker Claiming**:
+   - `DefaultMigrationExecutionStateService.processInsertion` was updated so `eligibleStatuses` includes `MigrationExecutionStatus.QUEUED`.
+   - The atomic update query in `MigrationExecutionRepository.claimExecutionRunningWithVersion`:
+     ```sql
+     UPDATE MigrationExecution m 
+     SET m.status = RUNNING, m.updatedAt = :now, m.version = m.version + 1 
+     WHERE m.id = :id AND m.status IN :eligibleStatuses AND m.version = :expectedVersion
+     ```
+     ensures cross-worker database-level atomicity. Concurrent claims by competing workers cleanly return 0 updated rows and throw `InvalidStateException` without dirtying state or executing remote mutations.
+4. **Database Compatibility (Zero Flyway DDL Required)**:
+   - Inspection of Flyway migration `V6__phase11e_durable_execution_schema.sql` confirmed that `migration_executions.status` is defined as `VARCHAR(50) NOT NULL DEFAULT 'INITIALIZED'`.
+   - No database CHECK constraints exist on this column.
+   - Therefore, adding the `QUEUED` enum literal in Java is fully backward- and forward-compatible, requiring zero Flyway DDL migrations.
 
 ---
 

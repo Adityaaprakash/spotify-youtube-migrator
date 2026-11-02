@@ -155,6 +155,57 @@ class MigrationExecutionStateMachineTest {
             execution.claimExecution();
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
         }
+
+        @Test
+        @DisplayName("QUEUED -> RUNNING via claimExecution() (Phase 12B)")
+        void queuedToRunning() {
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+            execution.markQueued();
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            assertThat(execution.isQueued()).isTrue();
+            assertThat(execution.isTerminal()).isFalse();
+            assertThat(execution.canResume()).isFalse();
+            assertThat(execution.canRollback()).isFalse();
+
+            execution.claimExecution();
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
+            assertThat(execution.getStartedAt()).isNotNull();
+        }
+
+        @Test
+        @DisplayName("INITIALIZED -> QUEUED via markQueued() is idempotent")
+        void markQueuedIsIdempotent() {
+            execution.markQueued();
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            execution.markQueued(); // idempotent call
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+        }
+
+        @Test
+        @DisplayName("markQueued() rejects non-INITIALIZED executions")
+        void markQueuedRejectsNonInitialized() {
+            execution.claimExecution(); // transitions to RUNNING
+            assertThatThrownBy(() -> execution.markQueued())
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("Cannot transition execution")
+                    .hasMessageContaining("expected INITIALIZED");
+        }
+
+        @Test
+        @DisplayName("QUEUED execution preserves canResume == false, protecting resume semantics")
+        void queuedExecutionCannotResume() {
+            execution.markQueued();
+            assertThat(execution.getStatus().canResume()).isFalse();
+            assertThat(execution.canResume()).isFalse();
+        }
+
+        @Test
+        @DisplayName("QUEUED execution cannot rollback (canRollback == false)")
+        void queuedExecutionCannotRollback() {
+            execution.markQueued();
+            assertThat(execution.getStatus().canRollback()).isFalse();
+            assertThat(execution.canRollback()).isFalse();
+        }
     }
 
     @Nested

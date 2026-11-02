@@ -3,17 +3,41 @@
 Last Updated: 2026-11-02
 
 Current Phase: Phase 12 — Async Migration & Progress [IN PROGRESS]
-Current Subphase: Phase 12A — Async Migration Architecture & Contracts [COMPLETE] -> Phase 12B [NEXT]
+Current Subphase: Phase 12B — Migration Job Persistence & Queue Alignment [COMPLETE] -> Phase 12C — Background Worker Engine [NEXT]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
-- **Clean Test Compilation**: PASSED in prior release gate (`.\mvnw.cmd clean test-compile` succeeded; 398 production + 125 test files compiled, 0 errors).
+- **Clean Test Compilation**: PASSED (zero compilation errors in production and test suites).
 - **Checkstyle Hygiene**: PASSED (0 violations).
 - **Phase 11 (Execution & Playlist Creation)**: COMPLETE & FROZEN (ADR-030).
 - **Phase 12A (Async Migration Architecture & Contracts)**: COMPLETE (ADR-022 created, architecture audit completed, background worker design established, REST contracts defined, 12B-12H roadmap planned).
-- **Phase 12B (Migration Job Persistence & Queue Alignment)**: NEXT IMPLEMENTATION STEP.
+- **Phase 12B (Migration Job Persistence & Queue Alignment)**: COMPLETE & AUDITED (QUEUED status introduced, single MigrationExecution aggregate reused, queue initialization implemented, atomic claiming contracts verified, resume semantics protected, zero Flyway DDL changes required).
+- **Phase 12C (Background Worker Engine)**: NEXT IMPLEMENTATION STEP.
 
 ## Completed
+### Phase 12B (Migration Job Persistence & Queue Alignment) [COMPLETE & AUDITED]
+- **Single Authoritative Migration Execution Aggregate**:
+  - Reused `MigrationExecution` (`migration_executions` table) without introducing duplicate `AsyncMigrationJob` or legacy `MigrationJob` entities.
+  - Preserved existing ownership (`user`), review session association (`reviewSession`), track-level execution records (`ExecutionTrackRecord`), derived counters, and optimistic locking (`@Version`).
+- **QUEUED Lifecycle Support**:
+  - Extended `MigrationExecutionStatus` enum with `QUEUED` state: `INITIALIZED -> QUEUED -> RUNNING -> COMPLETED / PARTIALLY_COMPLETED / FAILED / RECOVERY_REQUIRED`.
+  - Protected resume semantics: `MigrationExecutionStatus.canResume()` strictly returns `false` for `QUEUED` executions. A queued execution is waiting for initial background worker dispatch, not resuming an interrupted or failed execution.
+  - Updated `MigrationExecutionStatus.canRollback()` to disallow rollback on `QUEUED` executions.
+  - Added domain transition `MigrationExecution.markQueued()` with validation and idempotency.
+- **Queue Initialization & Persistence**:
+  - Added `MigrationExecutionStateService.queueExecution(UUID executionId, UUID authenticatedUserId)` to transition existing executions from `INITIALIZED` to `QUEUED`.
+  - Added `MigrationExecutionStateService.initializeQueuedExecution(InitializeExecutionRequest request, UUID authenticatedUserId)` to create or return an execution directly in `QUEUED` status with approved track records.
+  - Fully idempotent for already queued executions; strictly rejects invalid state transitions and enforces anti-IDOR user ownership.
+- **Atomic Execution Claiming**:
+  - Enhanced `DefaultMigrationExecutionStateService.processInsertion` to include `MigrationExecutionStatus.QUEUED` in eligible claim statuses.
+  - Utilizes existing PostgreSQL row-level conditional locking in `MigrationExecutionRepository.claimExecutionRunningWithVersion(id, eligibleStatuses, expectedVersion, now)`.
+  - Cross-worker concurrency safety: Competing workers attempting to claim the same execution atomically fail (zero rows updated) and throw `InvalidStateException` without dirtying in-memory state or executing destination mutations.
+- **Database & Flyway Compatibility**:
+  - Column `migration_executions.status` is `VARCHAR(50) NOT NULL` (Flyway V6) without check constraints. Adding `QUEUED` to the Java enum requires zero DDL migrations.
+- **Test Coverage**:
+  - Added state machine and invariant tests in `MigrationExecutionStateMachineTest`.
+  - Added service tests in `DefaultMigrationExecutionStateServiceTest.QueueLifecycleAndClaimingTests` verifying queue initialization, idempotency, anti-IDOR, atomic claiming of queued executions, competing worker rejection, and resume rejection.
+
 ### Phase 12A (Async Migration Architecture & Contracts) [COMPLETE & ACCEPTED]
 - **Repository Audit & Baseline**:
   - Full architectural audit of existing Phase 11 execution flow (`ApprovedMigrationOrchestrator`, `MigrationExecutionStateService`, `DefaultOrderedTrackInsertionService`).

@@ -22,6 +22,25 @@ public interface MigrationExecutionStateService {
     MigrationExecutionSummary initializeExecution(InitializeExecutionRequest request, UUID authenticatedUserId);
 
     /**
+     * Transitions an existing durable execution from INITIALIZED to QUEUED state for asynchronous background dispatch (Phase 12B).
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @return updated durable execution summary in QUEUED status
+     */
+    MigrationExecutionSummary queueExecution(UUID executionId, UUID authenticatedUserId);
+
+    /**
+     * Initializes durable execution state directly in QUEUED status ready for asynchronous background dispatch (Phase 12B).
+     * Idempotent: returns existing execution if one was already initialized or queued for the review session.
+     *
+     * @param request execution initialization request
+     * @param authenticatedUserId ID of the authenticated user
+     * @return durable execution summary in QUEUED status
+     */
+    MigrationExecutionSummary initializeQueuedExecution(InitializeExecutionRequest request, UUID authenticatedUserId);
+
+    /**
      * Retrieves durable migration execution details and per-track records by execution ID.
      *
      * @param executionId execution identifier

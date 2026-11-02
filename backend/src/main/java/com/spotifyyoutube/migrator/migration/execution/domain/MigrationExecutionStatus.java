@@ -11,6 +11,12 @@ public enum MigrationExecutionStatus {
     INITIALIZED,
 
     /**
+     * Execution accepted and queued for asynchronous background processing (Phase 12B).
+     * Persisted in database and waiting for worker claiming.
+     */
+    QUEUED,
+
+    /**
      * Execution actively claimed by a worker thread and performing track insertions.
      * Prevents concurrent execution attempts.
      */
@@ -57,6 +63,7 @@ public enum MigrationExecutionStatus {
 
     /**
      * Returns true if this execution can safely be resumed to process pending tracks.
+     * Strictly limited to stopped/partial executions; QUEUED executions are waiting for initial dispatch.
      */
     public boolean canResume() {
         return this == INITIALIZED || this == PARTIALLY_COMPLETED || this == PARTIALLY_ROLLED_BACK;
@@ -66,6 +73,13 @@ public enum MigrationExecutionStatus {
      * Returns true if this execution is eligible for a rollback operation.
      */
     public boolean canRollback() {
-        return this != RUNNING && this != ROLLED_BACK;
+        return this != RUNNING && this != QUEUED && this != ROLLED_BACK;
+    }
+
+    /**
+     * Returns true if this execution is in QUEUED status waiting for background worker claiming (Phase 12B).
+     */
+    public boolean isQueued() {
+        return this == QUEUED;
     }
 }
