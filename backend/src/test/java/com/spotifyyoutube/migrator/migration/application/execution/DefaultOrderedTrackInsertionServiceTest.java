@@ -181,7 +181,7 @@ class DefaultOrderedTrackInsertionServiceTest {
 
             assertThatThrownBy(() -> insertionService.insertApprovedTracks(request, userId))
                     .isInstanceOf(InvalidStateException.class)
-                    .hasMessageContaining("no approved tracks available for insertion");
+                    .hasMessageContaining("approved track selection is empty");
 
             verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
         }

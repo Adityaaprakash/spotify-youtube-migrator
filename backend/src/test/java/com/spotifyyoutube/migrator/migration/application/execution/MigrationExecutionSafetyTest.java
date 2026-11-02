@@ -3,9 +3,12 @@ package com.spotifyyoutube.migrator.migration.application.execution;
 import com.spotifyyoutube.migrator.matching.discovery.CandidateDiscoveryService;
 import com.spotifyyoutube.migrator.matching.engine.TrackMatchingEngine;
 import com.spotifyyoutube.migrator.matching.normalization.NormalizationOrchestrator;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackRecord;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
@@ -17,8 +20,10 @@ import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecu
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 
@@ -82,8 +87,8 @@ class MigrationExecutionSafetyTest {
                 .as("ExecutionTrackRecord must declare @Version for optimistic locking")
                 .isTrue();
 
-        assertThat(com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackRecord.class.isAnnotationPresent(Entity.class)).isTrue();
-        assertThat(com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackRecord.class.getAnnotation(Table.class).name())
+        assertThat(ExecutionRollbackRecord.class.isAnnotationPresent(Entity.class)).isTrue();
+        assertThat(ExecutionRollbackRecord.class.getAnnotation(Table.class).name())
                 .isEqualTo("execution_rollback_records");
     }
 
@@ -106,13 +111,28 @@ class MigrationExecutionSafetyTest {
     }
 
     @Test
-    @DisplayName("ADR-028 Audit Immutability Safety: ExecutionRollbackRecord is append-only audit entity without @Version")
-    void auditRecordIsAppendOnlyWithoutVersion() {
-        Field[] fields = com.spotifyyoutube.migrator.migration.execution.domain.ExecutionRollbackRecord.class.getDeclaredFields();
+    @DisplayName("ADR-028 Audit Immutability Safety: ExecutionRollbackRecord is append-only audit entity without mutators")
+    void auditRecordIsAppendOnlyWithoutVersion() throws NoSuchMethodException {
+        // 1. Strict Immutability: ExecutionRollbackRecord must declare zero setter methods
+        Method[] methods = ExecutionRollbackRecord.class.getDeclaredMethods();
+        for (Method method : methods) {
+            assertThat(method.getName())
+                    .as("ExecutionRollbackRecord must be strictly immutable and append-only with zero setter methods")
+                    .doesNotStartWith("set");
+        }
+
+        // 2. JPA Compliance vs Application Immutability: No-arg constructor must be protected to prevent arbitrary instantiation
+        Constructor<ExecutionRollbackRecord> noArgConstructor = ExecutionRollbackRecord.class.getDeclaredConstructor();
+        assertThat(Modifier.isProtected(noArgConstructor.getModifiers()))
+                .as("ExecutionRollbackRecord JPA no-arg constructor must be protected to prevent arbitrary application instantiation")
+                .isTrue();
+
+        // 3. Encapsulation: All declared fields in ExecutionRollbackRecord must be private
+        Field[] fields = ExecutionRollbackRecord.class.getDeclaredFields();
         for (Field field : fields) {
-            assertThat(field.isAnnotationPresent(Version.class))
-                    .as("ExecutionRollbackRecord must be strictly immutable and append-only, without @Version updates")
-                    .isFalse();
+            assertThat(Modifier.isPrivate(field.getModifiers()))
+                    .as("Field '%s' in ExecutionRollbackRecord must be private", field.getName())
+                    .isTrue();
         }
     }
 
@@ -120,9 +140,13 @@ class MigrationExecutionSafetyTest {
     @DisplayName("ADR-028 State Invariants: ROLLING_BACK is non-settled and UNCERTAIN is settled")
     void stateInvariantsForRollbackAndRecovery() {
         assertThat(ExecutionTrackStatus.ROLLING_BACK.isSettled()).isFalse();
-        assertThat(ExecutionTrackStatus.ROLLING_BACK.isTerminal()).isFalse();
+        assertThat(ExecutionTrackStatus.ROLLING_BACK.isRolledBack()).isFalse();
+        assertThat(ExecutionTrackStatus.ROLLED_BACK.isSettled()).isTrue();
+        assertThat(ExecutionTrackStatus.ROLLED_BACK.isRolledBack()).isTrue();
         assertThat(ExecutionTrackStatus.UNCERTAIN.isSettled()).isTrue();
-        assertThat(com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus.UNCERTAIN).isNotNull();
+        assertThat(MigrationExecutionStatus.ROLLED_BACK.isTerminal()).isTrue();
+        assertThat(MigrationExecutionStatus.PARTIALLY_ROLLED_BACK.isTerminal()).isFalse();
+        assertThat(RollbackRecordStatus.UNCERTAIN).isNotNull();
     }
 
     @Test

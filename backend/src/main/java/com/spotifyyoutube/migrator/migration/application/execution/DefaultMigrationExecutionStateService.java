@@ -23,7 +23,6 @@ import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackReco
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
-import com.spotifyyoutube.migrator.migration.execution.domain.RollbackRecordStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionRollbackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistInspection;
@@ -737,6 +736,9 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
             execution.releaseExecution();
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            if (saved == null) {
+                saved = execution;
+            }
 
             log.info("Execution {} finalized with status {}: {} added, {} failed, {} uncertain, {} skipped, {} rolled back out of {} total",
                     saved.getId(), saved.getStatus(), saved.getSuccessfulInsertions(),

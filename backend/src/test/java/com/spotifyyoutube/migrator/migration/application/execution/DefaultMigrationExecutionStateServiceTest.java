@@ -83,6 +83,8 @@ class DefaultMigrationExecutionStateServiceTest {
         });
 
         when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any())).thenReturn(1);
+        when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
 
         service = new DefaultMigrationExecutionStateService(
                 executionRepository,
@@ -444,7 +446,7 @@ class DefaultMigrationExecutionStateServiceTest {
 
             when(musicDestination.addTrackToPlaylist(eq(userId), eq("PL_dest_123"), any(AddTrackToDestinationPlaylistRequest.class)))
                     .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0))
-                    .thenThrow(new ExternalProviderException("YouTube", 403, "Quota exceeded"));
+                    .thenThrow(new ExternalProviderException("YouTube API quota exceeded", 403));
 
             MigrationExecutionSummary summary = service.executeTrackInsertion(execId, userId);
 
@@ -454,7 +456,7 @@ class DefaultMigrationExecutionStateServiceTest {
 
             assertThat(r0.getStatus()).isEqualTo(ExecutionTrackStatus.ADDED);
             assertThat(r1.getStatus()).isEqualTo(ExecutionTrackStatus.FAILED);
-            assertThat(r1.getErrorMessage()).contains("Quota exceeded");
+            assertThat(r1.getErrorMessage()).containsIgnoringCase("Quota exceeded");
             assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.PARTIALLY_COMPLETED);
         }
 
@@ -600,7 +602,8 @@ class DefaultMigrationExecutionStateServiceTest {
             ExecutionTrackRecord r0 = exec.getTrackRecords().get(0);
             r0.setId(UUID.randomUUID());
             r0.markAdding();
-            // Server crashed before r0 could be marked ADDED or FAILED: remains ADDING
+            // Server crashed 10 minutes ago: exceeds 5-minute lease threshold
+            r0.setStartedAt(Instant.now().minus(Duration.ofMinutes(10)));
 
             when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
 

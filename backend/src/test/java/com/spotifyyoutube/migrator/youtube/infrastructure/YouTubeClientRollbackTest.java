@@ -2,6 +2,9 @@ package com.spotifyyoutube.migrator.youtube.infrastructure;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
+import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureAnalysis;
+import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureClassification;
+import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureClassifier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -41,6 +44,8 @@ class YouTubeClientRollbackTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    private final ExecutionFailureClassifier failureClassifier = new ExecutionFailureClassifier();
 
     private static final String ACCESS_TOKEN = "ya29.test_rollback_access_token";
     private static final String PLAYLIST_ITEM_ID = "UExUZXN0SXRlbUlkMTIz";
@@ -87,7 +92,7 @@ class YouTubeClientRollbackTest {
     class ErrorHandling {
 
         @Test
-        @DisplayName("401 Unauthorized: Throws ExternalProviderException marked non-retryable")
+        @DisplayName("401 Unauthorized: Throws ExternalProviderException classified as AUTHENTICATION_OR_AUTHORIZATION_FAILURE")
         void handles401Unauthorized() {
             mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?id=" + PLAYLIST_ITEM_ID))
                     .andExpect(method(HttpMethod.DELETE))
@@ -98,12 +103,16 @@ class YouTubeClientRollbackTest {
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
                         assertThat(e.getProviderStatusCode()).isEqualTo(401);
+                        ExecutionFailureAnalysis analysis = failureClassifier.classify(e, "playlist_item_remove");
+                        assertThat(analysis.classification()).isEqualTo(ExecutionFailureClassification.AUTHENTICATION_OR_AUTHORIZATION_FAILURE);
+                        assertThat(analysis.retryable()).isFalse();
+                        assertThat(analysis.requiresManualIntervention()).isTrue();
                     });
             mockServer.verify();
         }
 
         @Test
-        @DisplayName("403 Forbidden: Throws ExternalProviderException marked non-retryable")
+        @DisplayName("403 Forbidden: Throws ExternalProviderException classified as non-retryable provider failure")
         void handles403Forbidden() {
             mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?id=" + PLAYLIST_ITEM_ID))
                     .andExpect(method(HttpMethod.DELETE))
@@ -114,6 +123,9 @@ class YouTubeClientRollbackTest {
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
                         assertThat(e.getProviderStatusCode()).isEqualTo(403);
+                        ExecutionFailureAnalysis analysis = failureClassifier.classify(e, "playlist_item_remove");
+                        assertThat(analysis.classification()).isEqualTo(ExecutionFailureClassification.CONFIRMED_PROVIDER_OPERATION_FAILURE);
+                        assertThat(analysis.retryable()).isFalse();
                     });
             mockServer.verify();
         }
@@ -130,12 +142,16 @@ class YouTubeClientRollbackTest {
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
                         assertThat(e.getProviderStatusCode()).isEqualTo(429);
+                        ExecutionFailureAnalysis analysis = failureClassifier.classify(e, "playlist_item_remove");
+                        assertThat(analysis.classification()).isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);
+                        assertThat(analysis.retryable()).isTrue();
+                        assertThat(analysis.requiresManualIntervention()).isFalse();
                     });
             mockServer.verify();
         }
 
         @Test
-        @DisplayName("503 Service Unavailable: Throws retryable ExternalProviderException")
+        @DisplayName("503 Service Unavailable: Remote mutation failure classified as MANUAL_INTERVENTION_REQUIRED (ambiguous)")
         void handles503ServiceUnavailable() {
             mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?id=" + PLAYLIST_ITEM_ID))
                     .andExpect(method(HttpMethod.DELETE))
@@ -146,19 +162,31 @@ class YouTubeClientRollbackTest {
                     .satisfies(ex -> {
                         ExternalProviderException e = (ExternalProviderException) ex;
                         assertThat(e.getProviderStatusCode()).isEqualTo(503);
+                        ExecutionFailureAnalysis analysis = failureClassifier.classify(e, "playlist_item_remove");
+                        // Remote mutation failure during rollback cannot be confirmed as committed/uncommitted -> ambiguous
+                        assertThat(analysis.classification()).isEqualTo(ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED);
+                        assertThat(analysis.retryable()).isFalse();
+                        assertThat(analysis.requiresManualIntervention()).isTrue();
                     });
             mockServer.verify();
         }
 
         @Test
-        @DisplayName("Network Timeout: Throws ResourceAccessException")
+        @DisplayName("Network Timeout: Throws ResourceAccessException classified as MANUAL_INTERVENTION_REQUIRED (ambiguous)")
         void handlesNetworkTimeout() {
             mockServer.expect(requestTo("https://www.googleapis.com/youtube/v3/playlistItems?id=" + PLAYLIST_ITEM_ID))
                     .andExpect(method(HttpMethod.DELETE))
                     .andRespond(withException(new SocketTimeoutException("Read timed out")));
 
             assertThatThrownBy(() -> youTubeClient.removeVideoFromPlaylist(ACCESS_TOKEN, PLAYLIST_ITEM_ID))
-                    .isInstanceOf(ResourceAccessException.class);
+                    .isInstanceOf(ResourceAccessException.class)
+                    .satisfies(ex -> {
+                        ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "playlist_item_remove");
+                        // Network timeout during rollback mutation is ambiguous and requires reconciliation
+                        assertThat(analysis.classification()).isEqualTo(ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED);
+                        assertThat(analysis.retryable()).isFalse();
+                        assertThat(analysis.requiresManualIntervention()).isTrue();
+                    });
             mockServer.verify();
         }
 

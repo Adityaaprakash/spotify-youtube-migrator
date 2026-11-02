@@ -304,15 +304,15 @@ class MigrationExecutionStateMachineTest {
 
             // Cannot markAdded from PENDING directly
             assertThatThrownBy(() -> tr.markAdded("item_id"))
-                    .isInstanceOf(IllegalStateException.class);
+                    .isInstanceOf(InvalidStateException.class);
 
             // Cannot markRollingBack from PENDING
             assertThatThrownBy(tr::markRollingBack)
-                    .isInstanceOf(IllegalStateException.class);
+                    .isInstanceOf(InvalidStateException.class);
 
             // Cannot markRolledBack from PENDING
             assertThatThrownBy(() -> tr.markRolledBack("reason"))
-                    .isInstanceOf(IllegalStateException.class);
+                    .isInstanceOf(InvalidStateException.class);
 
             // Move to ADDED
             tr.markAdding();
@@ -320,7 +320,7 @@ class MigrationExecutionStateMachineTest {
 
             // Cannot markAdding from ADDED
             assertThatThrownBy(tr::markAdding)
-                    .isInstanceOf(IllegalStateException.class);
+                    .isInstanceOf(InvalidStateException.class);
 
             // Move to ROLLED_BACK
             tr.markRollingBack();
@@ -328,7 +328,7 @@ class MigrationExecutionStateMachineTest {
 
             // Cannot resetForRecovery from ROLLED_BACK
             assertThatThrownBy(tr::resetForRecovery)
-                    .isInstanceOf(IllegalStateException.class);
+                    .isInstanceOf(InvalidStateException.class);
         }
     }
 
@@ -371,7 +371,9 @@ class MigrationExecutionStateMachineTest {
             assertThat(execution.getUncertainInsertions()).isEqualTo(0);
             assertThat(execution.getRolledBackInsertions()).isEqualTo(0);
             assertThat(execution.canResume()).isFalse(); // has failed tracks, requires recovery
-            assertThat(execution.hasFailedTracks() && execution.getUncertainInsertions() == 0).isTrue();
+            assertThat(execution.hasFailedTracks()).isTrue();
+            assertThat(execution.getUncertainInsertions()).isZero();
+            assertThat(execution.isTerminal()).isFalse();
             assertThat(execution.canRollback()).isTrue();
         }
 
@@ -449,8 +451,8 @@ class MigrationExecutionStateMachineTest {
 
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RECOVERY_REQUIRED);
             assertThat(execution.getUncertainInsertions()).isEqualTo(1);
-            assertThat(execution.getUncertainInsertions() > 0).isTrue(); // recovery blocked until reconciled
             assertThat(execution.canResume()).isFalse();
+            assertThat(execution.isTerminal()).isFalse();
         }
     }
 }

@@ -108,6 +108,42 @@ class ExecutionFailureClassifierTest {
                     .isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);
             assertThat(analysis.retryable()).isTrue();
         }
+
+        @Test
+        @DisplayName("Classifies network I/O timeout during destination insertion as MANUAL_INTERVENTION_REQUIRED (ambiguous)")
+        void classifiesNetworkTimeoutDuringInsertionAsManualIntervention() {
+            var exception = new ResourceAccessException("Connection timed out", new IOException("Read timed out"));
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "destination_insertion");
+
+            assertThat(analysis.classification())
+                    .isEqualTo(ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED);
+            assertThat(analysis.retryable()).isFalse();
+            assertThat(analysis.requiresManualIntervention()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Classifies ExternalProviderException 503 during remote mutation as MANUAL_INTERVENTION_REQUIRED (ambiguous)")
+        void classifies503ExternalProviderExceptionDuringMutation() {
+            var exception = new ExternalProviderException("YouTube backend unavailable", 503);
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "destination_insertion");
+
+            assertThat(analysis.classification())
+                    .isEqualTo(ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED);
+            assertThat(analysis.retryable()).isFalse();
+            assertThat(analysis.requiresManualIntervention()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Classifies ExternalProviderException 503 during read as RETRYABLE_PROVIDER_REJECTION")
+        void classifies503ExternalProviderExceptionDuringRead() {
+            var exception = new ExternalProviderException("YouTube backend unavailable", 503);
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "read_playlist");
+
+            assertThat(analysis.classification())
+                    .isEqualTo(ExecutionFailureClassification.CONFIRMED_RETRYABLE_PROVIDER_REJECTION);
+            assertThat(analysis.retryable()).isTrue();
+            assertThat(analysis.requiresManualIntervention()).isFalse();
+        }
     }
 
     @Nested
@@ -175,6 +211,30 @@ class ExecutionFailureClassifierTest {
 
             assertThat(analysis.classification())
                     .isEqualTo(ExecutionFailureClassification.AUTHENTICATION_OR_AUTHORIZATION_FAILURE);
+            assertThat(analysis.requiresManualIntervention()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Classifies ExternalProviderException 401 as AUTHENTICATION_OR_AUTHORIZATION_FAILURE")
+        void classifies401ExternalProviderException() {
+            var exception = new ExternalProviderException("Invalid OAuth token", 401);
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "destination_insertion");
+
+            assertThat(analysis.classification())
+                    .isEqualTo(ExecutionFailureClassification.AUTHENTICATION_OR_AUTHORIZATION_FAILURE);
+            assertThat(analysis.retryable()).isFalse();
+            assertThat(analysis.requiresManualIntervention()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Classifies ExternalProviderException 403 quota exhaustion as CONFIRMED_PROVIDER_OPERATION_FAILURE")
+        void classifies403QuotaExternalProviderException() {
+            var exception = new ExternalProviderException("The request cannot be completed because you have exceeded your quota", 403);
+            ExecutionFailureAnalysis analysis = classifier.classify(exception, "destination_insertion");
+
+            assertThat(analysis.classification())
+                    .isEqualTo(ExecutionFailureClassification.CONFIRMED_PROVIDER_OPERATION_FAILURE);
+            assertThat(analysis.retryable()).isFalse();
             assertThat(analysis.requiresManualIntervention()).isTrue();
         }
     }

@@ -58,7 +58,11 @@ public class ExecutionRollbackRecord extends BaseEntity {
     @Column(name = "version", nullable = false)
     private Long version = 0L;
 
-    public ExecutionRollbackRecord() {
+    /**
+     * Protected no-arg constructor strictly for JPA proxying.
+     * Application code must use static factory methods.
+     */
+    protected ExecutionRollbackRecord() {
     }
 
     public ExecutionRollbackRecord(

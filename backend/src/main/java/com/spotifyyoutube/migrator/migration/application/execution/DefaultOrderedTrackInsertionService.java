@@ -13,7 +13,6 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Inse
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.PlaylistTrackInsertionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.TrackInsertionOutcome;
-import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -128,7 +127,14 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
             return toInsertionSummary(execSummary);
         }
 
-        // 3. Verify destination playlist existence and accessibility under authenticated user's credentials
+        // 3. Verify destination platform is supported
+        Platform destinationPlatform = musicDestination.getPlatform();
+        if (destinationPlatform != null && destinationPlatform != Platform.YOUTUBE) {
+            throw new InvalidStateException("Only YOUTUBE destination platform is supported for track insertion: " + destinationPlatform);
+        }
+        final Platform platform = destinationPlatform != null ? destinationPlatform : Platform.YOUTUBE;
+
+        // 4. Verify destination playlist existence and accessibility under authenticated user's credentials
         try {
             musicDestination.getPlaylist(authenticatedUserId, trimmedPlaylistId);
         } catch (ResourceNotFoundException ex) {
@@ -222,9 +228,6 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
         }
 
         Instant completedAt = Instant.now();
-        Platform platform = musicDestination.getPlatform() != null
-                ? musicDestination.getPlatform()
-                : Platform.YOUTUBE;
 
         log.info("Finished track insertion for session {} into playlist {}: {} succeeded, {} failed, {} uncertain, {} skipped out of {} approved tracks",
                 context.reviewSessionId(), trimmedPlaylistId, successfulCount, failedCount, uncertainCount, skippedCount, approvedTracks.size());
