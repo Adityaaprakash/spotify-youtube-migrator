@@ -555,32 +555,42 @@ Controllers MUST NOT:
     - Recognizes that while `MigrationExecution` summary counters are only updated at execution boundaries, individual rows in `execution_track_records` are committed after every track mutation.
     - Querying `execution_track_records` provides true, real-time progress while an execution is `RUNNING` in a background worker.
 
-## Async Migration REST API & Progress Presentation (Phase 12E (A–D) — Complete & Audited)
+## Async Migration REST API, Hardening & Integrated Audit (Phase 12E — Complete & Audited)
 
 - Packages:
   - Presentation & Controllers: `com.spotifyyoutube.migrator.migration.api`
   - Presentation DTOs: `com.spotifyyoutube.migrator.migration.api.dto`
   - Async Dispatcher & Service: `com.spotifyyoutube.migrator.migration.async`, `com.spotifyyoutube.migrator.migration.progress.application`
-- Architecture Decisions: ADR-022 (Section: REST Presentation Layer & Progress Endpoints)
-- Purpose: Exposes asynchronous migration submission and real-time progress retrieval through secure, non-mutating REST endpoints, returning HTTP 202 Accepted with canonical Location headers, and enforcing anti-IDOR authorization and strict dual-routing backward compatibility.
+  - Exception Handling: `com.spotifyyoutube.migrator.common.exception`
+- Architecture Decisions: ADR-022 (Section: REST Presentation Layer, Hardening & Progress Endpoints)
+- Purpose: Exposes asynchronous migration submission and real-time progress retrieval through secure, non-mutating REST endpoints, returning HTTP 202 Accepted with canonical Location headers (or HTTP 200 OK for idempotent completed submissions), mapping worker saturation to HTTP 429 with Retry-After, and enforcing mandatory constructor injection, anti-IDOR authorization, and strict dual-routing backward compatibility.
 - Architecture Rules:
   - **DTO Decoupling & Immutability**:
     - `MigrationSubmissionResponse`: API response DTO exposing `executionId`, `reviewSessionId`, `status`, `progressUrl`, `message`, `totalTracks`, and `submittedAt`. Factory methods `from(summary)` and `of(...)`. Zero domain or JPA entity leakage; zero OAuth token or credential exposure.
     - `MigrationProgressResponse`: API response DTO mapping 1-to-1 from `MigrationProgressSnapshot`. Exposes `executionId`, `status`, counts for all 8 track statuses (`pendingTracks`, `addingTracks`, `addedTracks`, `failedTracks`, `uncertainTracks`, `skippedTracks`, `rollingBackTracks`, `rolledBackTracks`), and calculated metrics (`totalTracks`, `processedTracks`, `remainingTracks`, `progressPercentage`). Factory method `from(snapshot)`. Zero recalculation in controller or DTO.
   - **Submission Endpoint & Dual-Routing (`POST /api/migrations`)**:
     - Dual-routing behavior preserving 100% backward compatibility for legacy Phase 1 tests without Spring MVC route ambiguity:
-      - If request body contains `reviewSessionId`, routes to Phase 12E asynchronous dispatch (`submitAsyncMigration`), returning `HTTP 202 Accepted`, `Location: /api/migrations/{executionId}/progress`, and `MigrationSubmissionResponse`.
-      - If request body omits `reviewSessionId` (e.g. legacy `CreateMigrationRequest`), routes to legacy Phase 1 synchronous job creation (`createLegacyMigration`), returning `HTTP 201 Created`.
-    - Dedicated direct route `@PostMapping("/async")` also provided for unambiguous approved async submission.
+      - If request body contains `reviewSessionId`, `sessionId`, `targetPlaylistTitle`, or `targetPlaylistDescription`, routes to Phase 12E asynchronous dispatch (`submitAsyncMigration`), returning `HTTP 202 Accepted` (or `HTTP 200 OK` if already `COMPLETED`), `Location: /api/migrations/{executionId}/progress`, and `MigrationSubmissionResponse`.
+      - If request body contains `sourcePlatform` or `targetPlatform`, routes to legacy Phase 1 synchronous job creation (`createLegacyMigration`), returning `HTTP 201 Created`.
+      - Unrecognized payloads fail fast with `HTTP 400 Bad Request`, preventing malformed requests from silently falling through into legacy handlers.
+    - Dedicated direct route `@PostMapping("/submit")` also provided for unambiguous approved async submission.
   - **Canonical Location Header**:
-    - Returned on `HTTP 202 Accepted` pointing to `/api/migrations/{executionId}/progress`.
+    - Returned on `HTTP 202 Accepted` and `HTTP 200 OK` pointing to `/api/migrations/{executionId}/progress`.
     - Uses `progressUrl` generated from the persisted execution aggregate.
   - **Progress Retrieval Endpoints (`GET /api/migrations/{executionId}/progress` & `GET /api/migrations/review-sessions/{reviewSessionId}/progress`)**:
     - Both endpoints delegate to `MigrationProgressService` (`getProgress` and `getProgressByReviewSession`).
     - Return identical `MigrationProgressResponse` payloads.
-    - Annotated with `CacheControl.noCache().mustRevalidate()`.
+    - Annotated with `CacheControl.noCache()`.
     - Zero execution or track record mutation during polling; zero YouTube/Spotify API requests; zero background worker dispatch.
-  - **Security & Anti-IDOR Enforcement**:
+  - **Mandatory Constructor Injection & Production Startup Safety**:
+    - `MigrationController` enforces strict non-null constructor injection for all mandatory components (`MigrationService`, `MigrationJobDispatcher`, `MigrationProgressService`, `UserService`, `ObjectMapper`, `Validator`) with zero `@Autowired(required = false)`.
+  - **Security, Ownership & Anti-IDOR Enforcement**:
     - Resolves authenticated user identity via `Principal` or Spring Security `Authentication`.
-    - Client-supplied `userId` is compared against authenticated user ID. In the event of mismatch, `AccessDeniedException` is thrown to prevent user impersonation.
+    - Anonymous or missing principals fail fast with `HTTP 401 Unauthorized` (`InsufficientAuthenticationException` mapped by `GlobalExceptionHandler`).
+    - Client-supplied `userId` mismatch is rejected with `HTTP 400 Bad Request` (`IllegalArgumentException`).
     - Both execution and review-session lookups enforce ownership through `MigrationProgressService` which throws `ResourceNotFoundException` (HTTP 404) for unauthorized or nonexistent IDs, preventing cross-user migration enumeration.
+  - **Executor Saturation & Error Mapping**:
+    - `GlobalExceptionHandler` maps `TaskRejectedException` to `HTTP 429 Too Many Requests` with header `Retry-After: 30` and `ErrorCode.TOO_MANY_REQUESTS`.
+    - `AccessDeniedException` maps to `HTTP 403 Forbidden` (`ErrorCode.FORBIDDEN`).
+    - `AuthenticationException` maps to `HTTP 401 Unauthorized` (`ErrorCode.UNAUTHORIZED`).
+    - `InvalidStateException` maps to `HTTP 409 Conflict` (`ErrorCode.INVALID_STATE`).

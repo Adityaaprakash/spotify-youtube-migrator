@@ -15,6 +15,10 @@ import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
 import com.spotifyyoutube.migrator.migration.progress.domain.MigrationProgressSnapshot;
+import com.spotifyyoutube.migrator.migration.api.dto.CreateMigrationRequest;
+import com.spotifyyoutube.migrator.migration.domain.MigrationJob;
+import com.spotifyyoutube.migrator.migration.domain.MigrationStatus;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -38,6 +42,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -142,7 +147,7 @@ class MigrationAsyncControllerTest {
         }
 
         @Test
-        @DisplayName("Idempotent submission for already COMPLETED execution returns 202 with completed status")
+        @DisplayName("Idempotent submission for already COMPLETED execution returns 200 OK with completed status")
         void submitMigration_AlreadyCompleted() throws Exception {
             RunMigrationApiRequest request = new RunMigrationApiRequest(
                     sessionId,
@@ -176,7 +181,7 @@ class MigrationAsyncControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request))
                     .with(csrf()))
-                    .andExpect(status().isAccepted())
+                    .andExpect(status().isOk())
                     .andExpect(jsonPath("$.status").value("COMPLETED"))
                     .andExpect(jsonPath("$.message").value("Migration is already COMPLETED"));
         }
@@ -199,6 +204,23 @@ class MigrationAsyncControllerTest {
                     .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
 
             verify(jobDispatcher, never()).dispatchMigration(any(), any());
+        }
+
+        @Test
+        @DisplayName("Submission rejects unauthenticated caller with 401 Unauthorized")
+        void submitMigration_Unauthenticated() throws Exception {
+            RunMigrationApiRequest request = new RunMigrationApiRequest(
+                    sessionId,
+                    null, null, null, null, null
+            );
+
+            mockMvc.perform(post("/api/migrations")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(request))
+                    .with(anonymous())
+                    .with(csrf()))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
         }
 
         @Test
@@ -240,7 +262,7 @@ class MigrationAsyncControllerTest {
         }
 
         @Test
-        @DisplayName("Executor queue saturation propagates TaskRejectedException")
+        @DisplayName("Executor queue saturation returns 429 Too Many Requests with Retry-After header")
         void submitMigration_ExecutorSaturated() throws Exception {
             RunMigrationApiRequest request = new RunMigrationApiRequest(
                     sessionId,
@@ -254,7 +276,10 @@ class MigrationAsyncControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(request))
                     .with(csrf()))
-                    .andExpect(status().is5xxServerError());
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(header().string("Retry-After", "30"))
+                    .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"))
+                    .andExpect(jsonPath("$.message").value("Migration worker pool is currently saturated; please retry shortly"));
         }
 
         @Test
@@ -267,7 +292,57 @@ class MigrationAsyncControllerTest {
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         }
+
+        @Test
+        @DisplayName("Approved request without reviewSessionId is rejected with 400 Bad Request")
+        void submitMigration_MissingReviewSessionId() throws Exception {
+            mockMvc.perform(post("/api/migrations")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"targetPlaylistTitle\": \"Target Title Only\"}")
+                    .with(csrf()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        }
+
+        @Test
+        @DisplayName("Unrecognized payload neither async nor legacy is rejected with 400 Bad Request")
+        void submitMigration_UnrecognizedPayload() throws Exception {
+            mockMvc.perform(post("/api/migrations")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"arbitraryKey\": \"arbitraryValue\"}")
+                    .with(csrf()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        }
+
+        @Test
+        @DisplayName("Legacy synchronous migration request routes to legacy handler returning 201 Created")
+        void submitMigration_LegacyCompatibility() throws Exception {
+            CreateMigrationRequest legacyRequest = new CreateMigrationRequest(
+                    userId,
+                    "spotify-pl-1",
+                    Platform.SPOTIFY,
+                    Platform.YOUTUBE
+            );
+
+            MigrationJob mockJob = new MigrationJob();
+            mockJob.setUser(testUser);
+            mockJob.setSourcePlaylistId("spotify-pl-1");
+            mockJob.setSourcePlatform(Platform.SPOTIFY);
+            mockJob.setTargetPlatform(Platform.YOUTUBE);
+            mockJob.setStatus(MigrationStatus.PENDING);
+
+            when(migrationService.createMigrationJob(any(CreateMigrationRequest.class))).thenReturn(mockJob);
+
+            mockMvc.perform(post("/api/migrations")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(objectMapper.writeValueAsString(legacyRequest))
+                    .with(csrf()))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.sourcePlaylistId").value("spotify-pl-1"));
+        }
     }
+
 
     @Nested
     @DisplayName("Execution Progress Tests (GET /api/migrations/{executionId}/progress)")
@@ -333,6 +408,15 @@ class MigrationAsyncControllerTest {
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
+
+        @Test
+        @DisplayName("Unauthenticated request returns 401 Unauthorized")
+        void getExecutionProgress_Unauthenticated() throws Exception {
+            mockMvc.perform(get("/api/migrations/{executionId}/progress", executionId)
+                    .with(anonymous()))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        }
     }
 
     @Nested
@@ -384,5 +468,15 @@ class MigrationAsyncControllerTest {
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
+
+        @Test
+        @DisplayName("Unauthenticated request returns 401 Unauthorized")
+        void getReviewSessionProgress_Unauthenticated() throws Exception {
+            mockMvc.perform(get("/api/migrations/review-sessions/{reviewSessionId}/progress", sessionId)
+                    .with(anonymous()))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        }
     }
 }
+

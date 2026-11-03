@@ -35,6 +35,48 @@ The following API contracts represent the boundaries mapped statically between t
 - Queries sequential individual tracks processed during migration execution iteratively. 
 - Returns `List<MigrationTaskResponse>`.
 
+### Asynchronous Migration API (Phase 12E) (`/api/migrations`)
+
+**POST /api/migrations**
+- Dual-routed entry point supporting both approved asynchronous migration dispatch (Phase 12E) and legacy direct job creation (Phase 1).
+- **Approved Async Submission** (detected when payload contains `reviewSessionId`, `sessionId`, `targetPlaylistTitle`, or `targetPlaylistDescription`):
+  - Requires authenticated session context. Client `userId` is validated against the authenticated principal (anti-impersonation).
+  - Body: `@RunMigrationApiRequest(reviewSessionId, userId, sourcePlaylistId, targetPlaylistTitle, targetPlaylistDescription, isPrivate)`
+  - Pre-mutation validation confirms review session ownership (anti-IDOR) and approved status.
+  - Stage 1 prepares destination playlist and persists `MigrationExecution` as `QUEUED`.
+  - Stage 2 submits task to bounded background worker pool.
+  - **Returns `202 Accepted`** for newly queued migrations with header `Location: /api/migrations/{executionId}/progress` and `@MigrationSubmissionResponse`.
+  - **Returns `200 OK`** for idempotent submissions where the execution is already `COMPLETED`.
+  - Responses:
+    - `400 Bad Request`: Validation failure or client-supplied `userId` mismatch.
+    - `401 Unauthorized`: Unauthenticated request.
+    - `404 Not Found`: Unauthorized or missing review session (anti-IDOR).
+    - `409 Conflict`: Migration already `RUNNING` or `QUEUED`.
+    - `429 Too Many Requests`: Worker pool saturated (`TaskRejectedException`), includes `Retry-After: 30` header.
+- **Legacy Synchronous Job Creation** (detected when payload contains `sourcePlatform` or `targetPlatform`):
+  - Body: `@CreateMigrationRequest(userId, sourcePlaylistId, sourcePlatform, targetPlatform)`
+  - Returns `@MigrationJobResponse(...)` with status `201 Created`.
+
+**POST /api/migrations/submit**
+- Explicit, typed convenience endpoint for approved asynchronous migration dispatch (Phase 12E).
+- Body: `@RunMigrationApiRequest` (same semantics and responses as approved `POST /api/migrations`).
+
+**GET /api/migrations/{executionId}/progress**
+- Real-time polling endpoint retrieving execution progress and track outcome distribution by execution ID.
+- Strictly read-only: performs zero DB writes, zero YouTube/Spotify API calls, and zero background worker triggers.
+- Enforces user ownership via `MigrationProgressService`: unauthorized executions return `404 Not Found` (anti-IDOR).
+- Returns `@MigrationProgressResponse(executionId, status, totalTracks, pendingTracks, addingTracks, addedTracks, failedTracks, uncertainTracks, skippedTracks, rollingBackTracks, rolledBackTracks, processedTracks, remainingTracks, progressPercentage)`.
+- Headers: `Cache-Control: no-cache`.
+- Status: `200 OK`.
+
+**GET /api/migrations/review-sessions/{reviewSessionId}/progress**
+- Real-time polling endpoint retrieving execution progress by associated review-session ID.
+- Enables clients holding only `reviewSessionId` to monitor progress without initiating new executions or database mutations.
+- Enforces review session ownership via `MigrationProgressService`: unauthorized sessions return `404 Not Found` (anti-IDOR).
+- Returns the exact same `@MigrationProgressResponse` contract.
+- Headers: `Cache-Control: no-cache`.
+- Status: `200 OK`.
+
 ### YouTube API (`/api/youtube`)
 **GET /api/youtube/videos/search**
 - Searches YouTube for video candidates.
@@ -67,10 +109,16 @@ The following API contracts represent the boundaries mapped statically between t
 All failed integrations return strict `ApiError` shapes resolving to explicitly modeled codes. 
 ```json
 {
-  "code": "INVALID_REQUEST | UNAUTHORIZED | FORBIDDEN | NOT_FOUND | CONFLICT | INVALID_STATE | INTERNAL_SERVER_ERROR",
+  "code": "INVALID_REQUEST | UNAUTHORIZED | FORBIDDEN | NOT_FOUND | CONFLICT | INVALID_STATE | EXTERNAL_PROVIDER_ERROR | TOO_MANY_REQUESTS | INTERNAL_SERVER_ERROR",
   "message": "Human readable context",
-  "timestamp": "2026-10-05T00:00:00Z",
+  "timestamp": "2026-11-03T12:00:00Z",
   "path": "/api/..."
 }
 ```
-Stack traces and JPA references are strictly prohibited from exposure.
+- **400 Bad Request (`INVALID_REQUEST`)**: Malformed payload, missing required parameters, validation errors, or caller impersonation mismatch.
+- **401 Unauthorized (`UNAUTHORIZED`)**: Unauthenticated request or expired session.
+- **403 Forbidden (`FORBIDDEN`)**: Authenticated principal lacks permission.
+- **404 Not Found (`NOT_FOUND`)**: Resource does not exist or caller is unauthorized (anti-IDOR protection).
+- **409 Conflict (`CONFLICT` / `INVALID_STATE`)**: Conflicting state (e.g. migration already RUNNING or QUEUED).
+- **429 Too Many Requests (`TOO_MANY_REQUESTS`)**: Worker pool saturated (`TaskRejectedException`), includes `Retry-After: 30` header.
+- **500 Internal Server Error (`INTERNAL_SERVER_ERROR`)**: Generic sanitised error message. Stack traces, credentials, and internal aggregate details are strictly prohibited from exposure.

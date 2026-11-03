@@ -441,18 +441,19 @@ In Phase 12D, the progress tracking and calculation subsystem was implemented an
 
 ---
 
-## Phase 12E (A–D) Async REST API & Presentation Implementation
+## Phase 12E Async REST API, Hardening & Presentation Implementation
 
-In Phase 12E (subphases A through D), the REST presentation layer for asynchronous migration submission and progress polling was implemented and verified:
+In Phase 12E (subphases A through H), the REST presentation layer for asynchronous migration submission and progress polling was implemented, hardened, and verified:
 
 1. **REST DTO Design (`MigrationSubmissionResponse` & `MigrationProgressResponse`)**:
    - `MigrationSubmissionResponse`: Returns `executionId`, `reviewSessionId`, `status`, `progressUrl`, `message`, `totalTracks`, and `submittedAt`. Redacts sensitive credentials, provider tokens, and internal aggregate internals.
    - `MigrationProgressResponse`: 1-to-1 representation of `MigrationProgressSnapshot`. Exposes `executionId`, `status`, `totalTracks`, counts across all 8 track statuses, `processedTracks`, `remainingTracks`, and `progressPercentage`. Preserves the exact mathematical semantics of Phase 12D with zero controller recalculation.
 
-2. **Asynchronous Submission Endpoint (`POST /api/migrations`)**:
-   - Returns `HTTP 202 Accepted` with `Location: /api/migrations/{executionId}/progress` and `MigrationSubmissionResponse` body.
-   - Dual-routing architecture: Intelligently inspects incoming payload. Payloads specifying `reviewSessionId` execute approved asynchronous migration preparation and background dispatch via `MigrationJobDispatcher`. Legacy payloads (omitting `reviewSessionId`) invoke legacy Phase 1 synchronous job creation (`HTTP 201 Created`), maintaining 100% backward compatibility for all prior test suites.
-   - Anti-impersonation: Validates request body `userId` against authenticated caller context, throwing `AccessDeniedException` if a client attempts to submit a migration on behalf of another user.
+2. **Asynchronous Submission Endpoint (`POST /api/migrations` & `/api/migrations/submit`)**:
+   - Returns `HTTP 202 Accepted` with `Location: /api/migrations/{executionId}/progress` for newly accepted asynchronous work.
+   - Returns `HTTP 200 OK` with `Location` header for idempotent submissions where the execution is already `COMPLETED`.
+   - Dual-routing architecture: Intelligently inspects incoming payload. Payloads specifying `reviewSessionId`, `sessionId`, or target playlist metadata execute approved asynchronous migration preparation and background dispatch via `MigrationJobDispatcher`. Legacy payloads specifying `sourcePlatform` or `targetPlatform` invoke legacy Phase 1 synchronous job creation (`HTTP 201 Created`). Unrecognized payloads fail fast with `HTTP 400 Bad Request`, preventing malformed requests from silently falling through into legacy handlers.
+   - Anti-impersonation: Validates request body `userId` against authenticated caller context, throwing `IllegalArgumentException` (mapped to `400 Bad Request`) if a client attempts to submit a migration on behalf of another user.
 
 3. **Execution Progress Endpoint (`GET /api/migrations/{executionId}/progress`)**:
    - Delegates to `MigrationProgressService.getProgress(executionId, userId)`.
@@ -465,6 +466,15 @@ In Phase 12E (subphases A through D), the REST presentation layer for asynchrono
    - Returns the exact same `MigrationProgressResponse` representation as the execution endpoint.
    - Safe execution decoupling: Allows clients that only hold the `reviewSessionId` to query migration status without initiating migration preparation or inserting database rows.
    - Returns `HTTP 404 Not Found` if the review session is unauthorized or nonexistent, or if an execution has not yet been prepared for the review session.
+
+5. **API Hardening, Exception Mapping & Worker Saturation (Phase 12E-E)**:
+   - Worker pool queue saturation (`TaskRejectedException`) is caught by `GlobalExceptionHandler` and mapped to `HTTP 429 Too Many Requests` with a `Retry-After: 30` header and `ErrorCode.TOO_MANY_REQUESTS`.
+   - `AccessDeniedException` maps to `HTTP 403 Forbidden` (`ErrorCode.FORBIDDEN`).
+   - `AuthenticationException` maps to `HTTP 401 Unauthorized` (`ErrorCode.UNAUTHORIZED`).
+   - `InvalidStateException` maps to `HTTP 409 Conflict` (`ErrorCode.INVALID_STATE`).
+   - Anonymous or missing principals fail fast with `401 Unauthorized`.
+   - `MigrationController` enforces strict mandatory constructor injection for all dependencies (`MigrationService`, `MigrationJobDispatcher`, `MigrationProgressService`, `UserService`, `ObjectMapper`, `Validator`), ensuring zero production startup risk from missing required beans.
+
 
 ---
 

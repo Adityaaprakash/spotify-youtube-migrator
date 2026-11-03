@@ -30,6 +30,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -67,33 +68,30 @@ public class MigrationController {
     @Autowired
     public MigrationController(
             MigrationService migrationService,
-            @Autowired(required = false) MigrationJobDispatcher jobDispatcher,
-            @Autowired(required = false) MigrationProgressService progressService,
-            @Autowired(required = false) UserService userService,
-            @Autowired(required = false) ObjectMapper objectMapper,
-            @Autowired(required = false) Validator validator
+            MigrationJobDispatcher jobDispatcher,
+            MigrationProgressService progressService,
+            UserService userService,
+            ObjectMapper objectMapper,
+            Validator validator
     ) {
         this.migrationService = Objects.requireNonNull(migrationService, "MigrationService must not be null");
-        this.jobDispatcher = jobDispatcher;
-        this.progressService = progressService;
-        this.userService = userService;
+        this.jobDispatcher = Objects.requireNonNull(jobDispatcher, "MigrationJobDispatcher must not be null");
+        this.progressService = Objects.requireNonNull(progressService, "MigrationProgressService must not be null");
+        this.userService = Objects.requireNonNull(userService, "UserService must not be null");
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
         this.validator = validator;
-    }
-
-    public MigrationController(MigrationService migrationService) {
-        this(migrationService, null, null, null, new ObjectMapper(), null);
     }
 
     /**
      * Submits an approved playlist migration for asynchronous execution (Phase 12E), or creates a legacy migration job.
      * <p>
      * If the payload contains {@code reviewSessionId}, coordinates synchronous preparation (Stage 1),
-     * enqueues background worker execution (Stage 2), and returns HTTP 202 Accepted with a {@code Location} header.
+     * enqueues background worker execution (Stage 2), and returns HTTP 202 Accepted with a {@code Location} header
+     * (or HTTP 200 OK if already COMPLETED).
      *
      * @param payload   the JSON request body
      * @param principal the authenticated principal
-     * @return HTTP 202 Accepted with Location header for approved migrations, or HTTP 201 Created for legacy jobs
+     * @return HTTP 202 Accepted (or 200 OK) with Location header for approved migrations, or HTTP 201 Created for legacy jobs
      */
     @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<?> submitOrProcessMigration(
@@ -105,12 +103,19 @@ public class MigrationController {
         }
 
         // Case 1: Asynchronous Approved Migration Submission (Phase 12E)
-        if (payload.has("reviewSessionId") || payload.has("sessionId")) {
+        if (payload.has("reviewSessionId") || payload.has("sessionId")
+                || payload.has("targetPlaylistTitle") || payload.has("targetPlaylistDescription")) {
             return submitAsyncMigration(payload, principal);
         }
 
         // Case 2: Legacy Direct Migration Job Creation (Phase 1 / Phase 8)
-        return createLegacyMigration(payload);
+        if (payload.has("sourcePlatform") || payload.has("targetPlatform")) {
+            return createLegacyMigration(payload);
+        }
+
+        throw new IllegalArgumentException(
+                "Unrecognized migration request: must specify reviewSessionId for approved migration "
+                        + "or sourcePlatform/targetPlatform for legacy migration");
     }
 
     /**
@@ -118,23 +123,24 @@ public class MigrationController {
      *
      * @param request   validated approved migration request
      * @param principal authenticated principal
-     * @return HTTP 202 Accepted with Location header pointing to progress URL
+     * @return HTTP 202 Accepted (or 200 OK) with Location header pointing to progress URL
      */
     @PostMapping(value = "/submit", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<MigrationSubmissionResponse> submitMigrationDirect(
             @RequestBody @Valid RunMigrationApiRequest request,
             Principal principal
     ) {
-        if (jobDispatcher == null) {
-            throw new IllegalStateException("MigrationJobDispatcher is not configured");
-        }
         UUID userId = resolveUserId(request.userId(), principal);
         ApprovedMigrationExecutionRequest domainReq = MigrationExecutionApiMapper.toDomainRequest(request, userId);
 
         MigrationExecutionSummary summary = jobDispatcher.dispatchMigration(domainReq, userId);
         MigrationSubmissionResponse response = MigrationSubmissionResponse.from(summary);
 
-        return ResponseEntity.status(HttpStatus.ACCEPTED)
+        HttpStatus status = summary.status() == MigrationExecutionStatus.COMPLETED
+                ? HttpStatus.OK
+                : HttpStatus.ACCEPTED;
+
+        return ResponseEntity.status(status)
                 .location(URI.create(response.progressUrl()))
                 .body(response);
     }
@@ -152,9 +158,6 @@ public class MigrationController {
             @PathVariable UUID executionId,
             Principal principal
     ) {
-        if (progressService == null) {
-            throw new IllegalStateException("MigrationProgressService is not configured");
-        }
         UUID userId = resolveUserId(null, principal);
         MigrationProgressSnapshot snapshot = progressService.getProgress(executionId, userId);
 
@@ -175,9 +178,6 @@ public class MigrationController {
             @PathVariable UUID reviewSessionId,
             Principal principal
     ) {
-        if (progressService == null) {
-            throw new IllegalStateException("MigrationProgressService is not configured");
-        }
         UUID userId = resolveUserId(null, principal);
         MigrationProgressSnapshot snapshot = progressService.getProgressByReviewSession(reviewSessionId, userId);
 
@@ -205,15 +205,15 @@ public class MigrationController {
     }
 
     private ResponseEntity<MigrationSubmissionResponse> submitAsyncMigration(JsonNode payload, Principal principal) {
-        if (jobDispatcher == null) {
-            throw new IllegalStateException("MigrationJobDispatcher is not configured");
-        }
-
         RunMigrationApiRequest request;
         try {
             request = objectMapper.treeToValue(payload, RunMigrationApiRequest.class);
         } catch (Exception e) {
             throw new IllegalArgumentException("Malformed approved migration request: " + e.getMessage(), e);
+        }
+
+        if (request == null || request.reviewSessionId() == null) {
+            throw new IllegalArgumentException("reviewSessionId is required");
         }
 
         if (validator != null) {
@@ -229,10 +229,14 @@ public class MigrationController {
         MigrationExecutionSummary summary = jobDispatcher.dispatchMigration(domainReq, userId);
         MigrationSubmissionResponse response = MigrationSubmissionResponse.from(summary);
 
-        log.info("Accepted approved migration submission for review session {} -> executionId={}",
-                request.reviewSessionId(), response.executionId());
+        HttpStatus status = summary.status() == MigrationExecutionStatus.COMPLETED
+                ? HttpStatus.OK
+                : HttpStatus.ACCEPTED;
 
-        return ResponseEntity.status(HttpStatus.ACCEPTED)
+        log.info("Accepted approved migration submission for review session {} -> executionId={}, status={}",
+                request.reviewSessionId(), response.executionId(), status);
+
+        return ResponseEntity.status(status)
                 .location(URI.create(response.progressUrl()))
                 .body(response);
     }
@@ -262,11 +266,9 @@ public class MigrationController {
     }
 
     private UUID resolveUserId(UUID requestedUserId, Principal principal) {
-        if (principal == null || principal.getName() == null || principal.getName().isBlank()) {
-            throw new IllegalArgumentException("User must be authenticated");
-        }
-        if (userService == null) {
-            throw new IllegalStateException("UserService is not configured");
+        if (principal == null || principal.getName() == null || principal.getName().isBlank()
+                || "anonymousUser".equalsIgnoreCase(principal.getName())) {
+            throw new InsufficientAuthenticationException("User must be authenticated");
         }
 
         String identifier = principal.getName();
@@ -293,3 +295,4 @@ public class MigrationController {
         return user.getId();
     }
 }
+

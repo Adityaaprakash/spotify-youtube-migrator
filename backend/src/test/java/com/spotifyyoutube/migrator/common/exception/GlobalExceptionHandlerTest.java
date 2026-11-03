@@ -88,7 +88,23 @@ class GlobalExceptionHandlerTest {
         public void generic() {
             throw new RuntimeException("Something went very wrong");
         }
+
+        @GetMapping("/test/task-rejected")
+        public void taskRejected() {
+            throw new org.springframework.core.task.TaskRejectedException("Executor queue saturated");
+        }
+
+        @GetMapping("/test/access-denied")
+        public void accessDenied() {
+            throw new org.springframework.security.access.AccessDeniedException("Access is denied");
+        }
+
+        @GetMapping("/test/authentication")
+        public void authentication() {
+            throw new org.springframework.security.authentication.BadCredentialsException("Bad credentials");
+        }
     }
+
 
     @BeforeEach
     void setUp() {
@@ -189,4 +205,30 @@ class GlobalExceptionHandlerTest {
                 // Must NOT expose real exception message to the client
                 .andExpect(jsonPath("$.message").value("An unexpected error occurred"));
     }
+
+    @Test
+    void taskRejectedException_shouldReturn429WithRetryAfterHeader() throws Exception {
+        mockMvc.perform(get("/test/task-rejected").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "30"))
+                .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"))
+                .andExpect(jsonPath("$.message").value("Migration worker pool is currently saturated; please retry shortly"));
+    }
+
+    @Test
+    void accessDeniedException_shouldReturn403WithForbiddenCode() throws Exception {
+        mockMvc.perform(get("/test/access-denied").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"))
+                .andExpect(jsonPath("$.message").value("Access is denied"));
+    }
+
+    @Test
+    void authenticationException_shouldReturn401WithUnauthorizedCode() throws Exception {
+        mockMvc.perform(get("/test/authentication").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
+                .andExpect(jsonPath("$.message").value("Authentication is required"));
+    }
 }
+
