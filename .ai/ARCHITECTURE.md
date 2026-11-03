@@ -521,3 +521,36 @@ Controllers MUST NOT:
   - **Transaction & Connection Pool Boundaries**:
     - Zero `@Transactional` on worker or executor boundary.
     - Discrete programmatic transactions (`TransactionTemplate`) inside `DefaultMigrationExecutionStateService` ensure database connections are released during external YouTube API network calls.
+
+## Migration Progress Tracking & Calculation (Phase 12D — Complete & Audited)
+
+- Packages:
+  - Progress Domain & Contracts: `com.spotifyyoutube.migrator.migration.progress.domain`
+  - Application Service: `com.spotifyyoutube.migrator.migration.progress.application`
+  - Persistence & Repositories: `com.spotifyyoutube.migrator.migration.execution.repository`
+- Architecture Decisions: ADR-022 (Section: Progress Tracking Model & Mathematical Invariants)
+- Purpose: Provides a fast, mathematically consistent, non-mutating read layer that calculates real-time progress snapshots directly from persisted track execution records.
+- Architecture Rules:
+  - **Immutable Progress Snapshot (`MigrationProgressSnapshot`)**:
+    - Encapsulates execution ID, current `MigrationExecutionStatus`, total tracks, counts across all 8 `ExecutionTrackStatus` categories, processed tracks, remaining tracks, and progress percentage.
+    - Processed tracks definition:
+      $$\text{processedTracks} = \text{addedTracks} + \text{failedTracks} + \text{uncertainTracks} + \text{skippedTracks} + \text{rolledBackTracks}$$
+    - Remaining tracks definition:
+      $$\text{remainingTracks} = \max(0, \text{totalTracks} - \text{processedTracks})$$
+    - Progress percentage calculation:
+      $$\text{progressPercentage} = \min\left(100.0, \max\left(0.0, \text{roundToOneDecimal}\left(\frac{\text{processedTracks} \times 100.0}{\text{totalTracks}}\right)\right)\right)$$
+    - Zero-Track Policy: Returns 0.0% progress when `totalTracks == 0`. Never divides by zero, returns NaN, or fabricates 100%.
+    - Strict validation: All counts must be non-negative.
+  - **Dedicated Read-Only Application Service (`MigrationProgressService`)**:
+    - `DefaultMigrationProgressService` is annotated with `@Transactional(readOnly = true)`.
+    - Zero entity mutations: never alters `MigrationExecution` or `ExecutionTrackRecord` rows.
+    - Zero external provider calls: does not call YouTube or Spotify APIs.
+    - Enforces anti-IDOR authorization: verifies `execution.getUser().getId().equals(authenticatedUserId)`. Unauthorized access throws `ResourceNotFoundException` (HTTP 404) to prevent resource enumeration.
+  - **Indexed Database Aggregation Query (`TrackStatusCount`)**:
+    - `ExecutionTrackRecordRepository.countTracksByStatusForExecution(executionId)` executes a single `GROUP BY t.status` aggregation query.
+    - Leverages existing index `idx_executiontracks_execution_status` on `(execution_id, status)` from Flyway V6.
+    - Bounded result set (at most 8 rows) eliminating N+1 queries and avoiding loading heavy track collections into JVM memory.
+    - Any status absent from the query result defaults to 0 in an `EnumMap`.
+  - **Real-Time Active Execution Visibility**:
+    - Recognizes that while `MigrationExecution` summary counters are only updated at execution boundaries, individual rows in `execution_track_records` are committed after every track mutation.
+    - Querying `execution_track_records` provides true, real-time progress while an execution is `RUNNING` in a background worker.

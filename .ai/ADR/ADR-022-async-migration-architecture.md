@@ -411,6 +411,36 @@ In Phase 12C, the background processing engine and executor infrastructure were 
 
 ---
 
+## Phase 12D Migration Progress Tracking Implementation
+
+In Phase 12D, the progress tracking and calculation subsystem was implemented and verified:
+
+1. **`MigrationProgressSnapshot`**:
+   - Immutable domain snapshot record exposing execution metadata, counts for all 8 track statuses, processed tracks, remaining tracks, and progress percentage.
+   - Formula:
+     $$\text{processedTracks} = \text{addedTracks} + \text{failedTracks} + \text{uncertainTracks} + \text{skippedTracks} + \text{rolledBackTracks}$$
+     $$\text{remainingTracks} = \max(0, \text{totalTracks} - \text{processedTracks})$$
+     $$\text{progressPercentage} = \min\left(100.0, \max\left(0.0, \text{roundToOneDecimal}\left(\frac{\text{processedTracks} \times 100.0}{\text{totalTracks}}\right)\right)\right)$$
+   - Zero-track safe: Returns `0.0%` when `totalTracks == 0`. Never divides by zero or reports NaN.
+
+2. **Authoritative State Alignment**:
+   - `MigrationExecution` summary counters are only updated at execution completion or stoppage boundaries.
+   - `ExecutionTrackRecord` rows in `execution_track_records` are committed after every track mutation in discrete transactions.
+   - To provide real-time accuracy during active `RUNNING` migrations, track counts are queried directly from `execution_track_records`.
+
+3. **High-Performance Status Aggregation (`countTracksByStatusForExecution`)**:
+   - Added database aggregation query using JPQL constructor expression returning `List<TrackStatusCount>`.
+   - Utilizes existing database index `idx_executiontracks_execution_status` on `(execution_id, status)`.
+   - Returns at most 8 rows, eliminating entity hydration overhead and N+1 queries. Missing statuses default to 0.
+
+4. **`MigrationProgressService`**:
+   - Application service interface with `DefaultMigrationProgressService` implementation.
+   - Annotated with `@Transactional(readOnly = true)`.
+   - Enforces anti-IDOR security: throws `ResourceNotFoundException` (HTTP 404) if the execution does not exist or belongs to another user.
+   - Strictly read-only: performs zero entity modifications, zero YouTube/Spotify API requests, and zero background dispatch operations.
+
+---
+
 ## Consequences
 
 ### Positive

@@ -42,4 +42,17 @@ public interface ExecutionTrackRecordRepository extends JpaRepository<ExecutionT
            "t.version = t.version + 1 " +
            "WHERE t.id = :id AND t.status = com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus.ADDED")
     int claimTrackRollingBack(@Param("id") UUID id, @Param("now") Instant now);
+
+    /**
+     * Aggregates track counts by status for a given execution ID using the database index (Phase 12D).
+     * Avoids loading all track records into memory.
+     *
+     * @param executionId execution identifier
+     * @return list of status counts for statuses present in the execution
+     */
+    @Query("SELECT new com.spotifyyoutube.migrator.migration.execution.repository.TrackStatusCount(t.status, COUNT(t)) " +
+           "FROM ExecutionTrackRecord t " +
+           "WHERE t.execution.id = :executionId " +
+           "GROUP BY t.status")
+    List<TrackStatusCount> countTracksByStatusForExecution(@Param("executionId") UUID executionId);
 }

@@ -3,7 +3,7 @@
 Last Updated: 2026-11-02
 
 Current Phase: Phase 12 — Async Migration & Progress [IN PROGRESS]
-Current Subphase: Phase 12C — Background Worker Engine & TaskExecutor Configuration [COMPLETE & AUDITED] -> Phase 12D — Migration Progress Tracking & Calculation Engine [NEXT]
+Current Subphase: Phase 12D — Migration Progress Tracking & Calculation [COMPLETE & AUDITED] -> Phase 12E — Async REST API & Presentation Layer [NEXT]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
@@ -13,9 +13,34 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 - **Phase 12A (Async Migration Architecture & Contracts)**: COMPLETE (ADR-022 created, architecture audit completed, background worker design established, REST contracts defined, 12B-12H roadmap planned).
 - **Phase 12B (Migration Job Persistence & Queue Alignment)**: COMPLETE & AUDITED (QUEUED status introduced, single MigrationExecution aggregate reused, queue initialization implemented, atomic claiming contracts verified, resume semantics protected, zero Flyway DDL changes required).
 - **Phase 12C (Background Worker Engine & TaskExecutor)**: COMPLETE & AUDITED (ThreadPoolTaskExecutor bounded pool configured, MigrationBackgroundWorker delegating to ApprovedMigrationOrchestrator, MigrationJobDispatcher coordinating Stage 1 synchronous preparation and Stage 2 dispatch, QUEUED-only atomic database claim contract, executor saturation handling with safe reset to INITIALIZED preventing orphaned jobs, graceful shutdown configured).
-- **Phase 12D (Migration Progress Tracking & Calculation Engine)**: NEXT IMPLEMENTATION STEP.
+- **Phase 12D (Migration Progress Tracking & Calculation)**: COMPLETE & AUDITED (MigrationProgressSnapshot immutable domain record, MigrationProgressService and DefaultMigrationProgressService implemented, real-time status count aggregation via database index, processed/remaining track derivation, safe percentage calculation avoiding division by zero, anti-IDOR enforcement, zero mutation / read-only guarantees).
+- **Phase 12E (Async REST API & Presentation Layer)**: NEXT IMPLEMENTATION STEP.
 
 ## Completed
+### Phase 12D (Migration Progress Tracking & Calculation) [COMPLETE & AUDITED]
+- **Immutable Progress Snapshot Model (`MigrationProgressSnapshot`)**:
+  - Encapsulates execution metadata (`executionId`, `executionStatus`, `totalTracks`).
+  - Itemizes all 8 domain track statuses (`pendingTracks`, `addingTracks`, `addedTracks`, `failedTracks`, `uncertainTracks`, `skippedTracks`, `rollingBackTracks`, `rolledBackTracks`).
+  - Computes `processedTracks = added + failed + uncertain + skipped + rolledBack`.
+  - Computes `remainingTracks = max(0, totalTracks - processedTracks)`.
+  - Computes `progressPercentage` bounded in `[0.0, 100.0]` and rounded to 1 decimal place with `RoundingMode.HALF_UP`.
+  - Zero-track safe policy: returns `0.0%` progress when `totalTracks == 0` without division by zero or NaN.
+  - Validates non-negative invariant across all counters.
+- **Dedicated Read-Only Application Service (`MigrationProgressService`)**:
+  - Interface `MigrationProgressService` and implementation `DefaultMigrationProgressService`.
+  - Annotated with `@Transactional(readOnly = true)` ensuring read-only database connections that release immediately.
+  - Enforces anti-IDOR security: throws `ResourceNotFoundException` (HTTP 404) if the execution does not exist or belongs to another user.
+  - Provides `getProgress(UUID executionId, UUID authenticatedUserId)` and `getProgressByReviewSession(UUID reviewSessionId, UUID authenticatedUserId)`.
+  - Strictly non-mutating: performs zero state changes, zero API calls, and zero background job triggers.
+- **High-Performance Database Aggregation Query (`TrackStatusCount`)**:
+  - Added `countTracksByStatusForExecution(UUID executionId)` on `ExecutionTrackRecordRepository`.
+  - Uses JPQL constructor expression returning `List<TrackStatusCount>`.
+  - Leverages existing index `idx_executiontracks_execution_status` from Flyway V6.
+  - Bounded result set (at most 8 rows) eliminating N+1 queries and avoiding loading heavy track record entities into memory.
+  - Defaults any status missing from database results to 0.
+- **Authoritative Source Alignment**:
+  - Recognizes that while `MigrationExecution` summary counters are only updated at execution boundaries, individual rows in `execution_track_records` are committed after every track mutation.
+  - Querying `execution_track_records` provides true, real-time progress while an execution is `RUNNING` in a background worker.
 ### Phase 12C (Background Worker Engine & TaskExecutor Configuration) [COMPLETE & AUDITED]
 - **Bounded Worker Pool Configuration (`AsyncMigrationConfig`)**:
   - Configured Spring `ThreadPoolTaskExecutor` bean named `migrationTaskExecutor`.
