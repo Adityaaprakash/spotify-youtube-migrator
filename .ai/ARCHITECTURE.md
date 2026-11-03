@@ -554,3 +554,33 @@ Controllers MUST NOT:
   - **Real-Time Active Execution Visibility**:
     - Recognizes that while `MigrationExecution` summary counters are only updated at execution boundaries, individual rows in `execution_track_records` are committed after every track mutation.
     - Querying `execution_track_records` provides true, real-time progress while an execution is `RUNNING` in a background worker.
+
+## Async Migration REST API & Progress Presentation (Phase 12E (A–D) — Complete & Audited)
+
+- Packages:
+  - Presentation & Controllers: `com.spotifyyoutube.migrator.migration.api`
+  - Presentation DTOs: `com.spotifyyoutube.migrator.migration.api.dto`
+  - Async Dispatcher & Service: `com.spotifyyoutube.migrator.migration.async`, `com.spotifyyoutube.migrator.migration.progress.application`
+- Architecture Decisions: ADR-022 (Section: REST Presentation Layer & Progress Endpoints)
+- Purpose: Exposes asynchronous migration submission and real-time progress retrieval through secure, non-mutating REST endpoints, returning HTTP 202 Accepted with canonical Location headers, and enforcing anti-IDOR authorization and strict dual-routing backward compatibility.
+- Architecture Rules:
+  - **DTO Decoupling & Immutability**:
+    - `MigrationSubmissionResponse`: API response DTO exposing `executionId`, `reviewSessionId`, `status`, `progressUrl`, `message`, `totalTracks`, and `submittedAt`. Factory methods `from(summary)` and `of(...)`. Zero domain or JPA entity leakage; zero OAuth token or credential exposure.
+    - `MigrationProgressResponse`: API response DTO mapping 1-to-1 from `MigrationProgressSnapshot`. Exposes `executionId`, `status`, counts for all 8 track statuses (`pendingTracks`, `addingTracks`, `addedTracks`, `failedTracks`, `uncertainTracks`, `skippedTracks`, `rollingBackTracks`, `rolledBackTracks`), and calculated metrics (`totalTracks`, `processedTracks`, `remainingTracks`, `progressPercentage`). Factory method `from(snapshot)`. Zero recalculation in controller or DTO.
+  - **Submission Endpoint & Dual-Routing (`POST /api/migrations`)**:
+    - Dual-routing behavior preserving 100% backward compatibility for legacy Phase 1 tests without Spring MVC route ambiguity:
+      - If request body contains `reviewSessionId`, routes to Phase 12E asynchronous dispatch (`submitAsyncMigration`), returning `HTTP 202 Accepted`, `Location: /api/migrations/{executionId}/progress`, and `MigrationSubmissionResponse`.
+      - If request body omits `reviewSessionId` (e.g. legacy `CreateMigrationRequest`), routes to legacy Phase 1 synchronous job creation (`createLegacyMigration`), returning `HTTP 201 Created`.
+    - Dedicated direct route `@PostMapping("/async")` also provided for unambiguous approved async submission.
+  - **Canonical Location Header**:
+    - Returned on `HTTP 202 Accepted` pointing to `/api/migrations/{executionId}/progress`.
+    - Uses `progressUrl` generated from the persisted execution aggregate.
+  - **Progress Retrieval Endpoints (`GET /api/migrations/{executionId}/progress` & `GET /api/migrations/review-sessions/{reviewSessionId}/progress`)**:
+    - Both endpoints delegate to `MigrationProgressService` (`getProgress` and `getProgressByReviewSession`).
+    - Return identical `MigrationProgressResponse` payloads.
+    - Annotated with `CacheControl.noCache().mustRevalidate()`.
+    - Zero execution or track record mutation during polling; zero YouTube/Spotify API requests; zero background worker dispatch.
+  - **Security & Anti-IDOR Enforcement**:
+    - Resolves authenticated user identity via `Principal` or Spring Security `Authentication`.
+    - Client-supplied `userId` is compared against authenticated user ID. In the event of mismatch, `AccessDeniedException` is thrown to prevent user impersonation.
+    - Both execution and review-session lookups enforce ownership through `MigrationProgressService` which throws `ResourceNotFoundException` (HTTP 404) for unauthorized or nonexistent IDs, preventing cross-user migration enumeration.

@@ -3,7 +3,7 @@
 Last Updated: 2026-11-02
 
 Current Phase: Phase 12 — Async Migration & Progress [IN PROGRESS]
-Current Subphase: Phase 12D — Migration Progress Tracking & Calculation [COMPLETE & AUDITED] -> Phase 12E — Async REST API & Presentation Layer [NEXT]
+Current Subphase: Phase 12E (A–D) — Async REST API Implementation [COMPLETE & AUDITED] -> Phase 12E-E — Error-Handling Hardening & Status Mapping [NEXT]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
@@ -14,9 +14,32 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 - **Phase 12B (Migration Job Persistence & Queue Alignment)**: COMPLETE & AUDITED (QUEUED status introduced, single MigrationExecution aggregate reused, queue initialization implemented, atomic claiming contracts verified, resume semantics protected, zero Flyway DDL changes required).
 - **Phase 12C (Background Worker Engine & TaskExecutor)**: COMPLETE & AUDITED (ThreadPoolTaskExecutor bounded pool configured, MigrationBackgroundWorker delegating to ApprovedMigrationOrchestrator, MigrationJobDispatcher coordinating Stage 1 synchronous preparation and Stage 2 dispatch, QUEUED-only atomic database claim contract, executor saturation handling with safe reset to INITIALIZED preventing orphaned jobs, graceful shutdown configured).
 - **Phase 12D (Migration Progress Tracking & Calculation)**: COMPLETE & AUDITED (MigrationProgressSnapshot immutable domain record, MigrationProgressService and DefaultMigrationProgressService implemented, real-time status count aggregation via database index, processed/remaining track derivation, safe percentage calculation avoiding division by zero, anti-IDOR enforcement, zero mutation / read-only guarantees).
-- **Phase 12E (Async REST API & Presentation Layer)**: NEXT IMPLEMENTATION STEP.
+- **Phase 12E (A–D) (Async REST API Implementation)**: COMPLETE & AUDITED (POST /api/migrations async submission returning HTTP 202 Accepted with Location header, MigrationSubmissionResponse DTO, GET /api/migrations/{id}/progress execution progress polling endpoint, GET /api/migrations/review-sessions/{id}/progress review-session progress endpoint, MigrationProgressResponse DTO, anti-IDOR authorization, anti-impersonation, backward-compatible payload dispatching).
+- **Phase 12E-E (Error-Handling Hardening & Status Mapping)**: NEXT IMPLEMENTATION STEP.
 
 ## Completed
+### Phase 12E (A–D) (Async REST API Implementation) [COMPLETE & AUDITED]
+- **Asynchronous Submission Endpoint (`POST /api/migrations`)**:
+  - Implemented on `MigrationController`.
+  - Coordinates non-blocking submission through `MigrationJobDispatcher.dispatchMigration(...)`.
+  - Returns `HTTP 202 Accepted` with a `Location: /api/migrations/{executionId}/progress` header.
+  - Response payload: `MigrationSubmissionResponse` exposing `executionId`, `reviewSessionId`, `status`, `progressUrl`, `message`, `totalTracks`, `submittedAt`.
+  - Zero exposure of internal database entities, credentials, or OAuth tokens.
+  - Transparent dual-routing: requests with `reviewSessionId` execute asynchronous approved migration dispatch; legacy requests with `sourcePlatform`/`targetPlatform` continue to execute legacy job creation (`HTTP 201 Created`), preserving 100% backward compatibility.
+- **Execution Progress Endpoint (`GET /api/migrations/{executionId}/progress`)**:
+  - Resolves authenticated user and delegates to `MigrationProgressService.getProgress(executionId, userId)`.
+  - Returns `HTTP 200 OK` with `MigrationProgressResponse` mapping the Phase 12D `MigrationProgressSnapshot`.
+  - Sets `Cache-Control: no-cache`.
+  - Enforces anti-IDOR security: returns `HTTP 404 Not Found` if the execution does not exist or belongs to another user.
+  - Strictly read-only: zero mutations, zero external API calls.
+- **Review-Session Progress Endpoint (`GET /api/migrations/review-sessions/{reviewSessionId}/progress`)**:
+  - Resolves authenticated user and delegates to `MigrationProgressService.getProgressByReviewSession(reviewSessionId, userId)`.
+  - Returns `HTTP 200 OK` with identical `MigrationProgressResponse` structure.
+  - Handles review sessions without an execution safely by returning `HTTP 404 Not Found`.
+  - Enforces anti-IDOR authorization.
+- **REST Presentation DTOs**:
+  - `MigrationSubmissionResponse`: Immutable record containing submission metadata and progress URL.
+  - `MigrationProgressResponse`: Immutable record exposing execution status, 8 track statuses, processed/remaining tracks, and progress percentage.
 ### Phase 12D (Migration Progress Tracking & Calculation) [COMPLETE & AUDITED]
 - **Immutable Progress Snapshot Model (`MigrationProgressSnapshot`)**:
   - Encapsulates execution metadata (`executionId`, `executionStatus`, `totalTracks`).

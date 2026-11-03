@@ -441,7 +441,35 @@ In Phase 12D, the progress tracking and calculation subsystem was implemented an
 
 ---
 
+## Phase 12E (A–D) Async REST API & Presentation Implementation
+
+In Phase 12E (subphases A through D), the REST presentation layer for asynchronous migration submission and progress polling was implemented and verified:
+
+1. **REST DTO Design (`MigrationSubmissionResponse` & `MigrationProgressResponse`)**:
+   - `MigrationSubmissionResponse`: Returns `executionId`, `reviewSessionId`, `status`, `progressUrl`, `message`, `totalTracks`, and `submittedAt`. Redacts sensitive credentials, provider tokens, and internal aggregate internals.
+   - `MigrationProgressResponse`: 1-to-1 representation of `MigrationProgressSnapshot`. Exposes `executionId`, `status`, `totalTracks`, counts across all 8 track statuses, `processedTracks`, `remainingTracks`, and `progressPercentage`. Preserves the exact mathematical semantics of Phase 12D with zero controller recalculation.
+
+2. **Asynchronous Submission Endpoint (`POST /api/migrations`)**:
+   - Returns `HTTP 202 Accepted` with `Location: /api/migrations/{executionId}/progress` and `MigrationSubmissionResponse` body.
+   - Dual-routing architecture: Intelligently inspects incoming payload. Payloads specifying `reviewSessionId` execute approved asynchronous migration preparation and background dispatch via `MigrationJobDispatcher`. Legacy payloads (omitting `reviewSessionId`) invoke legacy Phase 1 synchronous job creation (`HTTP 201 Created`), maintaining 100% backward compatibility for all prior test suites.
+   - Anti-impersonation: Validates request body `userId` against authenticated caller context, throwing `AccessDeniedException` if a client attempts to submit a migration on behalf of another user.
+
+3. **Execution Progress Endpoint (`GET /api/migrations/{executionId}/progress`)**:
+   - Delegates to `MigrationProgressService.getProgress(executionId, userId)`.
+   - Returns `HTTP 200 OK` with `MigrationProgressResponse` and `Cache-Control: no-cache`.
+   - Read-only safety: Performs zero database writes, zero external provider calls, and zero background worker triggers. Safe for frequent client polling.
+   - Anti-IDOR: Returns `HTTP 404 Not Found` (`ResourceNotFoundException`) if the execution does not exist or belongs to a different user, preventing unauthorized enumeration.
+
+4. **Review-Session Progress Endpoint (`GET /api/migrations/review-sessions/{reviewSessionId}/progress`)**:
+   - Delegates to `MigrationProgressService.getProgressByReviewSession(reviewSessionId, userId)`.
+   - Returns the exact same `MigrationProgressResponse` representation as the execution endpoint.
+   - Safe execution decoupling: Allows clients that only hold the `reviewSessionId` to query migration status without initiating migration preparation or inserting database rows.
+   - Returns `HTTP 404 Not Found` if the review session is unauthorized or nonexistent, or if an execution has not yet been prepared for the review session.
+
+---
+
 ## Consequences
+
 
 ### Positive
 1. **Zero HTTP Timeouts**: Long-running playlist migrations never block client HTTP threads.
