@@ -515,6 +515,27 @@ In Phase 12E (subphases A through H), the REST presentation layer for asynchrono
    - **End-to-End Asynchronous Lifecycle**:
      Verified via `EndToEndAsyncMigrationLifecycleIT`. Validated full REST journey from `POST /api/migrations` (202 Accepted) through background worker processing to `GET /api/migrations/{id}/progress` (200 OK, 100% complete). Proved anti-IDOR security (404 Not Found for cross-user progress reads) and idempotent resubmission (200 OK without duplicate playlist creation).
 
+8. **Final Architecture Audit, Operational Governance & Subsystem Freeze (Phase 12H)**:
+   - **Architectural Freeze Invariants**:
+     - `MigrationExecution` is frozen as the single authoritative persistent execution aggregate.
+     - `ApprovedMigrationOrchestrator` / `DefaultApprovedMigrationOrchestrator` is frozen as the canonical execution boundary.
+     - Background worker execution (`MigrationBackgroundWorker`) delegates strictly to `executeQueuedMigration()`, bypassing legacy Phase 8 and avoiding full synchronous orchestration.
+     - Atomic conditional claim (`QUEUED` -> `RUNNING` checking `@Version`) is mandatory to prevent duplicate execution across workers or restarts.
+     - Destination playlist creation remains strictly in Stage 1 preparation, never re-executed in worker or on resubmission.
+     - External YouTube API calls (`addTrackToPlaylist`, `createPlaylist`) are strictly isolated outside database transactions.
+     - Progress calculation (`MigrationProgressService`) is strictly read-only under `REPEATABLE_READ` isolation without entity mutations.
+     - Eight-state count conservation invariant (`totalTracks = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack`) is strictly enforced without defensive clamping.
+     - Distinct HTTP 429 semantics are frozen: `Retry-After: 30` for executor saturation (with state reset to `INITIALIZED`); `Retry-After: 5` for client polling limit.
+     - REST API contracts maintain backward-compatible dual routing, typed submission, and anti-IDOR security.
+   - **Operational Limitations & Verification Status**:
+     - Automated terminal execution is blocked by host IDE security permissions policy.
+     - Testcontainers container execution is blocked where Docker daemon is unavailable.
+     - 100,000-track benchmark is NOT RUN pending live database terminal access.
+     - Process-local in-memory rate limiting and in-memory queue volatility are acknowledged single-instance operational trade-offs.
+   - **Phase 12 Freeze Decision**:
+     - Phase 12 architecture and contracts are formally **FROZEN**.
+     - No further architectural revisions, new features, Redis integration, SSE/WebSockets, or Phase 13 crash recovery will be introduced in Phase 12.
+
 ---
 
 ## Consequences

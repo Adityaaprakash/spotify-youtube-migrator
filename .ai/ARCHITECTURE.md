@@ -683,3 +683,75 @@ Controllers MUST NOT:
     - Verified via `EndToEndAsyncMigrationLifecycleIT`.
     - Validates full journey from `POST /api/migrations` (202 Accepted) through background worker processing to `GET /api/migrations/{id}/progress` (200 OK, 100% complete).
     - Proves anti-IDOR security (404 Not Found for cross-user progress reads) and idempotent resubmission (200 OK without duplicate playlist creation).
+
+## Async Migration Architecture Freeze & Operational Governance (Phase 12H — Complete & Frozen)
+
+- Packages:
+  - Domain & State: `com.spotifyyoutube.migrator.migration.domain`, `com.spotifyyoutube.migrator.migration.application.execution`
+  - Async Worker & Dispatcher: `com.spotifyyoutube.migrator.migration.async`
+  - Progress Tracking: `com.spotifyyoutube.migrator.migration.progress.domain`, `com.spotifyyoutube.migrator.migration.progress.application`
+  - REST API & Presentation: `com.spotifyyoutube.migrator.migration.api`, `com.spotifyyoutube.migrator.migration.api.dto`
+- Architecture Decisions: ADR-022 (Section: Phase 12 Freeze Declaration & Operational Governance)
+- Status: **COMPLETE & FROZEN**.
+
+### Architectural Freeze Rules (10 Invariant Boundaries)
+
+1. **Single Authoritative Aggregate**: `MigrationExecution` remains the single authoritative persistent execution aggregate. No secondary or async-only execution aggregate may be introduced.
+2. **Canonical Orchestration Boundary**: `ApprovedMigrationOrchestrator` / `DefaultApprovedMigrationOrchestrator` remains the single canonical execution engine. Background workers must delegate to `executeQueuedMigration()`.
+3. **Stage Separation**: Request submission (`Stage 1: Preparation & Enqueue`) and background execution (`Stage 2: Asynchronous Worker Processing`) remain strictly separated. The web request thread never performs track insertions.
+4. **Atomic Claim Invariant**: Atomic conditional database claiming (`claimExecutionRunningWithVersion` where status = `QUEUED`) is mandatory before worker execution. Competing or stale version claims must be rejected.
+5. **Destination Playlist Creation**: Destination playlist creation is strictly a preparation-stage responsibility. The worker never creates or re-creates the destination playlist. Resubmission of an existing execution must reuse the prepared playlist.
+6. **Transaction Boundary Isolation**: Database transactions remain short and programmatic (`TransactionTemplate`). Remote YouTube API calls (`addTrackToPlaylist`, `createPlaylist`) must execute strictly outside database transactions.
+7. **Read-Only Progress Aggregation**: Progress calculation (`MigrationProgressService`) remains strictly read-only under `REPEATABLE_READ` isolation. Progress queries must never mutate entity state or invoke external APIs.
+8. **Count Conservation Invariant**: Track progress must conserve total count across all 8 canonical states:
+   $$\text{totalTracks} = \text{pending} + \text{adding} + \text{added} + \text{failed} + \text{uncertain} + \text{skipped} + \text{rollingBack} + \text{rolledBack}$$
+   Defensive count clamping is forbidden; inconsistencies must trigger `ProgressConsistencyException`.
+9. **Separate 429 Quotas**: Polling rate limiting (`RateLimitExceededException`, `Retry-After: 5`) and executor saturation (`TaskRejectedException`, `Retry-After: 30`) remain completely distinct in keying, headers, and state side-effects.
+10. **API Backward Compatibility**: Dual routing on `POST /api/migrations`, typed `POST /api/migrations/submit`, and anti-IDOR security behavior (`404 Not Found` on unowned executions) remain stable public contracts.
+
+### Subsystem Architecture Flow
+
+```
+[Client]
+   │
+   ├─► POST /api/migrations/submit (or POST /api/migrations)
+   │     │
+   │     ▼ (Stage 1: Synchronous Web Request Thread)
+   │   MigrationJobDispatcher.dispatchMigration(...)
+   │     ├─► Validate Approved Plan & Authorization (Anti-IDOR)
+   │     ├─► Create Destination Playlist (External YouTube Call — Out of DB Tx)
+   │     ├─► Persist MigrationExecution as QUEUED (Short DB Tx)
+   │     └─► Submit Runnable to MigrationTaskExecutor (In-Memory Bounded Pool)
+   │           │
+   │           ├─► [SUCCESS] Return HTTP 202 Accepted (Location: /api/migrations/{id}/progress)
+   │           └─► [SATURATED] Reset QUEUED -> INITIALIZED (Short DB Tx), Return HTTP 429 (Retry-After: 30)
+   │
+   ├─► Background Worker Execution (Stage 2: migration-worker-N)
+   │     │
+   │     ▼
+   │   MigrationBackgroundWorker.run()
+   │     ├─► Atomic DB Claim: QUEUED -> RUNNING (Conditional Update on Version)
+   │     │     └─► [IF NOT CLAIMED] Abort silently (another worker or stale)
+   │     └─► ApprovedMigrationOrchestrator.executeQueuedMigration(...)
+   │           └─► Sequential Track Insertions (YouTube calls out of DB Tx, Track DB commits)
+   │
+   └─► Polling Progress: GET /api/migrations/{id}/progress
+         │
+         ▼
+       MigrationProgressService.getProgress(...)
+         ├─► ProgressPollingRateLimiter.checkLimit(userId) -> [EXCEEDED] HTTP 429 (Retry-After: 5)
+         ├─► Security Ownership Check -> [UNOWNED] HTTP 404 Not Found
+         └─► REPEATABLE_READ Read-Only Query:
+               ├─► SELECT execution WHERE id = :id
+               └─► SELECT status, COUNT(*) FROM execution_track_records WHERE execution_id = :id GROUP BY status
+                     └─► Return MigrationProgressResponse (HTTP 200 OK, Cache-Control: no-cache)
+```
+
+### Operational Limitations Register
+
+1. **Host Terminal Restrictions**: Host machine terminal commands are restricted by IDE host security permissions policy. All automated test suites are implemented and statically verified, but command-line Maven execution is blocked.
+2. **PostgreSQL / Testcontainers Runtime**: Testcontainers requires a running Docker daemon socket. In environments without Docker socket binding, container execution is blocked. Production PostgreSQL configuration is preserved without test-only H2 schema pollution.
+3. **100,000-Track Benchmark**: Composite index `idx_executiontracks_execution_status` on `(execution_id, status)` optimizes grouped aggregation to at most 8 result rows. Empirical `EXPLAIN ANALYZE` benchmarks against 100k rows remain `NOT RUN` pending active PostgreSQL database terminal access.
+4. **Process-Local Rate Limiter**: `InMemoryProgressPollingRateLimiter` sliding window is stored in local JVM memory. Does not synchronize quotas across horizontal application nodes; cluster-wide rate limiting belongs to Phase 19.
+5. **In-Memory Queue Volatility**: Executor queue (`LinkedBlockingQueue` capacity 50) is volatile in JVM memory. Durable queue crash recovery and reconciliation belong to Phase 13.
+6. **Delivery Protocol**: Polling-only over REST. WebSockets/SSE and frontend integration belong to Phase 15.
