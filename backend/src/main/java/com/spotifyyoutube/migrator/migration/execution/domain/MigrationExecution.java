@@ -232,6 +232,21 @@ public class MigrationExecution extends BaseEntity {
     }
 
     /**
+     * Resets a QUEUED execution back to INITIALIZED status if worker dispatch was rejected (Phase 12C).
+     * Prevents the execution from becoming an orphaned QUEUED job while preserving the destination
+     * playlist, approved track records, and review session binding for safe retry or recovery.
+     */
+    public void resetToInitialized() {
+        if (this.status != MigrationExecutionStatus.QUEUED) {
+            throw new InvalidStateException(String.format(
+                    "Cannot reset execution %s to INITIALIZED: current status is %s, expected QUEUED",
+                    getId(), this.status
+            ));
+        }
+        this.status = MigrationExecutionStatus.INITIALIZED;
+    }
+
+    /**
      * Claims this execution for active insertion processing on the current thread.
      * Prevents concurrent execution.
      */

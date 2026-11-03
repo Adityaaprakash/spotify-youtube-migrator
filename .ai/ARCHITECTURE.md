@@ -483,3 +483,41 @@ Controllers MUST NOT:
     - If multiple workers attempt to claim the same queued execution, exactly one succeeds (returns 1); competing claims return 0 and fail fast with `InvalidStateException` before performing any external YouTube API mutations.
   - **Schema & Flyway Compatibility**:
     - Table column `migration_executions.status` is `VARCHAR(50) NOT NULL` (Flyway V6) without CHECK constraints. Zero Flyway DDL migrations required.
+
+## Background Worker Engine & TaskExecutor Configuration (Phase 12C — Complete & Audited)
+
+- Packages:
+  - Async Configuration & Dispatcher: `com.spotifyyoutube.migrator.migration.async`
+  - Worker & Application Service: `com.spotifyyoutube.migrator.migration.async`, `com.spotifyyoutube.migrator.migration.application.execution`
+  - Contracts & Facade: `com.spotifyyoutube.migrator.migration.application.execution`, `com.spotifyyoutube.migrator.migration.application.execution.contract`
+  - Domain & State Machine: `com.spotifyyoutube.migrator.migration.execution.domain`
+- Architecture Decisions: ADR-022 (Section: Background Worker Engine, Dispatcher, and Executor Configuration)
+- Purpose: Provides the internal asynchronous execution infrastructure, executing approved migration track insertions on bounded background worker threads while ensuring strict transaction boundaries, atomic QUEUED-only database claiming, and orphan prevention upon executor saturation.
+- Architecture Rules:
+  - **Bounded TaskExecutor Configuration (`AsyncMigrationConfig`)**:
+    - Bean: `ThreadPoolTaskExecutor` named `migrationTaskExecutor`.
+    - Pool settings: `corePoolSize = 2`, `maxPoolSize = 4`, `queueCapacity = 50`, `threadNamePrefix = "migration-worker-"`.
+    - Rejection policy: Explicit `ThreadPoolExecutor.AbortPolicy` throwing `TaskRejectedException`.
+    - ThreadPool scaling semantics: Tasks 1-2 start worker threads; tasks 3-52 buffer in bounded queue; tasks 53-54 expand worker pool to maxPoolSize (4); task 55+ rejects immediately.
+    - Graceful shutdown: `waitForTasksToCompleteOnShutdown = true`, `awaitTerminationSeconds = 30`.
+  - **Two-Stage Orchestration Boundary**:
+    - **Stage 1 (Synchronous Preparation)**: `ApprovedMigrationOrchestrator.prepareQueuedMigration(...)` validates approved plan, creates YouTube destination playlist (satisfying Flyway V6 `destination_playlist_id NOT NULL` constraint), and persists durable `MigrationExecution` in `QUEUED` status with child track records via `initializeQueuedExecution`.
+    - **Stage 2 (Background Dispatch)**: `MigrationJobDispatcher` submits a lightweight task passing only `executionId` and `authenticatedUserId` to `ThreadPoolTaskExecutor`.
+  - **QUEUED-Only Database Claim Contract**:
+    - `MigrationExecutionStateService.executeQueuedTrackInsertion(executionId, authenticatedUserId)` enforces `eligibleStatuses = Set.of(MigrationExecutionStatus.QUEUED)`.
+    - Background workers cannot claim or hijack executions in `INITIALIZED`, `PARTIALLY_COMPLETED`, or `RECOVERY_REQUIRED` states.
+    - Preserves row-level conditional locking query (`claimExecutionRunningWithVersion`) preventing competing workers from processing the same execution.
+  - **Executor Saturation & Orphan Prevention**:
+    - When `ThreadPoolTaskExecutor` rejects submission (`TaskRejectedException`), `MigrationJobDispatcher` invokes `MigrationExecutionStateService.handleDispatchRejection(...)`.
+    - Invokes domain transition `MigrationExecution.resetToInitialized()`, moving status from `QUEUED` to `INITIALIZED`.
+    - Guarantees zero orphaned `QUEUED` executions without active workers in the database.
+    - Preserves destination playlist ID and track records so job can be safely retried or handled by Phase 13 durable recovery.
+    - Re-throws `TaskRejectedException` for upstream HTTP 429 Too Many Requests mapping.
+  - **Worker Execution & Error Isolation (`MigrationBackgroundWorker`)**:
+    - Worker delegates exclusively to `ApprovedMigrationOrchestrator.executeQueuedMigration(executionId, authenticatedUserId)`.
+    - Worker never calls destination YouTube API or state service directly.
+    - Does not blindly overwrite execution status to `FAILED` on error; preserves Phase 11 recovery classifications (`RECOVERY_REQUIRED`, `PARTIALLY_COMPLETED`, `UNCERTAIN`).
+    - Structured logging with execution duration; strict redaction of credentials and OAuth tokens.
+  - **Transaction & Connection Pool Boundaries**:
+    - Zero `@Transactional` on worker or executor boundary.
+    - Discrete programmatic transactions (`TransactionTemplate`) inside `DefaultMigrationExecutionStateService` ensure database connections are released during external YouTube API network calls.

@@ -352,4 +352,148 @@ class ApprovedMigrationOrchestratorTest {
             verify(executionStateService, never()).executeTrackInsertion(any(UUID.class), any());
         }
     }
+
+    @Nested
+    @DisplayName("Phase 12C: Queued Migration Preparation & Worker Execution Tests")
+    class Phase12CQueuedMigrationTests {
+
+        @Test
+        @DisplayName("prepareQueuedMigration validates, creates playlist, and persists QUEUED execution")
+        void prepareQueuedMigrationSuccess() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.valid(validContext));
+            when(executionStateService.getExecutionByReviewSession(sessionId, userId))
+                    .thenThrow(new ResourceNotFoundException("No existing execution"));
+
+            DestinationPlaylistCreationResult playlistResult = new DestinationPlaylistCreationResult(
+                    "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Target Playlist", Instant.now()
+            );
+            when(playlistCreationService.createDestinationPlaylist(request, userId)).thenReturn(playlistResult);
+
+            MigrationExecutionSummary queuedSummary = new MigrationExecutionSummary(
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.QUEUED, 2, 0, 0, 0, 0,
+                    false, false, null, null, Collections.emptyList()
+            );
+            when(executionStateService.initializeQueuedExecution(any(InitializeExecutionRequest.class), eq(userId)))
+                    .thenReturn(queuedSummary);
+
+            MigrationExecutionSummary result = orchestrator.prepareQueuedMigration(request, userId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.status()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            assertThat(result.executionId()).isEqualTo(executionId);
+
+            verify(executionService).validateExecution(request, userId);
+            verify(playlistCreationService).createDestinationPlaylist(request, userId);
+            verify(executionStateService).initializeQueuedExecution(any(InitializeExecutionRequest.class), eq(userId));
+        }
+
+        @Test
+        @DisplayName("prepareQueuedMigration returns existing summary when already COMPLETED")
+        void prepareQueuedMigrationReturnsWhenCompleted() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.valid(validContext));
+
+            MigrationExecutionSummary completedSummary = new MigrationExecutionSummary(
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                    false, false, Instant.now(), Instant.now(), Collections.emptyList()
+            );
+            when(executionStateService.getExecutionByReviewSession(sessionId, userId)).thenReturn(completedSummary);
+
+            MigrationExecutionSummary result = orchestrator.prepareQueuedMigration(request, userId);
+
+            assertThat(result.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(), any());
+            verify(executionStateService, never()).initializeQueuedExecution(any(), any());
+        }
+
+        @Test
+        @DisplayName("prepareQueuedMigration rejects when execution is already QUEUED")
+        void prepareQueuedMigrationRejectsWhenAlreadyQueued() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.valid(validContext));
+
+            MigrationExecutionSummary queuedSummary = new MigrationExecutionSummary(
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.QUEUED, 2, 0, 0, 0, 0,
+                    false, false, null, null, Collections.emptyList()
+            );
+            when(executionStateService.getExecutionByReviewSession(sessionId, userId)).thenReturn(queuedSummary);
+
+            assertThatThrownBy(() -> orchestrator.prepareQueuedMigration(request, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("already queued");
+        }
+
+        @Test
+        @DisplayName("prepareQueuedMigration rejects when execution is currently RUNNING")
+        void prepareQueuedMigrationRejectsWhenRunning() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.valid(validContext));
+
+            MigrationExecutionSummary runningSummary = new MigrationExecutionSummary(
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.RUNNING, 2, 0, 0, 0, 0,
+                    false, false, Instant.now(), null, Collections.emptyList()
+            );
+            when(executionStateService.getExecutionByReviewSession(sessionId, userId)).thenReturn(runningSummary);
+
+            assertThatThrownBy(() -> orchestrator.prepareQueuedMigration(request, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("currently in progress");
+        }
+
+        @Test
+        @DisplayName("prepareQueuedMigration rejects when validation fails")
+        void prepareQueuedMigrationRejectsWhenValidationFails() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.invalid(List.of(
+                            new com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationError(
+                                    ValidationFailureCode.INCOMPLETE_REVIEW, "Review not complete", null
+                            )
+                    )));
+
+            assertThatThrownBy(() -> orchestrator.prepareQueuedMigration(request, userId))
+                    .isInstanceOf(MigrationExecutionValidationException.class)
+                    .hasMessageContaining("validation failed");
+
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(), any());
+        }
+
+        @Test
+        @DisplayName("executeQueuedMigration delegates directly to executionStateService.executeQueuedTrackInsertion")
+        void executeQueuedMigrationSuccess() {
+            MigrationExecutionSummary completedSummary = new MigrationExecutionSummary(
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
+                    MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                    false, false, Instant.now(), Instant.now(), Collections.emptyList()
+            );
+            when(executionStateService.executeQueuedTrackInsertion(executionId, userId)).thenReturn(completedSummary);
+
+            MigrationExecutionSummary result = orchestrator.executeQueuedMigration(executionId, userId);
+
+            assertThat(result).isNotNull();
+            assertThat(result.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            verify(executionStateService).executeQueuedTrackInsertion(executionId, userId);
+        }
+
+        @Test
+        @DisplayName("executeQueuedMigration rejects null arguments with IllegalArgumentException")
+        void executeQueuedMigrationRejectsNullArguments() {
+            assertThatThrownBy(() -> orchestrator.executeQueuedMigration(null, userId))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Execution ID must not be null");
+
+            assertThatThrownBy(() -> orchestrator.executeQueuedMigration(executionId, null))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Authenticated user ID must not be null");
+        }
+    }
 }

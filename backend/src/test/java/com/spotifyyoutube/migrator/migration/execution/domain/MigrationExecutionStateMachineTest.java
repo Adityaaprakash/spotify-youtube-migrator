@@ -206,6 +206,31 @@ class MigrationExecutionStateMachineTest {
             assertThat(execution.getStatus().canRollback()).isFalse();
             assertThat(execution.canRollback()).isFalse();
         }
+
+        @Test
+        @DisplayName("QUEUED -> INITIALIZED via resetToInitialized() on dispatch rejection (Phase 12C)")
+        void resetToInitializedSuccess() {
+            execution.markQueued();
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+
+            execution.resetToInitialized();
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+            assertThat(execution.canResume()).isTrue();
+        }
+
+        @Test
+        @DisplayName("resetToInitialized() rejects non-QUEUED executions")
+        void resetToInitializedRejectsNonQueued() {
+            assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+            assertThatThrownBy(() -> execution.resetToInitialized())
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("expected QUEUED");
+
+            execution.claimExecution(); // RUNNING
+            assertThatThrownBy(() -> execution.resetToInitialized())
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("expected QUEUED");
+        }
     }
 
     @Nested

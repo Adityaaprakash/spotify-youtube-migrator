@@ -69,6 +69,28 @@ public interface MigrationExecutionStateService {
     MigrationExecutionSummary executeTrackInsertion(UUID executionId, UUID authenticatedUserId);
 
     /**
+     * Executes track insertion specifically for a QUEUED migration execution (Phase 12C background worker).
+     * Atomically claims the execution ONLY if current status is QUEUED.
+     * Rejects non-QUEUED executions at both Java domain pre-check and database atomic conditional claim levels.
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @return updated durable execution summary
+     */
+    MigrationExecutionSummary executeQueuedTrackInsertion(UUID executionId, UUID authenticatedUserId);
+
+    /**
+     * Resets a QUEUED execution back to INITIALIZED status if background dispatch was rejected (Phase 12C).
+     * Preserves destination playlist and track records for safe retry.
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @param reason failure or rejection reason
+     * @return updated durable execution summary in INITIALIZED status
+     */
+    MigrationExecutionSummary handleDispatchRejection(UUID executionId, UUID authenticatedUserId, String reason);
+
+    /**
      * Initializes (if not already present) and executes track insertion for the specified approved review session.
      *
      * @param request track insertion execution request

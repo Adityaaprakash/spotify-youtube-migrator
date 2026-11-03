@@ -376,6 +376,41 @@ In Phase 12B, the persistence foundation for asynchronous execution was implemen
 
 ---
 
+## Phase 12C Background Worker Engine & TaskExecutor Implementation
+
+In Phase 12C, the background processing engine and executor infrastructure were implemented and audited:
+
+1. **`AsyncMigrationConfig`**:
+   - Configures Spring `ThreadPoolTaskExecutor` bean `migrationTaskExecutor`.
+   - Settings: `corePoolSize = 2`, `maxPoolSize = 4`, `queueCapacity = 50`, `threadNamePrefix = "migration-worker-"`, `rejectedExecutionHandler = new ThreadPoolExecutor.AbortPolicy()`.
+   - Graceful shutdown: `waitForTasksToCompleteOnShutdown = true`, `awaitTerminationSeconds = 30`.
+   - Thread pool behavior: Worker threads are started up to `corePoolSize` (2). Subsequent tasks are buffered in the bounded queue (capacity 50). Only when the queue is completely full does the pool expand up to `maxPoolSize` (4). Once maximum pool size and queue capacity are exhausted (54 concurrent in-flight and pending tasks), subsequent submissions trigger `AbortPolicy` throwing `TaskRejectedException`.
+
+2. **Stage 1 Synchronous Preparation vs. Stage 2 Background Dispatch**:
+   - `MigrationJobDispatcher` coordinates submission in two clean stages.
+   - Stage 1 calls `ApprovedMigrationOrchestrator.prepareQueuedMigration(...)`: validates review session, creates YouTube destination playlist (fulfilling Flyway V6 `destination_playlist_id NOT NULL`), and persists `MigrationExecution` in `QUEUED` status.
+   - Stage 2 submits a lightweight runnable `() -> migrationBackgroundWorker.processMigration(executionId, authenticatedUserId)` to `migrationTaskExecutor`.
+   - Ensures the worker receives an already-persisted, valid `QUEUED` execution with destination playlist ID.
+
+3. **QUEUED-Only Conditional Claiming**:
+   - Added `executeQueuedTrackInsertion(executionId, authenticatedUserId)` on `MigrationExecutionStateService`.
+   - Enforces `eligibleStatuses = Set.of(MigrationExecutionStatus.QUEUED)` when invoking `MigrationExecutionRepository.claimExecutionRunningWithVersion(...)`.
+   - Guarantees that asynchronous workers can only claim `QUEUED` executions, preventing any accidental claim or state corruption of `INITIALIZED`, `PARTIALLY_COMPLETED`, or `RECOVERY_REQUIRED` executions.
+
+4. **Executor Saturation & Orphan Prevention**:
+   - When executor queue saturation causes `TaskRejectedException`, leaving an execution in `QUEUED` status would create an orphaned job with no scheduled worker.
+   - Handled via `MigrationExecution.resetToInitialized()` invoked by `MigrationExecutionStateService.handleDispatchRejection(...)`.
+   - Resets state from `QUEUED` back to `INITIALIZED`, preserving the created playlist ID and prepared track records for subsequent retry or Phase 13 durable dispatch.
+   - Re-throws `TaskRejectedException` so Phase 12E REST controller can map directly to HTTP 429 Too Many Requests with appropriate `Retry-After`.
+
+5. **Worker Delegation & Fault Isolation**:
+   - `MigrationBackgroundWorker` delegates to `ApprovedMigrationOrchestrator.executeQueuedMigration(...)`.
+   - Worker catches unexpected runtime exceptions and logs sanitized diagnostics without swallowing.
+   - Does not overwrite execution state to `FAILED`, preserving Phase 11 recovery classifications (`RECOVERY_REQUIRED`, `PARTIALLY_COMPLETED`, `UNCERTAIN`).
+   - Zero `@Transactional` on the worker level, ensuring Phase 11's discrete transaction strategy holds no DB connections during remote YouTube HTTP calls.
+
+---
+
 ## Consequences
 
 ### Positive

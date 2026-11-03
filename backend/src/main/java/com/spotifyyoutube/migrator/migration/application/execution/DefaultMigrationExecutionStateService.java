@@ -454,7 +454,12 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
     @Override
     public MigrationExecutionSummary executeTrackInsertion(UUID executionId, UUID authenticatedUserId) {
-        return processInsertion(executionId, authenticatedUserId, false);
+        return processInsertion(executionId, authenticatedUserId, false, false);
+    }
+
+    @Override
+    public MigrationExecutionSummary executeQueuedTrackInsertion(UUID executionId, UUID authenticatedUserId) {
+        return processInsertion(executionId, authenticatedUserId, false, true);
     }
 
     @Override
@@ -476,10 +481,43 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
     @Override
     public MigrationExecutionSummary resumeExecution(UUID executionId, UUID authenticatedUserId) {
-        return processInsertion(executionId, authenticatedUserId, true);
+        return processInsertion(executionId, authenticatedUserId, true, false);
     }
 
-    private MigrationExecutionSummary processInsertion(UUID executionId, UUID authenticatedUserId, boolean isResume) {
+    @Override
+    public MigrationExecutionSummary handleDispatchRejection(UUID executionId, UUID authenticatedUserId, String reason) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (execution.getStatus() == MigrationExecutionStatus.QUEUED) {
+                execution.resetToInitialized();
+                execution = executionRepository.saveAndFlush(execution);
+                log.warn("Reset execution {} from QUEUED to INITIALIZED due to dispatch rejection: {}",
+                        executionId, reason);
+            }
+
+            return MigrationExecutionSummary.from(execution);
+        });
+    }
+
+    private MigrationExecutionSummary processInsertion(
+            UUID executionId,
+            UUID authenticatedUserId,
+            boolean isResume,
+            boolean queuedOnly
+    ) {
         if (executionId == null) {
             throw new IllegalArgumentException("Execution ID must not be null");
         }
@@ -494,6 +532,13 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
             if (!execution.getUser().getId().equals(authenticatedUserId)) {
                 throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (queuedOnly && execution.getStatus() != MigrationExecutionStatus.QUEUED) {
+                throw new InvalidStateException(String.format(
+                        "Cannot execute queued track insertion for execution %s: current status is %s, expected QUEUED",
+                        executionId, execution.getStatus()
+                ));
             }
 
             if (execution.getStatus() == MigrationExecutionStatus.RUNNING) {
@@ -512,13 +557,15 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             }
 
             // Claim execution lock with atomic conditional update
-            Set<MigrationExecutionStatus> eligibleStatuses = Set.of(
-                    MigrationExecutionStatus.INITIALIZED,
-                    MigrationExecutionStatus.QUEUED,
-                    MigrationExecutionStatus.PARTIALLY_COMPLETED,
-                    MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
-                    MigrationExecutionStatus.RECOVERY_REQUIRED
-            );
+            Set<MigrationExecutionStatus> eligibleStatuses = queuedOnly
+                    ? Set.of(MigrationExecutionStatus.QUEUED)
+                    : Set.of(
+                            MigrationExecutionStatus.INITIALIZED,
+                            MigrationExecutionStatus.QUEUED,
+                            MigrationExecutionStatus.PARTIALLY_COMPLETED,
+                            MigrationExecutionStatus.PARTIALLY_ROLLED_BACK,
+                            MigrationExecutionStatus.RECOVERY_REQUIRED
+                    );
             long expectedVersion = execution.getVersion() != null ? execution.getVersion() : 0L;
             int claimed = executionRepository.claimExecutionRunningWithVersion(
                     executionId,

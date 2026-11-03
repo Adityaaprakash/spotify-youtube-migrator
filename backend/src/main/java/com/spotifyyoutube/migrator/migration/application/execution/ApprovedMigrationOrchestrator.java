@@ -50,6 +50,27 @@ public interface ApprovedMigrationOrchestrator {
     }
 
     /**
+     * Prepares and persists a migration execution in QUEUED status ready for asynchronous background worker dispatch (Phase 12C).
+     * Validates approved review session decisions, ensures destination playlist creation,
+     * and initializes durable execution tracking in QUEUED status with approved tracks.
+     *
+     * @param request execution request containing review session ID and optional playlist metadata
+     * @param authenticatedUserId trusted authenticated user ID
+     * @return summary of the durable execution in QUEUED status
+     */
+    MigrationExecutionSummary prepareQueuedMigration(ApprovedMigrationExecutionRequest request, UUID authenticatedUserId);
+
+    /**
+     * Executes an already-persisted, queued playlist migration in a background worker thread (Phase 12C).
+     * Atomically claims the QUEUED execution and delegates to ordered track insertion.
+     *
+     * @param executionId unique execution ID of the queued migration
+     * @param authenticatedUserId trusted authenticated user ID
+     * @return summary of the durable execution and insertion outcomes
+     */
+    MigrationExecutionSummary executeQueuedMigration(UUID executionId, UUID authenticatedUserId);
+
+    /**
      * Recovers eligible failed tracks in an execution via Phase 11F controlled recovery.
      *
      * @param executionId unique execution ID

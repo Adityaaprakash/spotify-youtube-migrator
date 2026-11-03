@@ -884,5 +884,147 @@ class DefaultMigrationExecutionStateServiceTest {
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("Execution cannot be resumed in current status: QUEUED");
         }
+
+        @Test
+        @DisplayName("executeQueuedTrackInsertion claims ONLY status QUEUED at the database level and executes insertion")
+        void executeQueuedTrackInsertionClaimsQueuedOnly() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenReturn(exec);
+
+            ExecutionTrackRecord r0 = exec.getTrackRecords().get(0);
+            r0.setId(UUID.randomUUID());
+            ExecutionTrackRecord r1 = exec.getTrackRecords().get(1);
+            r1.setId(UUID.randomUUID());
+
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(execId))
+                    .thenReturn(exec.getTrackRecords());
+            when(trackRecordRepository.findById(r0.getId())).thenReturn(Optional.of(r0));
+            when(trackRecordRepository.findById(r1.getId())).thenReturn(Optional.of(r1));
+
+            when(musicDestination.addTrackToPlaylist(eq(userId), eq("PL_dest_123"), any(AddTrackToDestinationPlaylistRequest.class)))
+                    .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0))
+                    .thenReturn(new DestinationPlaylistItem("item_1", "PL_dest_123", "yt_t1", 1));
+
+            MigrationExecutionSummary summary = service.executeQueuedTrackInsertion(execId, userId);
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            assertThat(summary.fullySuccessful()).isTrue();
+
+            // Verify claim was strictly executed with eligibleStatuses = Set.of(QUEUED)
+            verify(executionRepository).claimExecutionRunningWithVersion(
+                    eq(execId),
+                    eq(java.util.Set.of(MigrationExecutionStatus.QUEUED)),
+                    eq(0L),
+                    any(Instant.class)
+            );
+        }
+
+        @Test
+        @DisplayName("executeQueuedTrackInsertion rejects executions in non-QUEUED status (e.g. INITIALIZED, PARTIALLY_COMPLETED)")
+        void executeQueuedTrackInsertionRejectsNonQueuedStatus() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            assertThatThrownBy(() -> service.executeQueuedTrackInsertion(execId, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("Cannot execute queued track insertion")
+                    .hasMessageContaining("expected QUEUED");
+
+            verify(executionRepository, never()).claimExecutionRunningWithVersion(any(), any(), anyLong(), any());
+        }
+
+        @Test
+        @DisplayName("executeQueuedTrackInsertion rejects when concurrent worker already claimed the QUEUED execution")
+        void executeQueuedTrackInsertionRejectsConcurrentWorkerClaim() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            when(executionRepository.claimExecutionRunningWithVersion(eq(execId), any(), anyLong(), any()))
+                    .thenReturn(0);
+
+            assertThatThrownBy(() -> service.executeQueuedTrackInsertion(execId, userId))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("could not be claimed");
+
+            verify(musicDestination, never()).addTrackToPlaylist(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("handleDispatchRejection resets QUEUED execution back to INITIALIZED and flushes")
+        void handleDispatchRejectionResetsQueuedToInitialized() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+            assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+
+            MigrationExecutionSummary summary = service.handleDispatchRejection(execId, userId, "Executor queue full");
+
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+            assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+            verify(executionRepository).saveAndFlush(exec);
+        }
+
+        @Test
+        @DisplayName("handleDispatchRejection enforces anti-IDOR user ownership")
+        void handleDispatchRejectionAntiIdor() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            UUID attackerUserId = UUID.randomUUID();
+            assertThatThrownBy(() -> service.handleDispatchRejection(execId, attackerUserId, "Rejection"))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("not found");
+
+            verify(executionRepository, never()).saveAndFlush(any());
+        }
     }
 }

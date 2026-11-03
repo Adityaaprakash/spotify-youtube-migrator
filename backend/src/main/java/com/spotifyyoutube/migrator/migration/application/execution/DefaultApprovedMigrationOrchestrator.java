@@ -133,6 +133,98 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
     }
 
     @Override
+    public MigrationExecutionSummary prepareQueuedMigration(ApprovedMigrationExecutionRequest request, UUID authenticatedUserId) {
+        if (request == null) {
+            throw new IllegalArgumentException("ApprovedMigrationExecutionRequest must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        UUID sessionId = request.reviewSessionId();
+        log.info("Preparing queued migration for review session {} by user {}", sessionId, authenticatedUserId);
+
+        // Step 1: Pre-mutation validated execution context (Phase 11B)
+        ExecutionValidationResult validationResult = executionService.validateExecution(request, authenticatedUserId);
+        if (!validationResult.isValid()) {
+            log.warn("Approved migration rejected by validator for review session {}: {}",
+                    sessionId, validationResult.errors());
+            throw new MigrationExecutionValidationException("Approved migration execution validation failed", validationResult);
+        }
+
+        // Step 2: Check for existing durable execution state (Idempotency)
+        MigrationExecutionSummary existing = null;
+        try {
+            existing = executionStateService.getExecutionByReviewSession(sessionId, authenticatedUserId);
+        } catch (ResourceNotFoundException e) {
+            // Normal initial execution path
+        }
+
+        if (existing != null) {
+            log.info("Existing durable execution {} found in status {} for review session {}",
+                    existing.executionId(), existing.status(), sessionId);
+
+            if (existing.status() == MigrationExecutionStatus.COMPLETED) {
+                log.info("Execution {} is already COMPLETED. Returning existing summary.", existing.executionId());
+                return existing;
+            }
+
+            if (existing.status() == MigrationExecutionStatus.RUNNING) {
+                throw new InvalidStateException("Migration execution is currently in progress: " + existing.executionId());
+            }
+
+            if (existing.status() == MigrationExecutionStatus.QUEUED) {
+                throw new InvalidStateException("Migration execution is already queued: " + existing.executionId());
+            }
+
+            if (existing.status() == MigrationExecutionStatus.RECOVERY_REQUIRED) {
+                throw new InvalidStateException("Migration execution requires reconciliation or recovery before proceeding: "
+                        + existing.executionId());
+            }
+        }
+
+        // Step 3: Destination Playlist Creation (Phase 11C)
+        String destinationPlaylistId;
+        String destinationPlaylistUrl = null;
+        if (existing != null) {
+            destinationPlaylistId = existing.destinationPlaylistId();
+            destinationPlaylistUrl = existing.destinationPlaylistUrl();
+        } else {
+            log.info("Creating destination playlist on YouTube for review session {}", sessionId);
+            DestinationPlaylistCreationResult playlistResult = playlistCreationService.createDestinationPlaylist(request, authenticatedUserId);
+            destinationPlaylistId = playlistResult.destinationPlaylistId();
+            destinationPlaylistUrl = playlistResult.destinationPlaylistUrl();
+            log.info("Destination playlist created successfully: {}", destinationPlaylistId);
+        }
+
+        // Step 4: Durable Execution Initialization in QUEUED status (Phase 12B)
+        InitializeExecutionRequest initReq = new InitializeExecutionRequest(
+                sessionId,
+                destinationPlaylistId,
+                destinationPlaylistUrl,
+                authenticatedUserId
+        );
+        MigrationExecutionSummary queuedSummary = executionStateService.initializeQueuedExecution(initReq, authenticatedUserId);
+        log.info("Prepared queued migration execution {} in status {} for review session {}",
+                queuedSummary.executionId(), queuedSummary.status(), sessionId);
+
+        return queuedSummary;
+    }
+
+    @Override
+    public MigrationExecutionSummary executeQueuedMigration(UUID executionId, UUID authenticatedUserId) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        log.info("Orchestrator executing queued migration {} for user {}", executionId, authenticatedUserId);
+        return executionStateService.executeQueuedTrackInsertion(executionId, authenticatedUserId);
+    }
+
+    @Override
     public MigrationExecutionSummary recoverMigration(UUID executionId, RecoverExecutionRequest request, UUID authenticatedUserId) {
         log.info("Orchestrating recovery for execution {} by user {}", executionId, authenticatedUserId);
         return executionStateService.recoverExecution(executionId, request, authenticatedUserId);

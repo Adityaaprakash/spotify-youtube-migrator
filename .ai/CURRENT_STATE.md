@@ -3,7 +3,7 @@
 Last Updated: 2026-11-02
 
 Current Phase: Phase 12 — Async Migration & Progress [IN PROGRESS]
-Current Subphase: Phase 12B — Migration Job Persistence & Queue Alignment [COMPLETE] -> Phase 12C — Background Worker Engine [NEXT]
+Current Subphase: Phase 12C — Background Worker Engine & TaskExecutor Configuration [COMPLETE & AUDITED] -> Phase 12D — Migration Progress Tracking & Calculation Engine [NEXT]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
@@ -12,9 +12,39 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 - **Phase 11 (Execution & Playlist Creation)**: COMPLETE & FROZEN (ADR-030).
 - **Phase 12A (Async Migration Architecture & Contracts)**: COMPLETE (ADR-022 created, architecture audit completed, background worker design established, REST contracts defined, 12B-12H roadmap planned).
 - **Phase 12B (Migration Job Persistence & Queue Alignment)**: COMPLETE & AUDITED (QUEUED status introduced, single MigrationExecution aggregate reused, queue initialization implemented, atomic claiming contracts verified, resume semantics protected, zero Flyway DDL changes required).
-- **Phase 12C (Background Worker Engine)**: NEXT IMPLEMENTATION STEP.
+- **Phase 12C (Background Worker Engine & TaskExecutor)**: COMPLETE & AUDITED (ThreadPoolTaskExecutor bounded pool configured, MigrationBackgroundWorker delegating to ApprovedMigrationOrchestrator, MigrationJobDispatcher coordinating Stage 1 synchronous preparation and Stage 2 dispatch, QUEUED-only atomic database claim contract, executor saturation handling with safe reset to INITIALIZED preventing orphaned jobs, graceful shutdown configured).
+- **Phase 12D (Migration Progress Tracking & Calculation Engine)**: NEXT IMPLEMENTATION STEP.
 
 ## Completed
+### Phase 12C (Background Worker Engine & TaskExecutor Configuration) [COMPLETE & AUDITED]
+- **Bounded Worker Pool Configuration (`AsyncMigrationConfig`)**:
+  - Configured Spring `ThreadPoolTaskExecutor` bean named `migrationTaskExecutor`.
+  - Bounded pool: `corePoolSize = 2`, `maxPoolSize = 4`, `queueCapacity = 50`, `threadNamePrefix = "migration-worker-"`.
+  - Rejection policy: Explicit `ThreadPoolExecutor.AbortPolicy` throwing `TaskRejectedException` when pool and bounded queue are saturated.
+  - Documented ThreadPoolExecutor bounded queue expansion semantics (tasks up to corePoolSize start immediately; subsequent tasks queue up to 50; only after queue is full does pool expand up to maxPoolSize; subsequent tasks reject).
+  - Configured graceful shutdown: `waitForTasksToCompleteOnShutdown = true`, `awaitTerminationSeconds = 30`.
+- **Approved Orchestration Facade Extensions**:
+  - Added `MigrationExecutionSummary prepareQueuedMigration(ApprovedMigrationExecutionRequest request, UUID authenticatedUserId)` to `ApprovedMigrationOrchestrator` and `DefaultApprovedMigrationOrchestrator`. Coordinates pre-mutation validation (Phase 11B), destination playlist creation (Phase 11C), and durable initialization into `QUEUED` state via `initializeQueuedExecution`. Satisfies Flyway V6 `destination_playlist_id NOT NULL` constraint synchronously before worker dispatch.
+  - Added `MigrationExecutionSummary executeQueuedMigration(UUID executionId, UUID authenticatedUserId)` to `ApprovedMigrationOrchestrator` and `DefaultApprovedMigrationOrchestrator`. Validates user ownership, verifies `QUEUED` state, delegates into `executeQueuedTrackInsertion`, and returns execution summary without re-running validation or creating redundant playlists.
+- **QUEUED-Only Database Atomic Claiming**:
+  - Introduced `MigrationExecutionStateService.executeQueuedTrackInsertion(UUID executionId, UUID authenticatedUserId)` with internal `queuedOnly = true` flag.
+  - Configures `eligibleStatuses = Set.of(MigrationExecutionStatus.QUEUED)` for PostgreSQL row-level conditional query (`claimExecutionRunningWithVersion`).
+  - Guarantees background workers can only claim `QUEUED` executions; prevents worker hijacking of `INITIALIZED`, `PARTIALLY_COMPLETED`, or `RECOVERY_REQUIRED` states.
+  - Competing workers attempting to claim the same queued job atomically receive 0 updated rows and fail fast with `InvalidStateException` before performing any external YouTube API mutations.
+- **Background Worker Engine (`MigrationBackgroundWorker`)**:
+  - Receives `executionId` and `authenticatedUserId`.
+  - Delegates exclusively to `ApprovedMigrationOrchestrator.executeQueuedMigration(...)`.
+  - Structured logging with execution ID and execution duration.
+  - Strict secret scrubbing: Zero logging of OAuth tokens, refresh tokens, client secrets, or authorization headers.
+  - Safe error handling: Catches unexpected runtime exceptions and logs sanitized error without swallowing; avoids blindly forcing `FAILED` state to protect more accurate Phase 11 recovery states (`RECOVERY_REQUIRED`, `PARTIALLY_COMPLETED`, `UNCERTAIN`).
+- **Job Dispatcher & Rejection Handling (`MigrationJobDispatcher`)**:
+  - Application service coordinating Stage 1 synchronous preparation and Stage 2 asynchronous dispatch.
+  - Stage 1: Calls `orchestrator.prepareQueuedMigration(...)` ensuring playlist creation and `QUEUED` persistence succeed synchronously.
+  - Stage 2: Submits worker task to bounded `ThreadPoolTaskExecutor`.
+  - **Orphan Prevention on Executor Saturation**: If executor queue is saturated (`TaskRejectedException`), catches rejection and invokes `MigrationExecutionStateService.handleDispatchRejection(...)`, transitioning execution from `QUEUED` to `INITIALIZED` via domain method `MigrationExecution.resetToInitialized()`. Preserves destination playlist, approved track records, and audit history while preventing orphaned `QUEUED` executions without active workers. Re-throws `TaskRejectedException` so future Phase 12E REST controller can map to HTTP 429 Too Many Requests.
+  - Idempotency: Returns existing summary for `COMPLETED` executions without redundant worker dispatch or playlist creation.
+- **Transaction Boundaries & DB Starvation Safety**:
+  - Preserved Phase 11 discrete programmatic transactions (`TransactionTemplate`). Zero database transactions or connections are held across external YouTube HTTP calls or for the entire worker lifetime.
 ### Phase 12B (Migration Job Persistence & Queue Alignment) [COMPLETE & AUDITED]
 - **Single Authoritative Migration Execution Aggregate**:
   - Reused `MigrationExecution` (`migration_executions` table) without introducing duplicate `AsyncMigrationJob` or legacy `MigrationJob` entities.
