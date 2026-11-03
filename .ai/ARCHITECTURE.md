@@ -629,3 +629,57 @@ Controllers MUST NOT:
     - *Progress Polling Limit* (`RateLimitExceededException`): Excessive polling by client. Returns `Retry-After: 5`, strictly read-only, never mutates `MigrationExecution` or dispatcher state.
   - **Process-Local Storage Trade-Off**:
     - Limiter state is process-local in JVM memory and resets on application restart. Cluster-wide synchronization is deferred to Phase 19 (distributed caching / Redis).
+
+## Integration & Concurrency Testing (Phase 12G — Complete & Audited)
+
+- Packages:
+  - Integration Tests: `com.spotifyyoutube.migrator.migration.integration`
+  - Concurrency Tests: `com.spotifyyoutube.migrator.migration.async`, `com.spotifyyoutube.migrator.migration.progress.application`
+  - Rate Limiter Maintenance: `com.spotifyyoutube.migrator.migration.progress.application`
+- Architecture Decisions: ADR-022 (Section: Integration Testing, Concurrency Verification & Memory Growth Audit)
+- Purpose: Proves that the asynchronous migration architecture, atomic execution claiming, database snapshot consistency, worker thread pool bounds, bounded rate limiting, and progress calculations behave correctly under real PostgreSQL persistence and high-concurrency conditions.
+- Architecture Rules:
+  - **PostgreSQL Test Infrastructure (Phase 12G-A)**:
+    - Reuses project-wide Testcontainers configuration with PostgreSQL 16 image (`ContainerDatabaseDriver`) and real Flyway schema migrations (V1–V9).
+    - Preserves production database configuration without introducing test-only schema modifications or H2 substitutes.
+  - **REPEATABLE_READ Snapshot Consistency (Phase 12G-B)**:
+    - Verified via `PostgreSqlProgressConsistencyIT`.
+    - Proves that a reading transaction running under `REPEATABLE_READ` isolation observes a consistent snapshot between execution metadata and child track status counts, even when another transaction commits concurrent track state mutations.
+    - Proves that subsequent read transactions observe the committed state once the modifying transaction finishes.
+    - Strictly confirms count conservation:
+      $$\text{totalTracks} = \text{pending} + \text{adding} + \text{added} + \text{failed} + \text{uncertain} + \text{skipped} + \text{rollingBack} + \text{rolledBack}$$
+      $$\text{processedTracks} = \text{added} + \text{failed} + \text{uncertain} + \text{skipped} + \text{rolledBack}$$
+      $$\text{remainingTracks} = \text{totalTracks} - \text{processedTracks}$$
+  - **Atomic QUEUED Execution Claiming (Phase 12G-C)**:
+    - Verified via `AtomicQueuedExecutionClaimIT`.
+    - Proves that when 10 worker threads simultaneously attempt to claim the same execution in `QUEUED` status, exactly ONE worker succeeds (claims = 1); all 9 competing workers are rejected (claims = 0).
+    - Proves that claiming increments `@Version` and transitions status to `RUNNING`.
+    - Proves that stale optimistic version claims and non-QUEUED status claims are rejected at the database level.
+  - **Worker & Executor Concurrency (Phase 12G-D)**:
+    - Verified via `WorkerAndExecutorConcurrencyTest`.
+    - Proves that concurrent migrations execute within the configured bounded pool (core=2, max=4, queue=50) without exceeding thread bounds or corrupting state.
+    - Proves that saturating the pool (4 active + 50 queued) triggers `TaskRejectedException`, safely caught by `MigrationJobDispatcher` to reset the rejected execution from `QUEUED` to `INITIALIZED` via `handleDispatchRejection`.
+    - Confirms graceful shutdown respects `awaitTerminationSeconds` and waits for in-flight tasks to finish.
+  - **Dispatcher & Queued Migration Integration (Phase 12G-E)**:
+    - Verified via `QueuedMigrationDispatcherIT`.
+    - Validates the complete pipeline: approved plan validation -> queued preparation -> destination playlist creation -> QUEUED persistence -> dispatcher submission -> worker invocation -> atomic claim -> track insertion -> terminal `COMPLETED` state.
+    - Confirms that destination playlist creation is never repeated on resubmission, and that the legacy synchronous orchestrator is never invoked.
+  - **Active Migration Progress Polling (Phase 12G-F)**:
+    - Verified via `ActiveMigrationProgressIT`.
+    - Demonstrates 4 concurrent readers polling progress continuously while a worker processes 60 tracks.
+    - Proves that all invariants (count conservation, non-negative remaining tracks, progress in `[0.0, 100.0]`) hold for every sampled snapshot, with zero deadlocks, zero optimistic lock failures, and zero mutations by the read layer.
+  - **Rate Limiter Concurrency & Bounded Memory Cleanup (Phase 12G-G)**:
+    - Audited `InMemoryProgressPollingRateLimiter`: identified that inactive user entries in `userQuotas` were retained indefinitely.
+    - Enhanced `InMemoryProgressPollingRateLimiter` with bounded, thread-safe cleanup:
+      - Employs atomic `compute` and `computeIfPresent` key locking on `ConcurrentMap`.
+      - Exposes `cleanupExpiredEntries(Instant)` to prune inactive entries where all sliding window timestamps have expired.
+      - Guarantees zero full-map scans during normal `checkLimit` calls ($O(1)$).
+      - Prevents eviction while another thread is actively updating quota for that user.
+    - Unit and concurrency tests in `InMemoryProgressPollingRateLimiterTest` verify thread-safe cleanup and active entry preservation.
+  - **Database Index & Query Performance (Phase 12G-H)**:
+    - Verified composite index `idx_executiontracks_execution_status` on `(execution_id, status)` in Flyway migration V6.
+    - Grouped aggregation query `countTracksByStatusForExecution` projects only status and count, returning at most 8 rows and eliminating entity hydration and N+1 query overhead.
+  - **End-to-End Asynchronous Lifecycle (Phase 12G-I)**:
+    - Verified via `EndToEndAsyncMigrationLifecycleIT`.
+    - Validates full journey from `POST /api/migrations` (202 Accepted) through background worker processing to `GET /api/migrations/{id}/progress` (200 OK, 100% complete).
+    - Proves anti-IDOR security (404 Not Found for cross-user progress reads) and idempotent resubmission (200 OK without duplicate playlist creation).

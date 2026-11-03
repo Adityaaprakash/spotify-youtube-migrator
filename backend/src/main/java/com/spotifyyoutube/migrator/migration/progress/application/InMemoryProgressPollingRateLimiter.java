@@ -56,8 +56,58 @@ public class InMemoryProgressPollingRateLimiter implements ProgressPollingRateLi
             return;
         }
 
-        UserQuotaState state = userQuotas.computeIfAbsent(userId, k -> new UserQuotaState());
-        state.consume(clock, properties, userId);
+        userQuotas.compute(userId, (id, existing) -> {
+            UserQuotaState state = existing != null ? existing : new UserQuotaState();
+            state.consume(clock, properties, userId);
+            return state;
+        });
+    }
+
+    /**
+     * Bounded, thread-safe cleanup of inactive/expired user quota entries (Phase 12G-G).
+     * <p>
+     * Safely evicts map entries where all request timestamps have expired beyond the sliding window.
+     * Uses atomic {@link ConcurrentMap#computeIfPresent(Object, java.util.function.BiFunction)} to prevent
+     * removing an entry while another thread is actively updating its quota.
+     *
+     * @return the number of evicted inactive user quota entries
+     */
+    public int cleanupExpiredEntries() {
+        return cleanupExpiredEntries(clock.instant());
+    }
+
+    /**
+     * Bounded, thread-safe cleanup of inactive/expired user quota entries at a specified reference instant.
+     *
+     * @param referenceInstant the instant against which the sliding window cutoff is calculated
+     * @return the number of evicted inactive user quota entries
+     */
+    public int cleanupExpiredEntries(Instant referenceInstant) {
+        Objects.requireNonNull(referenceInstant, "referenceInstant must not be null");
+        int evictedCount = 0;
+        long windowSeconds = properties.getWindowSeconds();
+
+        for (UUID userId : userQuotas.keySet()) {
+            UserQuotaState result = userQuotas.computeIfPresent(userId, (id, state) -> {
+                if (state.isExpired(referenceInstant, windowSeconds)) {
+                    return null; // Atomic removal from ConcurrentHashMap
+                }
+                return state;
+            });
+            if (result == null) {
+                evictedCount++;
+            }
+        }
+        return evictedCount;
+    }
+
+    /**
+     * Returns the number of user quotas currently tracked in process memory.
+     *
+     * @return tracked user quota count
+     */
+    public int getTrackedUserCount() {
+        return userQuotas.size();
     }
 
     /**
@@ -89,6 +139,14 @@ public class InMemoryProgressPollingRateLimiter implements ProgressPollingRateLi
             }
 
             requestTimestamps.addLast(now);
+        }
+
+        public synchronized boolean isExpired(Instant now, long windowSeconds) {
+            Instant cutoff = now.minusSeconds(windowSeconds);
+            while (!requestTimestamps.isEmpty() && requestTimestamps.peekFirst().isBefore(cutoff)) {
+                requestTimestamps.pollFirst();
+            }
+            return requestTimestamps.isEmpty();
         }
     }
 }

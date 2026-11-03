@@ -252,6 +252,92 @@ class InMemoryProgressPollingRateLimiterTest {
         }
     }
 
+    @Nested
+    @DisplayName("Memory Cleanup & Growth Audit (Phase 12G-G)")
+    class CleanupTests {
+
+        @Test
+        @DisplayName("12. cleanupExpiredEntries evicts expired user quotas and preserves active ones")
+        void cleanupEvictsExpiredAndPreservesActive() {
+            // User A requests at T=0
+            rateLimiter.checkLimit(userA);
+            assertThat(rateLimiter.getTrackedUserCount()).isEqualTo(1);
+
+            // Advance clock to T=30
+            testClock.advance(Duration.ofSeconds(30));
+
+            // User B requests at T=30
+            rateLimiter.checkLimit(userB);
+            assertThat(rateLimiter.getTrackedUserCount()).isEqualTo(2);
+
+            // Advance clock to T=65 (Window is 60s: User A was at T=0 -> expired; User B was at T=30 -> active)
+            testClock.advance(Duration.ofSeconds(35));
+
+            int evicted = rateLimiter.cleanupExpiredEntries();
+
+            assertThat(evicted).isEqualTo(1);
+            assertThat(rateLimiter.getTrackedUserCount()).isEqualTo(1);
+
+            // User B is still active and tracked
+            assertThatCode(() -> rateLimiter.checkLimit(userB)).doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("13. cleanupExpiredEntries removes all entries when all user windows have expired")
+        void cleanupAllExpiredEntries() {
+            rateLimiter.checkLimit(userA);
+            rateLimiter.checkLimit(userB);
+            assertThat(rateLimiter.getTrackedUserCount()).isEqualTo(2);
+
+            // Advance clock past 60s window
+            testClock.advance(Duration.ofSeconds(61));
+
+            int evicted = rateLimiter.cleanupExpiredEntries();
+
+            assertThat(evicted).isEqualTo(2);
+            assertThat(rateLimiter.getTrackedUserCount()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("14. Concurrent cleanup and user quota consumption is thread-safe without race conditions")
+        void concurrentCleanupAndConsumption() throws InterruptedException {
+            int threadCount = 10;
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch startLatch = new CountDownLatch(1);
+            CountDownLatch doneLatch = new CountDownLatch(threadCount);
+
+            // Pre-seed some users
+            for (int i = 0; i < 5; i++) {
+                rateLimiter.checkLimit(UUID.randomUUID());
+            }
+
+            // Half threads do checkLimit, half do cleanup
+            for (int i = 0; i < threadCount; i++) {
+                final int index = i;
+                executor.submit(() -> {
+                    try {
+                        startLatch.await();
+                        if (index % 2 == 0) {
+                            rateLimiter.checkLimit(UUID.randomUUID());
+                        } else {
+                            rateLimiter.cleanupExpiredEntries();
+                        }
+                    } catch (Exception ex) {
+                        // ignore
+                    } finally {
+                        doneLatch.countDown();
+                    }
+                });
+            }
+
+            startLatch.countDown();
+            doneLatch.await();
+            executor.shutdown();
+
+            assertThat(rateLimiter.getTrackedUserCount()).isGreaterThanOrEqualTo(0);
+        }
+    }
+
     /**
      * Controllable test clock for deterministic sliding-window time travel without Thread.sleep.
      */

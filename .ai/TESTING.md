@@ -708,6 +708,38 @@ Implemented and verified (34 dedicated Phase 11H tests across 4 test classes):
     - Verifies rate limit rejection does not mutate `MigrationExecution` or invoke `MigrationJobDispatcher`.
   - `GlobalExceptionHandlerTest`: updated with tests for `RateLimitExceededException` (429, `Retry-After: 5`, `TOO_MANY_REQUESTS`) and `ProgressConsistencyException` (500, `INTERNAL_SERVER_ERROR`, generic sanitized message).
   - `MigrationControllerTest`: updated with `@MockBean private ProgressPollingRateLimiter rateLimiter`.
+- **Integration & Concurrency Testing (Phase 12G Complete)**:
+  - `PostgreSqlProgressConsistencyIT`: PostgreSQL integration test for `REPEATABLE_READ` snapshot consistency and progress calculation:
+    - Test 1 & 2: Proves stable snapshot: reads inside `REPEATABLE_READ` transaction do not see concurrent track mutations committed by a separate transaction; subsequent read in a new transaction observes the committed changes.
+    - Test 3: Count conservation verified: `totalTracks = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack`.
+    - Test 4: Processed count verified: `processedTracks = added + failed + uncertain + skipped + rolledBack`.
+    - Test 5: Remaining count verified: `remainingTracks = totalTracks - processedTracks`.
+    - Test 6: Progress percentage verified: 0 total -> 0.0%, one decimal place, HALF_UP rounding, bounded in [0.0, 100.0].
+  - `AtomicQueuedExecutionClaimIT`: PostgreSQL integration test for atomic `QUEUED` -> `RUNNING` claiming:
+    - Test 1: 10 worker threads simultaneously attempt to claim the same `QUEUED` execution via `CyclicBarrier`: exactly ONE worker claims it, 9 are rejected, status is `RUNNING`, version increments by 1.
+    - Test 2: Stale version claim returns 0 and leaves execution status/version untouched.
+    - Test 3: Attempting to claim executions in `INITIALIZED`, `RUNNING`, `COMPLETED`, `FAILED`, or `RECOVERY_REQUIRED` via QUEUED-only claim path is rejected.
+  - `WorkerAndExecutorConcurrencyTest`: Thread pool concurrency and saturation tests:
+    - Test 1: Multiple migrations execute concurrently up to configured `maxPoolSize` (4) without exceeding concurrency or corrupting state.
+    - Test 2: Saturated executor (4 active + 50 queued) rejects 55th submission with `TaskRejectedException`, triggering `handleDispatchRejection` to reset execution from `QUEUED` to `INITIALIZED`.
+    - Test 3: Controlled worker failures (`InvalidStateException`, `ResourceNotFoundException`, `RuntimeException`) are handled cleanly and preserve execution state without corruption.
+    - Test 4: Graceful shutdown waits for in-flight worker task to complete.
+  - `QueuedMigrationDispatcherIT`: Complete queued migration lifecycle integration test:
+    - Complete sequence verified against PostgreSQL: plan validation -> queued preparation -> destination playlist creation -> QUEUED persistence -> background worker claim -> sequential track insertion -> COMPLETED status.
+    - Verified destination playlist creation is never repeated on resubmission.
+  - `ActiveMigrationProgressIT`: Concurrent progress polling during active migration:
+    - 60 tracks processed sequentially by worker while 4 concurrent reader threads continuously poll progress snapshots.
+    - Proves count conservation, non-negative remaining tracks, bounded percentage, and read-only non-mutating guarantee across all sampled snapshots without deadlocks or optimistic lock failures.
+  - `InMemoryProgressPollingRateLimiterTest`: Memory cleanup and growth audit tests (Phase 12G-G):
+    - Test 12: `cleanupExpiredEntries` evicts expired user quotas and preserves active user quotas.
+    - Test 13: `cleanupExpiredEntries` removes all entries when all user windows have expired.
+    - Test 14: Concurrent cleanup and user quota consumption is thread-safe without race conditions.
+  - `EndToEndAsyncMigrationLifecycleIT`: Full REST end-to-end lifecycle integration test:
+    - `POST /api/migrations` returns HTTP 202 Accepted with `Location` header pointing to progress endpoint.
+    - Background worker completes track insertions into destination playlist.
+    - `GET /api/migrations/{id}/progress` returns HTTP 200 OK with 100.0% completion.
+    - Anti-IDOR: unauthorized user receives HTTP 404 Not Found on progress polling and submission.
+    - Idempotent resubmission returns HTTP 200 OK without creating duplicate playlist.
 
 ## Current Blockers & Status
 

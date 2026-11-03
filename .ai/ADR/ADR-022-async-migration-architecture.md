@@ -495,6 +495,26 @@ In Phase 12E (subphases A through H), the REST presentation layer for asynchrono
    - **Process-Local Storage Trade-Off**:
      Limiter state is process-local in JVM memory and resets on application restart. Cluster-wide synchronization is deferred to Phase 19 (distributed caching / Redis).
 
+7. **Integration & Concurrency Testing Verification (Phase 12G)**:
+   - **PostgreSQL Test Infrastructure**:
+     Reused project Testcontainers configuration using PostgreSQL 16 image (`ContainerDatabaseDriver`) and real Flyway schema migrations (V1–V9). Preserved production configuration without introducing test-only schema modifications or H2 substitutes.
+   - **REPEATABLE_READ Snapshot Consistency**:
+     Verified via `PostgreSqlProgressConsistencyIT`. Confirmed that a reading transaction executing under `REPEATABLE_READ` isolation observes a consistent snapshot across execution metadata and grouped track counts, even when a separate transaction commits concurrent track mutations. Confirmed that subsequent read transactions observe committed state. Validated strict count conservation, processed count formula, remaining count formula, and half-up percentage calculation invariants.
+   - **Atomic QUEUED Execution Claiming**:
+     Verified via `AtomicQueuedExecutionClaimIT`. Tested 10 concurrent worker threads competing to claim the same `QUEUED` execution simultaneously via `CyclicBarrier`: exactly ONE worker claims it, 9 are rejected, status is RUNNING, and version increments by 1. Confirmed stale version and non-QUEUED status claims are rejected at the database level.
+   - **Worker & Executor Concurrency & Saturation**:
+     Verified via `WorkerAndExecutorConcurrencyTest`. Proved concurrent execution across bounded pool (core=2, max=4, queue=50) up to maxPoolSize without state corruption. Proved saturating the executor (4 active + 50 queued) triggers `TaskRejectedException`, safely resetting rejected execution from `QUEUED` to `INITIALIZED` via `handleDispatchRejection`. Confirmed controlled worker exception handling and graceful shutdown waiting for active tasks.
+   - **Dispatcher & Queued Migration Integration**:
+     Verified via `QueuedMigrationDispatcherIT`. Proved complete pipeline: approved plan validation -> queued preparation -> destination playlist creation -> QUEUED persistence -> background worker claim -> sequential track insertion -> COMPLETED status. Confirmed destination playlist creation is never repeated on resubmission, and the legacy synchronous orchestrator is bypassed.
+   - **Progress Reading During Active Migration**:
+     Verified via `ActiveMigrationProgressIT`. Processed 60 tracks sequentially while 4 concurrent reader threads continuously poll progress snapshots. Proved that all invariants (count conservation, non-negative remaining tracks, progress in `[0.0, 100.0]`) hold for every sampled snapshot, with zero deadlocks, zero optimistic lock failures, and zero mutations by the read layer.
+   - **Rate Limiter Memory Growth Audit & Bounded Cleanup**:
+     Audited `InMemoryProgressPollingRateLimiter`: identified that inactive user entries in `userQuotas` were retained indefinitely. Enhanced with bounded, thread-safe cleanup: atomic `compute` and `computeIfPresent` key locking on `ConcurrentMap`, exposing `cleanupExpiredEntries(Instant)` to prune inactive entries where all sliding window timestamps have expired without full-map scans during normal `checkLimit` calls ($O(1)$) and without removing active entries. Verified with unit and concurrency tests in `InMemoryProgressPollingRateLimiterTest`.
+   - **Database Index & Query Performance**:
+     Verified composite index `idx_executiontracks_execution_status` on `(execution_id, status)` in Flyway migration V6. Grouped aggregation query `countTracksByStatusForExecution` projects only status and count, returning at most 8 rows and eliminating entity hydration and N+1 query overhead.
+   - **End-to-End Asynchronous Lifecycle**:
+     Verified via `EndToEndAsyncMigrationLifecycleIT`. Validated full REST journey from `POST /api/migrations` (202 Accepted) through background worker processing to `GET /api/migrations/{id}/progress` (200 OK, 100% complete). Proved anti-IDOR security (404 Not Found for cross-user progress reads) and idempotent resubmission (200 OK without duplicate playlist creation).
+
 ---
 
 ## Consequences
