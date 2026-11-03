@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spotifyyoutube.migrator.common.config.SecurityConfig;
 import com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
+import com.spotifyyoutube.migrator.common.exception.RateLimitExceededException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
@@ -14,6 +15,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Migr
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
+import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
 import com.spotifyyoutube.migrator.migration.progress.domain.MigrationProgressSnapshot;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateMigrationRequest;
 import com.spotifyyoutube.migrator.migration.domain.MigrationJob;
@@ -39,6 +41,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -51,13 +54,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * WebMvc integration tests for asynchronous migration submission and progress retrieval (Phase 12E).
+ * WebMvc integration tests for asynchronous migration submission and progress retrieval (Phase 12E & 12F).
  */
 @WebMvcTest(MigrationController.class)
 @AutoConfigureMockMvc(addFilters = false)
 @Import({SecurityConfig.class, GlobalExceptionHandler.class})
 @WithMockUser(username = "tester@example.com")
-@DisplayName("Phase 12E: MigrationController Async & Progress Tests")
+@DisplayName("Phase 12E & 12F: MigrationController Async, Progress & Rate Limiting Tests")
 class MigrationAsyncControllerTest {
 
     @Autowired
@@ -71,6 +74,9 @@ class MigrationAsyncControllerTest {
 
     @MockBean
     private MigrationProgressService progressService;
+
+    @MockBean
+    private ProgressPollingRateLimiter rateLimiter;
 
     @MockBean
     private UserService userService;
@@ -410,12 +416,30 @@ class MigrationAsyncControllerTest {
         }
 
         @Test
-        @DisplayName("Unauthenticated request returns 401 Unauthorized")
+        @DisplayName("Progress polling rate limit exceeded returns 429 Too Many Requests with Retry-After header")
+        void getExecutionProgress_RateLimitExceeded() throws Exception {
+            doThrow(new RateLimitExceededException("Progress polling rate limit exceeded; please slow down requests", 5))
+                    .when(rateLimiter).checkLimit(userId);
+
+            mockMvc.perform(get("/api/migrations/{executionId}/progress", executionId))
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(header().string("Retry-After", "5"))
+                    .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"))
+                    .andExpect(jsonPath("$.message").value("Progress polling rate limit exceeded; please slow down requests"));
+
+            verify(progressService, never()).getProgress(any(), any());
+            verify(jobDispatcher, never()).dispatchMigration(any(), any());
+        }
+
+        @Test
+        @DisplayName("Unauthenticated request returns 401 Unauthorized without consuming rate limit")
         void getExecutionProgress_Unauthenticated() throws Exception {
             mockMvc.perform(get("/api/migrations/{executionId}/progress", executionId)
                     .with(anonymous()))
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+            verify(rateLimiter, never()).checkLimit(any());
         }
     }
 
@@ -448,6 +472,22 @@ class MigrationAsyncControllerTest {
         }
 
         @Test
+        @DisplayName("Review session progress rate limit exceeded returns 429 Too Many Requests with Retry-After header")
+        void getReviewSessionProgress_RateLimitExceeded() throws Exception {
+            doThrow(new RateLimitExceededException("Progress polling rate limit exceeded; please slow down requests", 5))
+                    .when(rateLimiter).checkLimit(userId);
+
+            mockMvc.perform(get("/api/migrations/review-sessions/{reviewSessionId}/progress", sessionId))
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(header().string("Retry-After", "5"))
+                    .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"))
+                    .andExpect(jsonPath("$.message").value("Progress polling rate limit exceeded; please slow down requests"));
+
+            verify(progressService, never()).getProgressByReviewSession(any(), any());
+            verify(jobDispatcher, never()).dispatchMigration(any(), any());
+        }
+
+        @Test
         @DisplayName("Missing review session returns 404 NOT_FOUND")
         void getReviewSessionProgress_NotFound() throws Exception {
             when(progressService.getProgressByReviewSession(sessionId, userId))
@@ -470,12 +510,14 @@ class MigrationAsyncControllerTest {
         }
 
         @Test
-        @DisplayName("Unauthenticated request returns 401 Unauthorized")
+        @DisplayName("Unauthenticated request returns 401 Unauthorized without consuming rate limit")
         void getReviewSessionProgress_Unauthenticated() throws Exception {
             mockMvc.perform(get("/api/migrations/review-sessions/{reviewSessionId}/progress", sessionId)
                     .with(anonymous()))
                     .andExpect(status().isUnauthorized())
                     .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+            verify(rateLimiter, never()).checkLimit(any());
         }
     }
 }

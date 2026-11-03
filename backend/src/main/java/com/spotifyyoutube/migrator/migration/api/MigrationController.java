@@ -18,6 +18,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Appr
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
+import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
 import com.spotifyyoutube.migrator.migration.progress.domain.MigrationProgressSnapshot;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Valid;
@@ -47,10 +48,10 @@ import java.util.UUID;
 
 /**
  * REST controller exposing asynchronous migration submission, progress tracking,
- * and legacy migration management endpoints (Phase 12E).
+ * and legacy migration management endpoints (Phase 12E & 12F).
  * <p>
  * Enforces anti-IDOR security, authenticated user resolution, non-blocking asynchronous dispatch,
- * and read-only progress inspection.
+ * read-only progress inspection, and progress polling rate limiting.
  */
 @RestController
 @RequestMapping("/api/migrations")
@@ -61,6 +62,7 @@ public class MigrationController {
     private final MigrationService migrationService;
     private final MigrationJobDispatcher jobDispatcher;
     private final MigrationProgressService progressService;
+    private final ProgressPollingRateLimiter rateLimiter;
     private final UserService userService;
     private final ObjectMapper objectMapper;
     private final Validator validator;
@@ -70,6 +72,7 @@ public class MigrationController {
             MigrationService migrationService,
             MigrationJobDispatcher jobDispatcher,
             MigrationProgressService progressService,
+            ProgressPollingRateLimiter rateLimiter,
             UserService userService,
             ObjectMapper objectMapper,
             Validator validator
@@ -77,6 +80,7 @@ public class MigrationController {
         this.migrationService = Objects.requireNonNull(migrationService, "MigrationService must not be null");
         this.jobDispatcher = Objects.requireNonNull(jobDispatcher, "MigrationJobDispatcher must not be null");
         this.progressService = Objects.requireNonNull(progressService, "MigrationProgressService must not be null");
+        this.rateLimiter = Objects.requireNonNull(rateLimiter, "ProgressPollingRateLimiter must not be null");
         this.userService = Objects.requireNonNull(userService, "UserService must not be null");
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
         this.validator = validator;
@@ -159,6 +163,7 @@ public class MigrationController {
             Principal principal
     ) {
         UUID userId = resolveUserId(null, principal);
+        rateLimiter.checkLimit(userId);
         MigrationProgressSnapshot snapshot = progressService.getProgress(executionId, userId);
 
         return ResponseEntity.ok()
@@ -179,6 +184,7 @@ public class MigrationController {
             Principal principal
     ) {
         UUID userId = resolveUserId(null, principal);
+        rateLimiter.checkLimit(userId);
         MigrationProgressSnapshot snapshot = progressService.getProgressByReviewSession(reviewSessionId, userId);
 
         return ResponseEntity.ok()

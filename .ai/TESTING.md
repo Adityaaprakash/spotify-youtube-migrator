@@ -681,8 +681,33 @@ Implemented and verified (34 dedicated Phase 11H tests across 4 test classes):
     - Submission tests (9 tests): valid authenticated submission returning `202 Accepted` with `Location` header; idempotent submission for already `COMPLETED` executions returning `200 OK`; client-supplied `userId` impersonation mismatch returning `400 Bad Request`; unauthenticated request returning `401 Unauthorized`; unauthorized review session returning `404 Not Found` (anti-IDOR); already `RUNNING` conflict returning `409 Conflict`; worker saturation `TaskRejectedException` returning `429 Too Many Requests` with `Retry-After: 30` header; empty payload returning `400 Bad Request`; missing `reviewSessionId` returning `400 Bad Request`; unrecognized payload returning `400 Bad Request`; and legacy synchronous migration payload routing to legacy handler returning `201 Created`.
     - Execution progress tests (4 tests): valid execution returning `200 OK` with full track distribution and `Cache-Control: no-cache`; missing execution returning `404 Not Found`; unauthorized execution returning `404 Not Found` (anti-IDOR); unauthenticated request returning `401 Unauthorized`.
     - Review session progress tests (4 tests): valid review session returning `200 OK` with identical snapshot schema; missing review session returning `404 Not Found`; unauthorized review session returning `404 Not Found` (anti-IDOR); unauthenticated request returning `401 Unauthorized`.
-  - `GlobalExceptionHandlerTest`: updated with 3 tests verifying `TaskRejectedException` mapping to `429 Too Many Requests` with `Retry-After: 30` and `TOO_MANY_REQUESTS` code, `AccessDeniedException` mapping to `403 Forbidden` (`FORBIDDEN`), and `AuthenticationException` mapping to `401 Unauthorized` (`UNAUTHORIZED`).
   - `MigrationControllerTest`: updated with mandatory mock beans (`jobDispatcher`, `progressService`, `userService`) verifying Phase 1 legacy compatibility under mandatory constructor injection.
+- **Progress Consistency & Rate-Limit Hardening (Phase 12F Complete)**:
+  - `MigrationProgressSnapshotTest`: updated with 17 tests:
+    - Count conservation invariant strictly verified: `totalTracks = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack`.
+    - Throws `ProgressConsistencyException` upon count mismatch without fabricating or defensively clamping counts.
+    - Direct constructor verifies non-negative counts, count conservation, processed tracks formula, remaining tracks formula, and finite percentage bounds [0.0, 100.0].
+  - `DefaultMigrationProgressServiceTest`: updated with 9 tests:
+    - Verifies all 8 `MigrationExecutionStatus` enum values with count conservation preserved.
+    - Throws `ProgressConsistencyException` when `execution.totalApprovedTracks` differs from grouped database counts (detecting drift).
+    - Throws `ProgressConsistencyException` when null or unmapped status is returned from the aggregation query.
+    - Verifies read-only execution: zero entity saves or flushes.
+  - `InMemoryProgressPollingRateLimiterTest`: 11 unit and concurrency tests across 4 nested classes:
+    - Quota enforcement: first permitted request, requests within limit, exceeding limit throwing `RateLimitExceededException` with `Retry-After: 5` header value.
+    - Sliding window: incremental eviction of timestamps, window expiration resetting quota using deterministic `MutableTestClock` without `Thread.sleep`.
+    - Authenticated user isolation: User A quota exhaustion does not affect User B.
+    - Configuration and lifecycle: disabled limiter permitting unlimited requests, process-local reset clearing state, null validation, properties range validation.
+    - Thread safety: 20 concurrent threads against same user quota with `CountDownLatch` verifying exact permitted/rejected counts.
+  - `ConcurrentProgressReadTest`: comprehensive concurrency integration test:
+    - 8 concurrent reader threads and 1 background worker thread transitioning 50 tracks from PENDING -> ADDING -> ADDED/FAILED.
+    - Synchronized deterministically using `CyclicBarrier` and `CountDownLatch` without arbitrary sleeps.
+    - Verifies count conservation holds on 100% of snapshot reads, processed/remaining counts are exact, progress percentage stays within [0.0, 100.0], and zero database writes are triggered.
+  - `MigrationAsyncControllerTest`: updated with 18 `@WebMvcTest` cases:
+    - Verifies progress polling rate limit rejection returning `429 Too Many Requests` with `Retry-After: 5` header on both progress endpoints (`GET /{executionId}/progress` and `GET /review-sessions/{reviewSessionId}/progress`).
+    - Verifies unauthenticated requests return `401 Unauthorized` without consuming rate limit quota.
+    - Verifies rate limit rejection does not mutate `MigrationExecution` or invoke `MigrationJobDispatcher`.
+  - `GlobalExceptionHandlerTest`: updated with tests for `RateLimitExceededException` (429, `Retry-After: 5`, `TOO_MANY_REQUESTS`) and `ProgressConsistencyException` (500, `INTERNAL_SERVER_ERROR`, generic sanitized message).
+  - `MigrationControllerTest`: updated with `@MockBean private ProgressPollingRateLimiter rateLimiter`.
 
 ## Current Blockers & Status
 

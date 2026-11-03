@@ -1,9 +1,9 @@
 # Current State
 
-Last Updated: 2026-11-02
+Last Updated: 2026-11-03
 
 Current Phase: Phase 12 — Async Migration & Progress [IN PROGRESS]
-Current Subphase: Phase 12E — Async REST API, Hardening & Integrated Audit [COMPLETE & AUDITED] -> Phase 12F — Progress Consistency & Rate-Limit Hardening [NEXT]
+Current Subphase: Phase 12F — Progress Consistency & Rate-Limit Hardening [COMPLETE & AUDITED] -> Phase 12G — Integration & Concurrency Testing [NEXT]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
@@ -15,9 +15,33 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 - **Phase 12C (Background Worker Engine & TaskExecutor)**: COMPLETE & AUDITED (ThreadPoolTaskExecutor bounded pool configured, MigrationBackgroundWorker delegating to ApprovedMigrationOrchestrator, MigrationJobDispatcher coordinating Stage 1 synchronous preparation and Stage 2 dispatch, QUEUED-only atomic database claim contract, executor saturation handling with safe reset to INITIALIZED preventing orphaned jobs, graceful shutdown configured).
 - **Phase 12D (Migration Progress Tracking & Calculation)**: COMPLETE & AUDITED (MigrationProgressSnapshot immutable domain record, MigrationProgressService and DefaultMigrationProgressService implemented, real-time status count aggregation via database index, processed/remaining track derivation, safe percentage calculation avoiding division by zero, anti-IDOR enforcement, zero mutation / read-only guarantees).
 - **Phase 12E (Async REST API, Hardening & Integrated Audit)**: COMPLETE & AUDITED (POST /api/migrations async submission returning HTTP 202 Accepted with Location header, idempotent 200 OK for already-completed executions, MigrationSubmissionResponse DTO, GET /api/migrations/{id}/progress execution progress polling endpoint, GET /api/migrations/review-sessions/{id}/progress review-session progress endpoint, MigrationProgressResponse DTO, TaskRejectedException mapped to HTTP 429 Too Many Requests with Retry-After: 30 header, AccessDeniedException mapped to HTTP 403, AuthenticationException mapped to HTTP 401, mandatory constructor injection, anti-IDOR authorization, anti-impersonation, backward-compatible dual routing, full WebMvc test coverage).
-- **Phase 12F (Progress Consistency & Rate-Limit Hardening)**: NEXT IMPLEMENTATION STEP.
+- **Phase 12F (Progress Consistency & Rate-Limit Hardening)**: COMPLETE & AUDITED (Strict count conservation invariant enforced, misleading defensive clamping removed, ProgressConsistencyException mapped to safe HTTP 500, DefaultMigrationProgressService running with REPEATABLE_READ isolation preventing snapshot drift under concurrent worker track transitions, ProgressPollingRateLimiter with thread-safe sliding window per authenticated user, configurable rate limits defaulting to 60 req/min, HTTP 429 Too Many Requests with Retry-After: 5 header, strict separation from worker saturation 429, zero execution mutations on rate limiting, full unit, WebMvc, and concurrency test coverage).
+- **Phase 12G (Integration & Concurrency Testing)**: NEXT IMPLEMENTATION STEP.
 
 ## Completed
+### Phase 12F (Progress Consistency & Rate-Limit Hardening) [COMPLETE & AUDITED]
+- **Strict Count Conservation Invariant**:
+  - Enforced in `MigrationProgressSnapshot`: `totalTracks = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack`.
+  - Removed misleading defensive clamping (`Math.max(0, totalTracks - processedTracks)`).
+  - Exact formula `remainingTracks = totalTracks - processedTracks` strictly guaranteed by invariant.
+  - Introduced `ProgressConsistencyException`: thrown upon any count conservation mismatch or unmapped track status.
+  - Safe error mapping in `GlobalExceptionHandler`: logs detailed diagnostic on server, maps to generic HTTP 500 `INTERNAL_SERVER_ERROR` with sanitized message `"An unexpected error occurred"`.
+- **Database Snapshot Consistency Strategy (PostgreSQL MVCC)**:
+  - `DefaultMigrationProgressService` configured with `@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)`.
+  - In PostgreSQL MVCC, this guarantees that both the `MigrationExecution` query and the grouped `countTracksByStatusForExecution` query see the exact same transaction snapshot.
+  - Drift detection: verifies `execution.getTotalApprovedTracks()` matches `sumOfRecords`. If drift occurs due to external corruption or uncommitted writes, safely rejects with `ProgressConsistencyException`.
+  - Strictly read-only: zero database updates, zero external API calls.
+- **Progress API Polling Rate Limiting**:
+  - Protects `GET /api/migrations/{id}/progress` and `GET /api/migrations/review-sessions/{id}/progress`.
+  - Authenticated identity keying: keyed on authenticated `UUID userId` (derived from Spring Security context).
+  - Unauthenticated requests fail fast with `HTTP 401 Unauthorized` without consuming rate limit quota.
+  - `ProgressPollingRateLimiter` interface + `InMemoryProgressPollingRateLimiter` thread-safe sliding window implementation.
+  - Configurable properties (`ProgressRateLimitProperties` under `migration.progress.rate-limit`): `enabled: true`, `max-requests: 60`, `window-seconds: 60`, `retry-after-seconds: 5`.
+  - Accommodates recommended frontend polling interval (1000ms–2000ms).
+  - Rate limit rejection: returns `HTTP 429 Too Many Requests`, `Retry-After: 5` header, `ErrorCode.TOO_MANY_REQUESTS`.
+  - Distinct from executor saturation (`TaskRejectedException` returns `Retry-After: 30` and resets QUEUED to INITIALIZED; rate limit rejection does NOT mutate `MigrationExecution` or dispatcher).
+  - Process-local in-memory state trade-off documented (cluster synchronization deferred to Phase 19).
+
 ### Phase 12E (Async REST API, Hardening & Integrated Audit) [COMPLETE & AUDITED]
 - **Asynchronous Submission Endpoint (`POST /api/migrations`)**:
   - Implemented on `MigrationController`.

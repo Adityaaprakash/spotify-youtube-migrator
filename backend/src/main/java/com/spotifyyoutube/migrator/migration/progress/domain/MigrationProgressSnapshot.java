@@ -58,6 +58,31 @@ public record MigrationProgressSnapshot(
         validateNonNegative("processedTracks", processedTracks);
         validateNonNegative("remainingTracks", remainingTracks);
 
+        int sumOfStates = pendingTracks + addingTracks + addedTracks + failedTracks
+                + uncertainTracks + skippedTracks + rollingBackTracks + rolledBackTracks;
+        if (totalTracks != sumOfStates) {
+            throw new ProgressConsistencyException(String.format(
+                    "Progress count conservation violation for execution %s: totalTracks (%d) != sum of track states (%d)",
+                    executionId, totalTracks, sumOfStates
+            ));
+        }
+
+        int expectedProcessed = addedTracks + failedTracks + uncertainTracks + skippedTracks + rolledBackTracks;
+        if (processedTracks != expectedProcessed) {
+            throw new ProgressConsistencyException(String.format(
+                    "Processed tracks mismatch for execution %s: processedTracks (%d) != expected processed (%d)",
+                    executionId, processedTracks, expectedProcessed
+            ));
+        }
+
+        int expectedRemaining = totalTracks - processedTracks;
+        if (remainingTracks != expectedRemaining) {
+            throw new ProgressConsistencyException(String.format(
+                    "Remaining tracks mismatch for execution %s: remainingTracks (%d) != expected remaining (%d)",
+                    executionId, remainingTracks, expectedRemaining
+            ));
+        }
+
         if (Double.isNaN(progressPercentage) || Double.isInfinite(progressPercentage)) {
             throw new IllegalArgumentException("progressPercentage must be a finite number");
         }
@@ -68,6 +93,7 @@ public record MigrationProgressSnapshot(
 
     /**
      * Factory method computing processed tracks, remaining tracks, and progress percentage from track counts.
+     * Enforces the mathematical count conservation invariant (Phase 12F).
      *
      * @param executionId       the execution ID
      * @param executionStatus   the execution status
@@ -81,6 +107,7 @@ public record MigrationProgressSnapshot(
      * @param rollingBackTracks count of ROLLING_BACK tracks
      * @param rolledBackTracks  count of ROLLED_BACK tracks
      * @return immutable validated progress snapshot
+     * @throws ProgressConsistencyException if count conservation fails
      */
     public static MigrationProgressSnapshot calculate(
             UUID executionId,
@@ -105,8 +132,17 @@ public record MigrationProgressSnapshot(
         validateNonNegative("rollingBackTracks", rollingBackTracks);
         validateNonNegative("rolledBackTracks", rolledBackTracks);
 
+        int sumOfStates = pendingTracks + addingTracks + addedTracks + failedTracks
+                + uncertainTracks + skippedTracks + rollingBackTracks + rolledBackTracks;
+        if (totalTracks != sumOfStates) {
+            throw new ProgressConsistencyException(String.format(
+                    "Progress count conservation violation for execution %s: totalTracks (%d) != sum of track states (%d)",
+                    executionId, totalTracks, sumOfStates
+            ));
+        }
+
         int processed = addedTracks + failedTracks + uncertainTracks + skippedTracks + rolledBackTracks;
-        int remaining = Math.max(0, totalTracks - processed);
+        int remaining = totalTracks - processed;
         double percentage = computePercentage(processed, totalTracks);
 
         return new MigrationProgressSnapshot(

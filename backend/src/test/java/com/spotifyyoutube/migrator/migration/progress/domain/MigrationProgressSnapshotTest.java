@@ -299,10 +299,10 @@ class MigrationProgressSnapshotTest {
         }
 
         @Test
-        @DisplayName("12. Clamped bounds -> Percentage never exceeds 100.0 or falls below 0.0")
-        void boundsClamped() {
-            // Even if processed exceeds total due to unexpected count drift
-            MigrationProgressSnapshot snapshot = MigrationProgressSnapshot.calculate(
+        @DisplayName("12. Count conservation violation -> Throws ProgressConsistencyException without fabricating counts")
+        void countConservationViolationThrows() {
+            // totalTracks is 10, but track status counts sum to 12 -> must throw ProgressConsistencyException
+            assertThatThrownBy(() -> MigrationProgressSnapshot.calculate(
                     executionId,
                     MigrationExecutionStatus.COMPLETED,
                     10,
@@ -314,14 +314,12 @@ class MigrationProgressSnapshotTest {
                     0,
                     0,
                     0
-            );
-
-            assertThat(snapshot.progressPercentage()).isEqualTo(100.0);
-            assertThat(snapshot.remainingTracks()).isEqualTo(0);
+            )).isInstanceOf(ProgressConsistencyException.class)
+                    .hasMessageContaining("Progress count conservation violation");
         }
 
         @Test
-        @DisplayName("13. Remaining tracks calculation is non-negative")
+        @DisplayName("13. Remaining tracks calculation is non-negative and exact")
         void remainingTracksCalculation() {
             MigrationProgressSnapshot snapshot = MigrationProgressSnapshot.calculate(
                     executionId,
@@ -422,6 +420,48 @@ class MigrationProgressSnapshotTest {
                     10, 5, 0, 5, 0, 0, 0, 0, 0, 5, 5,
                     Double.POSITIVE_INFINITY
             )).isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("Direct constructor rejects count conservation violation (total != sum)")
+        void constructorRejectsCountConservationViolation() {
+            assertThatThrownBy(() -> new MigrationProgressSnapshot(
+                    executionId,
+                    MigrationExecutionStatus.RUNNING,
+                    10, // total = 10
+                    4, 0, 4, 0, 0, 0, 0, 0, // sum of states = 8
+                    4, 6, 40.0
+            )).isInstanceOf(ProgressConsistencyException.class)
+                    .hasMessageContaining("Progress count conservation violation");
+        }
+
+        @Test
+        @DisplayName("Direct constructor rejects processed tracks mismatch")
+        void constructorRejectsProcessedTracksMismatch() {
+            assertThatThrownBy(() -> new MigrationProgressSnapshot(
+                    executionId,
+                    MigrationExecutionStatus.RUNNING,
+                    10,
+                    5, 0, 5, 0, 0, 0, 0, 0, // sum = 10, expected processed = 5
+                    6, // fabricated processedTracks = 6
+                    4, 50.0
+            )).isInstanceOf(ProgressConsistencyException.class)
+                    .hasMessageContaining("Processed tracks mismatch");
+        }
+
+        @Test
+        @DisplayName("Direct constructor rejects remaining tracks mismatch")
+        void constructorRejectsRemainingTracksMismatch() {
+            assertThatThrownBy(() -> new MigrationProgressSnapshot(
+                    executionId,
+                    MigrationExecutionStatus.RUNNING,
+                    10,
+                    5, 0, 5, 0, 0, 0, 0, 0, // sum = 10, processed = 5, expected remaining = 5
+                    5,
+                    3, // fabricated remainingTracks = 3
+                    50.0
+            )).isInstanceOf(ProgressConsistencyException.class)
+                    .hasMessageContaining("Remaining tracks mismatch");
         }
     }
 }

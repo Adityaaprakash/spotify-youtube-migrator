@@ -65,17 +65,19 @@ The following API contracts represent the boundaries mapped statically between t
 - Real-time polling endpoint retrieving execution progress and track outcome distribution by execution ID.
 - Strictly read-only: performs zero DB writes, zero YouTube/Spotify API calls, and zero background worker triggers.
 - Enforces user ownership via `MigrationProgressService`: unauthorized executions return `404 Not Found` (anti-IDOR).
+- Rate-limited via `ProgressPollingRateLimiter`: excessive polling requests exceeding configured quota return `429 Too Many Requests` with `Retry-After: 5` header.
 - Returns `@MigrationProgressResponse(executionId, status, totalTracks, pendingTracks, addingTracks, addedTracks, failedTracks, uncertainTracks, skippedTracks, rollingBackTracks, rolledBackTracks, processedTracks, remainingTracks, progressPercentage)`.
 - Headers: `Cache-Control: no-cache`.
-- Status: `200 OK`.
+- Status: `200 OK` (or `429 Too Many Requests` if polling quota is exceeded).
 
 **GET /api/migrations/review-sessions/{reviewSessionId}/progress**
 - Real-time polling endpoint retrieving execution progress by associated review-session ID.
 - Enables clients holding only `reviewSessionId` to monitor progress without initiating new executions or database mutations.
 - Enforces review session ownership via `MigrationProgressService`: unauthorized sessions return `404 Not Found` (anti-IDOR).
+- Rate-limited via `ProgressPollingRateLimiter`: excessive polling requests exceeding configured quota return `429 Too Many Requests` with `Retry-After: 5` header.
 - Returns the exact same `@MigrationProgressResponse` contract.
 - Headers: `Cache-Control: no-cache`.
-- Status: `200 OK`.
+- Status: `200 OK` (or `429 Too Many Requests` if polling quota is exceeded).
 
 ### YouTube API (`/api/youtube`)
 **GET /api/youtube/videos/search**
@@ -120,5 +122,7 @@ All failed integrations return strict `ApiError` shapes resolving to explicitly 
 - **403 Forbidden (`FORBIDDEN`)**: Authenticated principal lacks permission.
 - **404 Not Found (`NOT_FOUND`)**: Resource does not exist or caller is unauthorized (anti-IDOR protection).
 - **409 Conflict (`CONFLICT` / `INVALID_STATE`)**: Conflicting state (e.g. migration already RUNNING or QUEUED).
-- **429 Too Many Requests (`TOO_MANY_REQUESTS`)**: Worker pool saturated (`TaskRejectedException`), includes `Retry-After: 30` header.
-- **500 Internal Server Error (`INTERNAL_SERVER_ERROR`)**: Generic sanitised error message. Stack traces, credentials, and internal aggregate details are strictly prohibited from exposure.
+- **429 Too Many Requests (`TOO_MANY_REQUESTS`)**:
+  - *Executor Saturation*: Worker pool queue capacity exceeded during migration submission (`TaskRejectedException`), includes `Retry-After: 30` header. Execution reset from QUEUED to INITIALIZED.
+  - *Progress Polling Limit*: Client exceeded configured progress endpoint polling rate limit (`RateLimitExceededException`), includes `Retry-After: 5` header. Execution state remains completely unmutated.
+- **500 Internal Server Error (`INTERNAL_SERVER_ERROR`)**: Generic sanitised error message. Stack traces, credentials, and internal aggregate details are strictly prohibited from exposure. Count conservation invariant violations raise `ProgressConsistencyException` which maps safely here.

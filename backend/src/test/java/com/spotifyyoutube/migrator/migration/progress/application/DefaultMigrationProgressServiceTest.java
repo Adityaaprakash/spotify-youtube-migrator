@@ -11,6 +11,7 @@ import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrack
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.TrackStatusCount;
 import com.spotifyyoutube.migrator.migration.progress.domain.MigrationProgressSnapshot;
+import com.spotifyyoutube.migrator.migration.progress.domain.ProgressConsistencyException;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
@@ -259,11 +260,39 @@ class DefaultMigrationProgressServiceTest {
         void supportsAllExecutionStatuses(MigrationExecutionStatus status) {
             execution.setStatus(status);
             when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
-            when(trackRecordRepository.countTracksByStatusForExecution(executionId)).thenReturn(List.of());
+            when(trackRecordRepository.countTracksByStatusForExecution(executionId))
+                    .thenReturn(List.of(new TrackStatusCount(ExecutionTrackStatus.PENDING, 4L)));
 
             MigrationProgressSnapshot snapshot = progressService.getProgress(executionId, userId);
 
             assertThat(snapshot.executionStatus()).isEqualTo(status);
+        }
+
+        @Test
+        @DisplayName("Count mismatch between totalApprovedTracks and track records throws ProgressConsistencyException")
+        void countConservationViolation_ThrowsException() {
+            execution.setStatus(MigrationExecutionStatus.RUNNING);
+            when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+            // execution has totalApprovedTracks = 4, but repository only returns 3 records
+            when(trackRecordRepository.countTracksByStatusForExecution(executionId))
+                    .thenReturn(List.of(new TrackStatusCount(ExecutionTrackStatus.ADDED, 3L)));
+
+            assertThatThrownBy(() -> progressService.getProgress(executionId, userId))
+                    .isInstanceOf(ProgressConsistencyException.class)
+                    .hasMessageContaining("Count conservation violation");
+        }
+
+        @Test
+        @DisplayName("Null or unrecognized status from aggregation query throws ProgressConsistencyException")
+        void nullStatusInAggregation_ThrowsException() {
+            execution.setStatus(MigrationExecutionStatus.RUNNING);
+            when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+            when(trackRecordRepository.countTracksByStatusForExecution(executionId))
+                    .thenReturn(List.of(new TrackStatusCount(null, 4L)));
+
+            assertThatThrownBy(() -> progressService.getProgress(executionId, userId))
+                    .isInstanceOf(ProgressConsistencyException.class)
+                    .hasMessageContaining("Unknown track status detected");
         }
 
         @Test

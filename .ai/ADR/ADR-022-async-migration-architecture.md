@@ -475,6 +475,25 @@ In Phase 12E (subphases A through H), the REST presentation layer for asynchrono
    - Anonymous or missing principals fail fast with `401 Unauthorized`.
    - `MigrationController` enforces strict mandatory constructor injection for all dependencies (`MigrationService`, `MigrationJobDispatcher`, `MigrationProgressService`, `UserService`, `ObjectMapper`, `Validator`), ensuring zero production startup risk from missing required beans.
 
+6. **Progress Consistency & Rate-Limit Hardening (Phase 12F)**:
+   - **Count Conservation Invariant**:
+     Strict mathematical invariant:
+     `totalTracks = pendingTracks + addingTracks + addedTracks + failedTracks + uncertainTracks + skippedTracks + rollingBackTracks + rolledBackTracks`.
+     Must hold exactly on every progress snapshot. Defensive clamping (`Math.max(0, ...)`) is eliminated. `remainingTracks = totalTracks - processedTracks` is exact.
+     Any status count conservation violation or unmapped status raises `ProgressConsistencyException`, safely mapped to HTTP 500 (`INTERNAL_SERVER_ERROR`) with sanitized message, logging detailed diagnostics server-side.
+   - **Database Snapshot Consistency Strategy (PostgreSQL MVCC)**:
+     `DefaultMigrationProgressService` runs under `@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)`.
+     Under PostgreSQL Multi-Version Concurrency Control (MVCC), this ensures the `MigrationExecution` metadata read and the `ExecutionTrackRecord` grouped count query execute against the exact same committed snapshot, eliminating race-condition drift caused by concurrent background worker track commits.
+   - **Progress API Polling Rate Limiting**:
+     Protects progress polling endpoints (`GET /api/migrations/{id}/progress` and `GET /api/migrations/review-sessions/{id}/progress`) from excessive polling while accommodating active frontend polling intervals (1000ms–2000ms).
+     Encapsulated behind `ProgressPollingRateLimiter` interface with thread-safe sliding window implementation `InMemoryProgressPollingRateLimiter` keyed on authenticated `userId` (`UUID`).
+     Configured via `migration.progress.rate-limit` properties: `max-requests: 60`, `window-seconds: 60`, `retry-after-seconds: 5`.
+     Quota violations return `HTTP 429 Too Many Requests` with `Retry-After: 5` header and `ErrorCode.TOO_MANY_REQUESTS`.
+   - **Strict Separation of 429 Scenarios**:
+     - *Executor Saturation* (`TaskRejectedException`): Worker pool capacity exceeded during migration submission. Returns `Retry-After: 30`, resets QUEUED execution to INITIALIZED.
+     - *Progress Polling Limit* (`RateLimitExceededException`): Excessive polling by client. Returns `Retry-After: 5`, strictly read-only, never mutates `MigrationExecution` or dispatcher state.
+   - **Process-Local Storage Trade-Off**:
+     Limiter state is process-local in JVM memory and resets on application restart. Cluster-wide synchronization is deferred to Phase 19 (distributed caching / Redis).
 
 ---
 

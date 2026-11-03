@@ -1,7 +1,11 @@
 package com.spotifyyoutube.migrator.common.exception;
 
+import com.spotifyyoutube.migrator.migration.progress.domain.ProgressConsistencyException;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -20,6 +24,8 @@ import java.time.Instant;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> handleHttpMessageNotReadableException(
@@ -178,7 +184,23 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                .header(org.springframework.http.HttpHeaders.RETRY_AFTER, "30")
+                .header(HttpHeaders.RETRY_AFTER, "30")
+                .body(apiError);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ApiError> handleRateLimitExceededException(
+            RateLimitExceededException ex,
+            HttpServletRequest request
+    ) {
+        ApiError apiError = new ApiError(
+                ErrorCode.TOO_MANY_REQUESTS,
+                ex.getMessage() != null ? ex.getMessage() : "Rate limit exceeded",
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(ex.getRetryAfterSeconds()))
                 .body(apiError);
     }
 
@@ -208,6 +230,21 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
         return new ResponseEntity<>(apiError, HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(ProgressConsistencyException.class)
+    public ResponseEntity<ApiError> handleProgressConsistencyException(
+            ProgressConsistencyException ex,
+            HttpServletRequest request
+    ) {
+        log.error("Internal progress consistency violation at URI {}: {}", request.getRequestURI(), ex.getMessage(), ex);
+        ApiError apiError = new ApiError(
+                ErrorCode.INTERNAL_SERVER_ERROR,
+                "An unexpected error occurred",
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @ExceptionHandler(Exception.class)

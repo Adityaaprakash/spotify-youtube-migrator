@@ -67,4 +67,13 @@ review:
     max-queries-per-track: ${REVIEW_SEARCH_MAX_QUERIES_PER_TRACK:2}
     max-query-length: ${REVIEW_SEARCH_MAX_QUERY_LENGTH:500}
 
+migration:
+  progress:
+    rate-limit:
+      enabled: ${MIGRATION_PROGRESS_RATE_LIMIT_ENABLED:true}
+      max-requests: ${MIGRATION_PROGRESS_RATE_LIMIT_MAX_REQUESTS:60}
+      window-seconds: ${MIGRATION_PROGRESS_RATE_LIMIT_WINDOW_SECONDS:60}
+      retry-after-seconds: ${MIGRATION_PROGRESS_RATE_LIMIT_RETRY_AFTER_SECONDS:5}
+
+
 

@@ -594,3 +594,38 @@ Controllers MUST NOT:
     - `AccessDeniedException` maps to `HTTP 403 Forbidden` (`ErrorCode.FORBIDDEN`).
     - `AuthenticationException` maps to `HTTP 401 Unauthorized` (`ErrorCode.UNAUTHORIZED`).
     - `InvalidStateException` maps to `HTTP 409 Conflict` (`ErrorCode.INVALID_STATE`).
+
+## Progress Consistency & Rate-Limit Hardening (Phase 12F — Complete & Audited)
+
+- Packages:
+  - Progress Domain & Models: `com.spotifyyoutube.migrator.migration.progress.domain`
+  - Progress Service & Rate Limiting: `com.spotifyyoutube.migrator.migration.progress.application`
+  - Exception & Error Handling: `com.spotifyyoutube.migrator.common.exception`
+  - REST Controller: `com.spotifyyoutube.migrator.migration.api`
+- Architecture Decisions: ADR-022 (Section: Progress Consistency & Rate-Limit Hardening)
+- Purpose: Guarantees strict mathematical count conservation across all progress snapshots, provides coherent database snapshot reads under concurrent worker track transitions using PostgreSQL MVCC isolation, and protects progress polling endpoints against abusive request volumes through thread-safe, process-local rate limiting.
+- Architecture Rules:
+  - **Count Conservation Invariant**:
+    - `totalTracks = pendingTracks + addingTracks + addedTracks + failedTracks + uncertainTracks + skippedTracks + rollingBackTracks + rolledBackTracks`.
+    - Enforced strictly in `MigrationProgressSnapshot` record constructor and static `calculate(...)` factory.
+    - Misleading defensive clamping (`Math.max(0, totalTracks - processedTracks)`) is permanently removed.
+    - `remainingTracks = totalTracks - processedTracks` is exact and mathematically guaranteed non-negative.
+    - Any status count mismatch or unrecognized track state raises `ProgressConsistencyException`, safely mapped by `GlobalExceptionHandler` to `HTTP 500 Internal Server Error` (`ErrorCode.INTERNAL_SERVER_ERROR`) with sanitized message `"An unexpected error occurred"`, logging diagnostics internally.
+  - **Database Snapshot Consistency (PostgreSQL MVCC Isolation)**:
+    - `DefaultMigrationProgressService` is annotated with `@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)`.
+    - Under PostgreSQL MVCC, this guarantees that both the `MigrationExecution` query and the grouped `countTracksByStatusForExecution` query read from the exact same transaction snapshot, preventing race-condition drift caused by background worker commits while progress is read.
+    - Compares `execution.getTotalApprovedTracks()` with `sumOfRecords` from the database query to detect aggregate drift.
+    - Strictly read-only: performs zero entity saves, zero flushes, zero external API calls.
+  - **Authenticated Progress API Polling Rate Limiting**:
+    - Protects `GET /api/migrations/{executionId}/progress` and `GET /api/migrations/review-sessions/{reviewSessionId}/progress`.
+    - Contract: `ProgressPollingRateLimiter.checkLimit(UUID userId)`.
+    - Implementation: `InMemoryProgressPollingRateLimiter` utilizing thread-safe sliding window tracking per authenticated `userId`.
+    - Configured via `ProgressRateLimitProperties` (`migration.progress.rate-limit`): `enabled: true`, `max-requests: 60`, `window-seconds: 60`, `retry-after-seconds: 5`.
+    - Accommodates recommended frontend polling interval (1000ms–2000ms).
+    - Unauthenticated requests fail fast at security/controller boundary with `HTTP 401 Unauthorized` without consuming rate limit quota.
+    - Exceeding quota throws `RateLimitExceededException`, mapped to `HTTP 429 Too Many Requests` with header `Retry-After: 5` and `ErrorCode.TOO_MANY_REQUESTS`.
+  - **Distinct 429 Error Scenarios**:
+    - *Executor Saturation* (`TaskRejectedException`): Worker pool capacity exceeded during migration submission. Returns `Retry-After: 30`, resets QUEUED execution to INITIALIZED.
+    - *Progress Polling Limit* (`RateLimitExceededException`): Excessive polling by client. Returns `Retry-After: 5`, strictly read-only, never mutates `MigrationExecution` or dispatcher state.
+  - **Process-Local Storage Trade-Off**:
+    - Limiter state is process-local in JVM memory and resets on application restart. Cluster-wide synchronization is deferred to Phase 19 (distributed caching / Redis).

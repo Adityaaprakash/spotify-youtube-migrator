@@ -7,9 +7,11 @@ import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrack
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.TrackStatusCount;
 import com.spotifyyoutube.migrator.migration.progress.domain.MigrationProgressSnapshot;
+import com.spotifyyoutube.migrator.migration.progress.domain.ProgressConsistencyException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.EnumMap;
@@ -19,13 +21,15 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Default implementation of {@link MigrationProgressService} (Phase 12D).
+ * Default implementation of {@link MigrationProgressService} (Phase 12D & 12F).
  * <p>
  * Provides read-only progress calculation directly from persisted execution track state.
  * Uses database index aggregation to avoid loading track entities into memory.
+ * Employs {@link Isolation#REPEATABLE_READ} to guarantee coherent snapshot reads across
+ * the execution aggregate and per-track grouped status counts during concurrent worker execution.
  */
 @Service
-@Transactional(readOnly = true)
+@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 public class DefaultMigrationProgressService implements MigrationProgressService {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultMigrationProgressService.class);
@@ -72,26 +76,45 @@ public class DefaultMigrationProgressService implements MigrationProgressService
         List<TrackStatusCount> counts = trackRecordRepository.countTracksByStatusForExecution(executionId);
 
         Map<ExecutionTrackStatus, Long> countMap = new EnumMap<>(ExecutionTrackStatus.class);
+        long rawCountSum = 0;
         for (TrackStatusCount sc : counts) {
+            if (sc == null || sc.status() == null) {
+                log.error("Unknown or null track status in progress records for execution {}", executionId);
+                throw new ProgressConsistencyException("Unknown track status detected in progress aggregation for execution " + executionId);
+            }
+            rawCountSum += sc.count();
             countMap.put(sc.status(), sc.count());
         }
 
-        int pending = countMap.getOrDefault(ExecutionTrackStatus.PENDING, 0L).intValue();
-        int adding = countMap.getOrDefault(ExecutionTrackStatus.ADDING, 0L).intValue();
-        int added = countMap.getOrDefault(ExecutionTrackStatus.ADDED, 0L).intValue();
-        int failed = countMap.getOrDefault(ExecutionTrackStatus.FAILED, 0L).intValue();
-        int uncertain = countMap.getOrDefault(ExecutionTrackStatus.UNCERTAIN, 0L).intValue();
-        int skipped = countMap.getOrDefault(ExecutionTrackStatus.SKIPPED, 0L).intValue();
-        int rollingBack = countMap.getOrDefault(ExecutionTrackStatus.ROLLING_BACK, 0L).intValue();
-        int rolledBack = countMap.getOrDefault(ExecutionTrackStatus.ROLLED_BACK, 0L).intValue();
+        int pending = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.PENDING, 0L));
+        int adding = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.ADDING, 0L));
+        int added = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.ADDED, 0L));
+        int failed = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.FAILED, 0L));
+        int uncertain = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.UNCERTAIN, 0L));
+        int skipped = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.SKIPPED, 0L));
+        int rollingBack = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.ROLLING_BACK, 0L));
+        int rolledBack = Math.toIntExact(countMap.getOrDefault(ExecutionTrackStatus.ROLLED_BACK, 0L));
 
         int sumOfRecords = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack;
-        int totalTracks = Math.max(execution.getTotalApprovedTracks(), sumOfRecords);
+        if (rawCountSum != sumOfRecords) {
+            log.error("Track status aggregation count mismatch for execution {}: raw={}, mapped={}", executionId, rawCountSum, sumOfRecords);
+            throw new ProgressConsistencyException("Track status count mismatch in aggregation for execution " + executionId);
+        }
+
+        int totalApproved = execution.getTotalApprovedTracks();
+        if (totalApproved != sumOfRecords) {
+            log.error("Execution totalApprovedTracks mismatch for execution {}: totalApprovedTracks={}, sumOfRecords={}",
+                    executionId, totalApproved, sumOfRecords);
+            throw new ProgressConsistencyException(String.format(
+                    "Count conservation violation for execution %s: totalApprovedTracks (%d) != sumOfRecords (%d)",
+                    executionId, totalApproved, sumOfRecords
+            ));
+        }
 
         MigrationProgressSnapshot snapshot = MigrationProgressSnapshot.calculate(
                 executionId,
                 execution.getStatus(),
-                totalTracks,
+                totalApproved,
                 pending,
                 adding,
                 added,

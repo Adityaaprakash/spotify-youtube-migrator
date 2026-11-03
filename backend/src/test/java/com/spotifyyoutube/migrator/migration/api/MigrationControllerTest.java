@@ -12,6 +12,7 @@ import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
+import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -48,6 +49,9 @@ public class MigrationControllerTest {
 
     @MockBean
     private MigrationProgressService progressService;
+
+    @MockBean
+    private ProgressPollingRateLimiter rateLimiter;
 
     @MockBean
     private UserService userService;

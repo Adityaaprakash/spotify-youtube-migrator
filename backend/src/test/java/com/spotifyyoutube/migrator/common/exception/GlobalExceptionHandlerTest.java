@@ -103,6 +103,16 @@ class GlobalExceptionHandlerTest {
         public void authentication() {
             throw new org.springframework.security.authentication.BadCredentialsException("Bad credentials");
         }
+
+        @GetMapping("/test/rate-limit-exceeded")
+        public void rateLimitExceeded() {
+            throw new RateLimitExceededException("Progress polling rate limit exceeded; please slow down requests", 5);
+        }
+
+        @GetMapping("/test/progress-consistency")
+        public void progressConsistency() {
+            throw new com.spotifyyoutube.migrator.migration.progress.domain.ProgressConsistencyException("Count conservation violation: total=10, sum=8");
+        }
     }
 
 
@@ -229,6 +239,23 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHORIZED"))
                 .andExpect(jsonPath("$.message").value("Authentication is required"));
+    }
+
+    @Test
+    void rateLimitExceededException_shouldReturn429WithRetryAfterHeader() throws Exception {
+        mockMvc.perform(get("/test/rate-limit-exceeded").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "5"))
+                .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"))
+                .andExpect(jsonPath("$.message").value("Progress polling rate limit exceeded; please slow down requests"));
+    }
+
+    @Test
+    void progressConsistencyException_shouldReturn500AndSanitisedMessage() throws Exception {
+        mockMvc.perform(get("/test/progress-consistency").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.code").value("INTERNAL_SERVER_ERROR"))
+                .andExpect(jsonPath("$.message").value("An unexpected error occurred"));
     }
 }
 
