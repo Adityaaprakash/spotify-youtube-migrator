@@ -122,6 +122,9 @@ public record MigrationProgressSnapshot(
             int rollingBackTracks,
             int rolledBackTracks
     ) {
+        Objects.requireNonNull(executionId, "executionId must not be null");
+        Objects.requireNonNull(executionStatus, "executionStatus must not be null");
+
         validateNonNegative("totalTracks", totalTracks);
         validateNonNegative("pendingTracks", pendingTracks);
         validateNonNegative("addingTracks", addingTracks);

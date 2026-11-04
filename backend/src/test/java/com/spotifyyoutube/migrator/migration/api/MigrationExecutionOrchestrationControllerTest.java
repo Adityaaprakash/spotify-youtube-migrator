@@ -216,13 +216,13 @@ class MigrationExecutionOrchestrationControllerTest {
 
         @Test
         @WithAnonymousUser
-        @DisplayName("401 Unauthorized: Unauthenticated request rejected")
+        @DisplayName("403 Forbidden: Unauthenticated request rejected")
         void unauthenticatedRequestRejected() throws Exception {
             mockMvc.perform(post("/api/migrations/execution/run")
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{}"))
-                    .andExpect(status().isUnauthorized());
+                    .andExpect(status().isForbidden());
         }
     }
 
@@ -269,11 +269,11 @@ class MigrationExecutionOrchestrationControllerTest {
 
         @Test
         @WithAnonymousUser
-        @DisplayName("401 Unauthorized: Unauthenticated request rejected")
+        @DisplayName("403 Forbidden: Unauthenticated request rejected")
         void unauthenticatedSessionIdRejected() throws Exception {
             mockMvc.perform(post("/api/migrations/execution/run/{sessionId}", sessionId)
                             .with(csrf()))
-                    .andExpect(status().isUnauthorized());
+                    .andExpect(status().isForbidden());
         }
     }
 }

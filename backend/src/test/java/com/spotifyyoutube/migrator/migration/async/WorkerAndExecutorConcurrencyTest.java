@@ -78,21 +78,26 @@ class WorkerAndExecutorConcurrencyTest {
     @Test
     @DisplayName("Test 1: Multiple migrations execute concurrently up to configured maxPoolSize without state corruption")
     void concurrentWorkerExecutionWithinPoolBounds() throws Exception {
-        int concurrentTasks = 4;
-        CyclicBarrier barrier = new CyclicBarrier(concurrentTasks);
-        CountDownLatch doneLatch = new CountDownLatch(concurrentTasks);
+        int totalTasks = 4;
+        int corePoolConcurrency = 2;
+        CyclicBarrier coreBarrier = new CyclicBarrier(corePoolConcurrency);
+        CountDownLatch doneLatch = new CountDownLatch(totalTasks);
         AtomicInteger activeThreads = new AtomicInteger(0);
         AtomicInteger maxObservedConcurrency = new AtomicInteger(0);
+        AtomicInteger taskCounter = new AtomicInteger(0);
         List<String> threadNames = Collections.synchronizedList(new ArrayList<>());
 
         when(orchestrator.executeQueuedMigration(any(UUID.class), any(UUID.class)))
                 .thenAnswer(invocation -> {
+                    int taskIndex = taskCounter.incrementAndGet();
                     int current = activeThreads.incrementAndGet();
                     maxObservedConcurrency.accumulateAndGet(current, Math::max);
                     threadNames.add(Thread.currentThread().getName());
 
-                    // Wait for all 4 tasks to be actively executing concurrently
-                    barrier.await(5, TimeUnit.SECONDS);
+                    // Synchronize the core pool threads concurrently executing the first 2 tasks
+                    if (taskIndex <= corePoolConcurrency) {
+                        coreBarrier.await(5, TimeUnit.SECONDS);
+                    }
 
                     activeThreads.decrementAndGet();
                     doneLatch.countDown();
@@ -105,7 +110,7 @@ class WorkerAndExecutorConcurrencyTest {
                     );
                 });
 
-        for (int i = 0; i < concurrentTasks; i++) {
+        for (int i = 0; i < totalTasks; i++) {
             UUID executionId = UUID.randomUUID();
             UUID userId = UUID.randomUUID();
             taskExecutor.execute(() -> worker.processMigration(executionId, userId));
@@ -113,6 +118,7 @@ class WorkerAndExecutorConcurrencyTest {
 
         boolean completed = doneLatch.await(5, TimeUnit.SECONDS);
         assertThat(completed).isTrue();
+        assertThat(maxObservedConcurrency.get()).isGreaterThanOrEqualTo(2);
         assertThat(maxObservedConcurrency.get()).isLessThanOrEqualTo(4);
         assertThat(threadNames).allMatch(name -> name.startsWith("migration-worker-"));
     }

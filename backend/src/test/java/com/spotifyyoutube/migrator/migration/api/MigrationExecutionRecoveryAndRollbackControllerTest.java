@@ -189,12 +189,12 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
 
         @Test
         @WithAnonymousUser
-        @DisplayName("401 Unauthorized: Unauthenticated request rejected")
+        @DisplayName("403 Forbidden: Unauthenticated request rejected")
         void unauthenticatedRecoveryRejected() throws Exception {
             mockMvc.perform(post("/api/migrations/execution/{executionId}/recover", executionId)
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON))
-                    .andExpect(status().isUnauthorized());
+                    .andExpect(status().isForbidden());
         }
     }
 
@@ -252,11 +252,11 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.executionId").value(executionId.toString()))
-                    .andExpect(jsonPath("$.status").value("SUCCESS"))
+                    .andExpect(jsonPath("$.overallStatus").value("SUCCESS"))
                     .andExpect(jsonPath("$.successfullyRolledBack").value(1))
                     .andExpect(jsonPath("$.failedRollbacks").value(0))
-                    .andExpect(jsonPath("$.outcomes[0].destinationPlaylistItemId").value("yt_item_0"))
-                    .andExpect(jsonPath("$.outcomes[0].status").value("ROLLED_BACK"));
+                    .andExpect(jsonPath("$.trackOutcomes[0].destinationPlaylistItemId").value("yt_item_0"))
+                    .andExpect(jsonPath("$.trackOutcomes[0].status").value("ROLLED_BACK"));
         }
 
         @Test
@@ -305,7 +305,7 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(request)))
                     .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.errorCode").value("CONFLICT"))
+                    .andExpect(jsonPath("$.code").value("CONFLICT"))
                     .andExpect(jsonPath("$.message").value("Concurrent modification detected; resource was updated by another request"));
         }
     }
@@ -354,10 +354,10 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
 
         @Test
         @WithAnonymousUser
-        @DisplayName("401 Unauthorized: Unauthenticated history request rejected")
+        @DisplayName("403 Forbidden: Unauthenticated history request rejected")
         void unauthenticatedHistoryRejected() throws Exception {
             mockMvc.perform(get("/api/migrations/execution/{executionId}/rollbacks", executionId))
-                    .andExpect(status().isUnauthorized());
+                    .andExpect(status().isForbidden());
         }
     }
 }

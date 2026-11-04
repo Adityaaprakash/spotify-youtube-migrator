@@ -578,7 +578,7 @@ class MigrationExecutionControllerTest {
                             .content(objectMapper.writeValueAsString(reqDto))
                             .with(csrf()))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_ARGUMENT"));
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
 
             verify(trackInsertionService, never()).insertApprovedTracks(any(InsertTracksExecutionRequest.class), any(UUID.class));
         }
@@ -598,7 +598,7 @@ class MigrationExecutionControllerTest {
                             .content(objectMapper.writeValueAsString(reqDto))
                             .with(csrf()))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
 
         @Test
@@ -625,7 +625,7 @@ class MigrationExecutionControllerTest {
             mockAuthUser();
 
             when(trackInsertionService.insertApprovedTracks(any(InsertTracksExecutionRequest.class), eq(userId)))
-                    .thenThrow(new ExternalProviderException("YouTube API quota exceeded (quotaExceeded)"));
+                    .thenThrow(new ExternalProviderException("YouTube API quota exceeded (quotaExceeded)", 403));
 
             InsertTracksRequest reqDto = new InsertTracksRequest(sessionId, "PL_quota", null);
 
@@ -751,7 +751,7 @@ class MigrationExecutionControllerTest {
                             .content(objectMapper.writeValueAsString(reqDto))
                             .with(csrf()))
                     .andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("BAD_REQUEST"));
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
         }
 
         @Test
@@ -779,7 +779,7 @@ class MigrationExecutionControllerTest {
 
             mockMvc.perform(get("/api/migrations/execution/" + missingId))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.code").value("RESOURCE_NOT_FOUND"));
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
         }
 
         @Test

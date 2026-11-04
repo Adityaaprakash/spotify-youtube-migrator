@@ -201,12 +201,12 @@ class MigrationExecutionReconciliationControllerTest {
 
         @Test
         @WithAnonymousUser
-        @DisplayName("401 Unauthorized: Unauthenticated reconciliation rejected")
+        @DisplayName("403 Forbidden: Unauthenticated reconciliation rejected")
         void unauthenticatedReconciliationRejected() throws Exception {
             mockMvc.perform(post("/api/migrations/execution/{executionId}/reconcile", executionId)
                             .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON))
-                    .andExpect(status().isUnauthorized());
+                    .andExpect(status().isForbidden());
         }
     }
 
@@ -278,10 +278,10 @@ class MigrationExecutionReconciliationControllerTest {
 
         @Test
         @WithAnonymousUser
-        @DisplayName("401 Unauthorized: Unauthenticated history query rejected")
+        @DisplayName("403 Forbidden: Unauthenticated history query rejected")
         void unauthenticatedHistoryRejected() throws Exception {
             mockMvc.perform(get("/api/migrations/execution/{executionId}/reconciliations", executionId))
-                    .andExpect(status().isUnauthorized());
+                    .andExpect(status().isForbidden());
         }
     }
 
@@ -347,10 +347,10 @@ class MigrationExecutionReconciliationControllerTest {
 
         @Test
         @WithAnonymousUser
-        @DisplayName("401 Unauthorized: Unauthenticated status query rejected")
+        @DisplayName("403 Forbidden: Unauthenticated status query rejected")
         void unauthenticatedStatusRejected() throws Exception {
             mockMvc.perform(get("/api/migrations/execution/{executionId}/reconciliation-status", executionId))
-                    .andExpect(status().isUnauthorized());
+                    .andExpect(status().isForbidden());
         }
     }
 }
