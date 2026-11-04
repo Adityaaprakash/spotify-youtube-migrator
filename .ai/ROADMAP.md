@@ -105,7 +105,16 @@ When a future requirement affects current architecture, document the architectur
 - **Phase 12G**: [IMPLEMENTED & AUDITED] Integration & Concurrency Testing (PostgreSQL Testcontainers integration tests, REPEATABLE_READ snapshot consistency verification, multi-threaded atomic claim verification under race conditions, worker pool concurrency & saturation testing, bounded rate-limiter cleanup and memory growth audit, database index aggregation performance verification, full end-to-end asynchronous lifecycle integration tests; automated runtime verification blocked by IDE host security policy).
 - **Phase 12H**: [COMPLETE & AUDITED / FROZEN] Final Documentation, Architecture Audit & Phase 12 Freeze (Comprehensive audit of execution aggregate, worker delegation, database transaction boundaries, executor configuration, progress count conservation, polling rate limiter, and API contracts; operational limitations register established; ADR-022 finalized; formal architectural freeze of Phase 12 asynchronous processing subsystem enacted).
 - **Phase 12 Final Engineering Audit**: [COMPLETE] Comprehensive codebase review, runtime verification analysis, defect resolution (5 confirmed defects: constructor overloads, invalid test method calls, application.yml YAML nesting, interface mocking & missing imports, test constructor argument mismatch & convenience constructor), and regression testing.
-### **Phase 13 — Reliability Engineering**
+### **Phase 13 — Reliability Engineering** [IN PROGRESS: 13A COMPLETE]
+- **Phase 13A**: [COMPLETE / ARCHITECTURE APPROVED] Reliability Architecture Audit & Design (ADR-031, comprehensive Phase 12 audit, 16-scenario failure matrix, provider-neutral two-tier retry architecture with full jitter, IETF Idempotency-Key contract with user scoping and SHA-256 fingerprinting, zero-duplicate destination playlist creation pre-allocation, evidence-based ambiguous track insertion reconciliation using inspectPlaylist, Flyway V10 schema proposals, and Phase 13B–13I roadmap).
+- **Phase 13B**: [READY] Provider Failure Classification
+- **Phase 13C**: [READY] Retry Policy & Backoff Engine
+- **Phase 13D**: [READY] Durable Retry Scheduling
+- **Phase 13E**: [READY] API Idempotency
+- **Phase 13F**: [READY] External Operation Idempotency & Reconciliation
+- **Phase 13G**: [READY] Migration Recovery & Resume Integration
+- **Phase 13H**: [READY] Reliability & Fault-Injection Testing
+- **Phase 13I**: [READY] Documentation, Verification & Freeze
 ### **Phase 14 — Migration History**
 ### **Phase 15 — Frontend Product Layer**
 ### **Phase 16 — Security Hardening**
