@@ -16,6 +16,7 @@ import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepo
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewTrackRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +52,7 @@ public class DefaultReviewSessionService implements ReviewSessionService {
     private final UserRepository userRepository;
     private final ReviewCandidateSearchService reviewCandidateSearchService;
 
+    @Autowired
     public DefaultReviewSessionService(
             ReviewSessionRepository reviewSessionRepository,
             ReviewTrackRepository reviewTrackRepository,

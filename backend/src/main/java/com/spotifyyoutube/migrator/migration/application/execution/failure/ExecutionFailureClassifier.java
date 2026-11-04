@@ -7,6 +7,7 @@ import jakarta.persistence.OptimisticLockException;
 import jakarta.persistence.PersistenceException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
@@ -166,7 +167,8 @@ public class ExecutionFailureClassifier {
         // 7. Local Persistence Failures
         if (throwable instanceof DataAccessException
                 || throwable instanceof OptimisticLockException
-                || throwable instanceof PersistenceException) {
+                || throwable instanceof PersistenceException
+                || throwable instanceof TransactionException) {
             boolean isIntegrity = throwable.getClass().getSimpleName().contains("DataIntegrity")
                     || throwable.getClass().getSimpleName().contains("ConstraintViolation");
             return new ExecutionFailureAnalysis(

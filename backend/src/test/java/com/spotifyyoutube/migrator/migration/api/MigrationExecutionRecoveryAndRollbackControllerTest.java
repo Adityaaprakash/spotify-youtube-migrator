@@ -11,6 +11,7 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.dto.RecoverExecutionApiRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.RollbackExecutionApiRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
+import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationOrchestrator;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
 import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
 import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
@@ -72,6 +73,9 @@ class MigrationExecutionRecoveryAndRollbackControllerTest {
 
     @MockBean
     private MigrationExecutionStateService executionStateService;
+
+    @MockBean
+    private ApprovedMigrationOrchestrator migrationOrchestrator;
 
     @MockBean
     private UserService userService;

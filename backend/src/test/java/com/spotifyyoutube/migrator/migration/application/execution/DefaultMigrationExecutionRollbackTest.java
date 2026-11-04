@@ -159,12 +159,24 @@ class DefaultMigrationExecutionRollbackTest {
         executionId = UUID.randomUUID();
         execution = new MigrationExecution(testUser, reviewSession, approvedContext, "yt_pl_target", null);
         execution.setId(executionId);
+        for (ExecutionTrackRecord tr : execution.getTrackRecords()) {
+            tr.setId(UUID.randomUUID());
+        }
 
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
         when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
         when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any())).thenReturn(1);
-        when(trackRecordRepository.claimTrackRollingBack(any(), any())).thenReturn(1);
+        when(trackRecordRepository.claimTrackRollingBack(any(), any())).thenAnswer(invocation -> {
+            UUID trackId = invocation.getArgument(0);
+            for (ExecutionTrackRecord tr : execution.getTrackRecords()) {
+                if (tr.getId().equals(trackId) && tr.getStatus() == ExecutionTrackStatus.ADDED) {
+                    tr.markRollingBack();
+                    return 1;
+                }
+            }
+            return 0;
+        });
         when(trackRecordRepository.save(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
         when(trackRecordRepository.saveAndFlush(any(ExecutionTrackRecord.class))).thenAnswer(i -> i.getArgument(0));
     }

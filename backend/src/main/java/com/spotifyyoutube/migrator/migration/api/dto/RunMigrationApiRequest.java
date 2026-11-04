@@ -25,4 +25,15 @@ public record RunMigrationApiRequest(
         String targetPlaylistTitle,
         String targetPlaylistDescription,
         Boolean isPrivate
-) {}
+) {
+
+    /**
+     * Convenience constructor accepting only the required reviewSessionId.
+     *
+     * @param reviewSessionId unique review session identifier
+     */
+    public RunMigrationApiRequest(UUID reviewSessionId) {
+        this(reviewSessionId, null, null, null, null, null);
+    }
+}
+

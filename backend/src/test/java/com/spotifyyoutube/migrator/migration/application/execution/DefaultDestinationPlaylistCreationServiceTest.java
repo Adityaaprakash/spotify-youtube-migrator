@@ -93,7 +93,6 @@ class DefaultDestinationPlaylistCreationServiceTest {
         @DisplayName("Successfully creates destination playlist with validated metadata and zero track insertions")
         void createDestinationPlaylist_Success() {
             when(executionService.prepareExecution(request, userId)).thenReturn(validContext);
-            when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
 
             DestinationPlaylist createdPlaylist = new DestinationPlaylist(
                     "PL_created_999",
@@ -138,7 +137,6 @@ class DefaultDestinationPlaylistCreationServiceTest {
         void createDestinationPlaylist_ConvenienceMethod_Success() {
             when(executionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
                     .thenReturn(validContext);
-            when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
 
             DestinationPlaylist createdPlaylist = new DestinationPlaylist(
                     "PL_conv_123",
@@ -162,7 +160,6 @@ class DefaultDestinationPlaylistCreationServiceTest {
         @DisplayName("Falls back to standard URL construction if provider returns null url")
         void createDestinationPlaylist_FallbackUrl() {
             when(executionService.prepareExecution(request, userId)).thenReturn(validContext);
-            when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
 
             DestinationPlaylist createdPlaylist = new DestinationPlaylist(
                     "PL_nourl_456",

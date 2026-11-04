@@ -10,6 +10,8 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.Desti
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
+import com.spotifyyoutube.migrator.matching.engine.MatchDecision;
+import com.spotifyyoutube.migrator.migration.application.plan.PlanTrackClassification;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
@@ -18,8 +20,6 @@ import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrack
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
 import com.spotifyyoutube.migrator.migration.progress.domain.MigrationProgressSnapshot;
-import com.spotifyyoutube.migrator.migration.review.domain.CandidateDecision;
-import com.spotifyyoutube.migrator.migration.review.domain.MatchCandidate;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
@@ -89,28 +89,48 @@ public class QueuedMigrationDispatcherIT {
         testUser = userRepository.save(new User("queued-it-" + UUID.randomUUID() + "@example.com"));
 
         testSession = new ReviewSession(testUser, "sp_pl_" + UUID.randomUUID(), "Queued Dispatcher PL", UUID.randomUUID());
-        testSession.setStatus(ReviewSessionStatus.COMPLETED);
-        testSession = reviewSessionRepository.save(testSession);
 
         // Add 2 approved review tracks
-        ReviewTrack track0 = new ReviewTrack(testSession, 0, "sp_t0", "Track 0", "Artist", Duration.ofMinutes(3), "alb0");
-        MatchCandidate c0 = new MatchCandidate("yt_t0", "Track 0 (YT)", "Channel", Duration.ofMinutes(3), 0.95);
-        track0.addCandidate(c0);
-        track0.applyDecision(CandidateDecision.APPROVE, c0.getId(), ReviewDecisionSource.AUTOMATIC, "High match");
+        ReviewTrack track0 = new ReviewTrack();
+        track0.setPosition(0);
+        track0.setSourceTrackId("sp_t0");
+        track0.setSourceTitle("Track 0");
+        track0.setSourceArtist("Artist");
+        track0.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        track0.setOriginalCandidateId("yt_t0");
+        track0.setOriginalCandidateTitle("Track 0 (YT)");
+        track0.setOriginalCandidateChannel("Channel");
+        track0.setOriginalCandidateDurationMs(Duration.ofMinutes(3).toMillis());
+        track0.setOriginalMatchScore(0.95);
+        track0.setOriginalMatchDecision(MatchDecision.MATCH);
+        track0.acceptOriginalMatch();
+        testSession.addTrack(track0);
 
-        ReviewTrack track1 = new ReviewTrack(testSession, 1, "sp_t1", "Track 1", "Artist", Duration.ofMinutes(3), "alb1");
-        MatchCandidate c1 = new MatchCandidate("yt_t1", "Track 1 (YT)", "Channel", Duration.ofMinutes(3), 0.90);
-        track1.addCandidate(c1);
-        track1.applyDecision(CandidateDecision.APPROVE, c1.getId(), ReviewDecisionSource.AUTOMATIC, "High match");
+        ReviewTrack track1 = new ReviewTrack();
+        track1.setPosition(1);
+        track1.setSourceTrackId("sp_t1");
+        track1.setSourceTitle("Track 1");
+        track1.setSourceArtist("Artist");
+        track1.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        track1.setOriginalCandidateId("yt_t1");
+        track1.setOriginalCandidateTitle("Track 1 (YT)");
+        track1.setOriginalCandidateChannel("Channel");
+        track1.setOriginalCandidateDurationMs(Duration.ofMinutes(3).toMillis());
+        track1.setOriginalMatchScore(0.90);
+        track1.setOriginalMatchDecision(MatchDecision.MATCH);
+        track1.acceptOriginalMatch();
+        testSession.addTrack(track1);
 
+        testSession.setStatus(ReviewSessionStatus.COMPLETED);
+        testSession = reviewSessionRepository.save(testSession);
         reviewTrackRepository.saveAll(List.of(track0, track1));
 
         // Mock MusicDestination behavior
         when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
         when(musicDestination.createPlaylist(eq(testUser.getId()), any(CreateDestinationPlaylistRequest.class)))
-                .thenReturn(new DestinationPlaylist("yt_pl_created_123", "Queued Dispatcher PL", "https://music.youtube.com/playlist?list=yt_pl_created_123", Platform.YOUTUBE));
+                .thenReturn(new DestinationPlaylist("yt_pl_created_123", "Queued Dispatcher PL", "Queued Dispatcher PL Description", "private", "https://music.youtube.com/playlist?list=yt_pl_created_123", Platform.YOUTUBE));
 
-        when(musicDestination.insertTrack(eq(testUser.getId()), any(AddTrackToDestinationPlaylistRequest.class)))
+        when(musicDestination.addTrackToPlaylist(eq(testUser.getId()), eq("yt_pl_created_123"), any(AddTrackToDestinationPlaylistRequest.class)))
                 .thenReturn(new DestinationPlaylistItem("item_yt_" + UUID.randomUUID(), "yt_pl_created_123", "yt_t", 0));
     }
 
@@ -148,7 +168,7 @@ public class QueuedMigrationDispatcherIT {
         assertThat(completedExecution.getFailedInsertions()).isEqualTo(0);
 
         // Verify tracks were inserted via MusicDestination
-        verify(musicDestination, times(2)).insertTrack(eq(userId), any());
+        verify(musicDestination, times(2)).addTrackToPlaylist(eq(userId), eq("yt_pl_created_123"), any());
 
         // Verify track records persisted in PostgreSQL are ADDED
         List<ExecutionTrackRecord> tracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);

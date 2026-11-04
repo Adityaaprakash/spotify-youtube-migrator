@@ -9,6 +9,7 @@ import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.dto.ReconcileExecutionApiRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
+import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationOrchestrator;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
 import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
 import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
@@ -70,6 +71,9 @@ class MigrationExecutionReconciliationControllerTest {
 
     @MockBean
     private MigrationExecutionStateService executionStateService;
+
+    @MockBean
+    private ApprovedMigrationOrchestrator migrationOrchestrator;
 
     @MockBean
     private UserService userService;

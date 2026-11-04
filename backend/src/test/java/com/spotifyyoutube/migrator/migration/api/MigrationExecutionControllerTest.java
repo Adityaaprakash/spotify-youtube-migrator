@@ -13,6 +13,7 @@ import com.spotifyyoutube.migrator.migration.api.dto.InitializeExecutionRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.InsertTracksRequest;
 import com.spotifyyoutube.migrator.migration.api.dto.ValidateExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
+import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationOrchestrator;
 import com.spotifyyoutube.migrator.migration.application.execution.DestinationPlaylistCreationService;
 import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
 import com.spotifyyoutube.migrator.migration.application.execution.OrderedTrackInsertionService;
@@ -82,6 +83,9 @@ class MigrationExecutionControllerTest {
 
     @MockBean
     private MigrationExecutionStateService executionStateService;
+
+    @MockBean
+    private ApprovedMigrationOrchestrator migrationOrchestrator;
 
     @MockBean
     private UserService userService;

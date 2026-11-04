@@ -9,6 +9,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Appr
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionRollbackSummary;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationError;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionValidationException;
@@ -366,7 +367,9 @@ class ApprovedMigrationOrchestratorTest {
                     .thenThrow(new ResourceNotFoundException("No existing execution"));
 
             DestinationPlaylistCreationResult playlistResult = new DestinationPlaylistCreationResult(
-                    "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Target Playlist", Instant.now()
+                    sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target",
+                    "Target Playlist", "Description", true, 2, Instant.now()
             );
             when(playlistCreationService.createDestinationPlaylist(request, userId)).thenReturn(playlistResult);
 
@@ -407,7 +410,7 @@ class ApprovedMigrationOrchestratorTest {
             MigrationExecutionSummary result = orchestrator.prepareQueuedMigration(request, userId);
 
             assertThat(result.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
-            verify(playlistCreationService, never()).createDestinationPlaylist(any(), any());
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
             verify(executionStateService, never()).initializeQueuedExecution(any(), any());
         }
 
@@ -454,8 +457,8 @@ class ApprovedMigrationOrchestratorTest {
         void prepareQueuedMigrationRejectsWhenValidationFails() {
             when(executionService.validateExecution(request, userId))
                     .thenReturn(ExecutionValidationResult.invalid(List.of(
-                            new com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationError(
-                                    ValidationFailureCode.INCOMPLETE_REVIEW, "Review not complete", null
+                            ExecutionValidationError.sessionLevel(
+                                    ValidationFailureCode.INCOMPLETE_REVIEW, "Review not complete"
                             )
                     )));
 
@@ -463,7 +466,7 @@ class ApprovedMigrationOrchestratorTest {
                     .isInstanceOf(MigrationExecutionValidationException.class)
                     .hasMessageContaining("validation failed");
 
-            verify(playlistCreationService, never()).createDestinationPlaylist(any(), any());
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
         }
 
         @Test

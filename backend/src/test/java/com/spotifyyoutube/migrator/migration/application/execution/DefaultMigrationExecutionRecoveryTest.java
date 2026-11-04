@@ -154,6 +154,9 @@ class DefaultMigrationExecutionRecoveryTest {
         executionId = UUID.randomUUID();
         execution = new MigrationExecution(testUser, reviewSession, approvedContext, "yt_pl_target", null);
         execution.setId(executionId);
+        for (ExecutionTrackRecord tr : execution.getTrackRecords()) {
+            tr.setId(UUID.randomUUID());
+        }
 
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));

@@ -1,6 +1,8 @@
 package com.spotifyyoutube.migrator.migration.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.spotifyyoutube.migrator.common.config.SecurityConfig;
+import com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.domain.User;

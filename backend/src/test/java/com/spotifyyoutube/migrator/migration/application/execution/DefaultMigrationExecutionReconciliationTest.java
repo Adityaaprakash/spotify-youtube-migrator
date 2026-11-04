@@ -109,13 +109,10 @@ class DefaultMigrationExecutionReconciliationTest {
         userId = UUID.randomUUID();
         user = new User("user@example.com");
         user.setDisplayName("Test User");
-        try {
-            var idField = com.spotifyyoutube.migrator.common.domain.BaseEntity.class.getDeclaredField("id");
-            idField.setAccessible(true);
-            idField.set(user, userId);
-        } catch (Exception ignored) {}
+        user.setId(userId);
 
         session = new ReviewSession(user, "sp_pl_1", "Source Playlist", UUID.randomUUID());
+        session.setId(UUID.randomUUID());
         ApprovedTrack track1 = new ApprovedTrack(0, "sp_1", "Track One", "Artist", "yt_vid_1", "Title 1", "Channel", Duration.ofSeconds(200), ReviewDecisionSource.AUTOMATIC, 0);
         ApprovedTrack track2 = new ApprovedTrack(1, "sp_2", "Track Two", "Artist", "yt_vid_2", "Title 2", "Channel", Duration.ofSeconds(180), ReviewDecisionSource.AUTOMATIC, 1);
 
@@ -136,7 +133,11 @@ class DefaultMigrationExecutionReconciliationTest {
         );
 
         execution = new MigrationExecution(user, session, context, DEST_PLAYLIST_ID, "https://youtube.com/playlist?list=" + DEST_PLAYLIST_ID);
-        executionId = execution.getId();
+        executionId = UUID.randomUUID();
+        execution.setId(executionId);
+        for (ExecutionTrackRecord tr : execution.getTrackRecords()) {
+            tr.setId(UUID.randomUUID());
+        }
 
         when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
         when(executionRepository.findByIdAndUserId(executionId, userId)).thenReturn(Optional.of(execution));

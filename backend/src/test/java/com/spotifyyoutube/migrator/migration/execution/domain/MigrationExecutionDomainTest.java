@@ -96,7 +96,7 @@ class MigrationExecutionDomainTest {
             );
 
             assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
-            assertThat(execution.getDestinationPlatform()).isEqualTo("YOUTUBE");
+            assertThat(execution.getDestinationPlatform()).isEqualTo(Platform.YOUTUBE);
             assertThat(execution.getDestinationPlaylistId()).isEqualTo("PL_youtube_123");
             assertThat(execution.getDestinationPlaylistUrl()).contains("https://music.youtube.com/playlist?list=PL_youtube_123");
             assertThat(execution.getSourcePlaylistTitle()).isEqualTo("My Spotify Playlist");
@@ -418,6 +418,7 @@ class MigrationExecutionDomainTest {
             // Server crashed while r1 was in ADDING state
             ExecutionTrackRecord r1 = execution.getTrackRecords().get(1);
             r1.markAdding();
+            r1.setStartedAt(Instant.now().minus(Duration.ofMinutes(10)));
 
             // When application restarts, stale crash state is reconciled:
             boolean reconciled = execution.reconcileStaleCrashState();

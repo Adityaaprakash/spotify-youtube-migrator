@@ -84,8 +84,20 @@ class DefaultMigrationExecutionStateServiceTest {
         });
 
         when(executionRepository.claimExecutionRunningWithVersion(any(), any(), anyLong(), any())).thenReturn(1);
-        when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
-        when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> i.getArgument(0));
+        when(executionRepository.save(any(MigrationExecution.class))).thenAnswer(i -> {
+            MigrationExecution exec = i.getArgument(0);
+            if (exec.getId() == null) {
+                exec.setId(UUID.randomUUID());
+            }
+            return exec;
+        });
+        when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenAnswer(i -> {
+            MigrationExecution exec = i.getArgument(0);
+            if (exec.getId() == null) {
+                exec.setId(UUID.randomUUID());
+            }
+            return exec;
+        });
 
         service = new DefaultMigrationExecutionStateService(
                 executionRepository,
@@ -725,7 +737,7 @@ class DefaultMigrationExecutionStateServiceTest {
             when(executionService.prepareExecution(sessionId, userId)).thenReturn(approvedContext);
             when(reviewSessionRepository.findById(sessionId)).thenReturn(Optional.of(reviewSession));
             when(musicDestination.getPlaylist(userId, "PL_dest_123"))
-                    .thenReturn(new DestinationPlaylist("PL_dest_123", "PL Title", "url", 0, Instant.now()));
+                    .thenReturn(new DestinationPlaylist("PL_dest_123", "PL Title", "Description", "private", "https://music.youtube.com/playlist?list=PL_dest_123", Platform.YOUTUBE));
 
             MigrationExecutionSummary summary = service.initializeQueuedExecution(req, userId);
 

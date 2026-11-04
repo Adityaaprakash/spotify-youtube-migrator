@@ -83,25 +83,7 @@ public class AtomicQueuedExecutionClaimIT {
         );
 
         MigrationExecution execution = new MigrationExecution(testUser, session, context, "PL_dest_" + UUID.randomUUID(), "url");
-        if (initialStatus == MigrationExecutionStatus.QUEUED) {
-            execution.queueForExecution();
-        } else if (initialStatus == MigrationExecutionStatus.RUNNING) {
-            execution.queueForExecution();
-            execution.claimExecution();
-        } else if (initialStatus == MigrationExecutionStatus.COMPLETED) {
-            execution.queueForExecution();
-            execution.claimExecution();
-            execution.completeExecution(1, 0, 0, 0);
-        } else if (initialStatus == MigrationExecutionStatus.FAILED) {
-            execution.queueForExecution();
-            execution.claimExecution();
-            execution.failExecution(0, 1, 0, 0);
-        } else if (initialStatus == MigrationExecutionStatus.RECOVERY_REQUIRED) {
-            execution.queueForExecution();
-            execution.claimExecution();
-            execution.markRecoveryRequired(0, 0, 1, 0);
-        }
-
+        execution.setStatus(initialStatus);
         return executionRepository.saveAndFlush(execution);
     }
 

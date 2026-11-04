@@ -100,7 +100,7 @@ public class ActiveMigrationProgressIT {
         );
 
         MigrationExecution execution = new MigrationExecution(testUser, session, context, "PL_active_progress", "url");
-        execution.queueForExecution();
+        execution.markQueued();
         execution.claimExecution(); // Transition to RUNNING
         testExecution = executionRepository.saveAndFlush(execution);
     }
@@ -147,7 +147,8 @@ public class ActiveMigrationProgressIT {
             // Once all tracks are processed, complete the execution
             txTemplate.execute(status -> {
                 MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                exec.completeExecution(50, 6, 0, 4);
+                exec.setStatus(MigrationExecutionStatus.COMPLETED);
+                exec.reconcileCounts();
                 executionRepository.saveAndFlush(exec);
                 return null;
             });

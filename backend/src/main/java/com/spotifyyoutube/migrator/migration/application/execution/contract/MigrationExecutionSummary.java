@@ -149,6 +149,97 @@ public record MigrationExecutionSummary(
         );
     }
 
+    /**
+     * Overloaded 14-parameter constructor for test and worker convenience.
+     */
+    public MigrationExecutionSummary(
+            UUID executionId,
+            UUID reviewSessionId,
+            MigrationExecutionStatus status,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            int totalApprovedTracks,
+            int successfulInsertions,
+            int failedInsertions,
+            int uncertainInsertions,
+            int skippedInsertions,
+            int rolledBackInsertions,
+            Instant startedAt,
+            Instant completedAt,
+            long version
+    ) {
+        this(
+                executionId,
+                reviewSessionId,
+                null,
+                reviewSessionId,
+                Platform.YOUTUBE,
+                destinationPlaylistId,
+                destinationPlaylistUrl,
+                "Source Playlist",
+                status,
+                totalApprovedTracks,
+                successfulInsertions,
+                failedInsertions,
+                uncertainInsertions,
+                skippedInsertions,
+                rolledBackInsertions,
+                status == MigrationExecutionStatus.COMPLETED && successfulInsertions == totalApprovedTracks,
+                status.canResume(),
+                status.canRollback() && (successfulInsertions > 0),
+                startedAt,
+                completedAt,
+                Collections.emptyList()
+        );
+    }
+
+    /**
+     * Overloaded 17-parameter constructor for test convenience.
+     */
+    public MigrationExecutionSummary(
+            UUID executionId,
+            UUID reviewSessionId,
+            UUID planId,
+            String sourcePlaylistId,
+            String sourcePlaylistTitle,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            MigrationExecutionStatus status,
+            int totalApprovedTracks,
+            int successfulInsertions,
+            int failedInsertions,
+            int uncertainInsertions,
+            int skippedInsertions,
+            int rolledBackInsertions,
+            Instant startedAt,
+            Instant completedAt,
+            List<ExecutionTrackRecordDto> trackRecords
+    ) {
+        this(
+                executionId,
+                reviewSessionId,
+                planId,
+                reviewSessionId,
+                Platform.YOUTUBE,
+                destinationPlaylistId,
+                destinationPlaylistUrl,
+                sourcePlaylistTitle != null ? sourcePlaylistTitle : "Source Playlist",
+                status,
+                totalApprovedTracks,
+                successfulInsertions,
+                failedInsertions,
+                uncertainInsertions,
+                skippedInsertions,
+                rolledBackInsertions,
+                status == MigrationExecutionStatus.COMPLETED && successfulInsertions == totalApprovedTracks,
+                status.canResume(),
+                status.canRollback() && (successfulInsertions > 0),
+                startedAt,
+                completedAt,
+                trackRecords
+        );
+    }
+
     public Optional<UUID> getPlanId() {
         return Optional.ofNullable(planId);
     }

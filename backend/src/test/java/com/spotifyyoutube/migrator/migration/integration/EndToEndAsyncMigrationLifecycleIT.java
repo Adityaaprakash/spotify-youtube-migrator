@@ -4,21 +4,22 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.identity.repository.UserRepository;
+import com.spotifyyoutube.migrator.matching.engine.MatchDecision;
 import com.spotifyyoutube.migrator.migration.api.dto.RunMigrationApiRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
+import com.spotifyyoutube.migrator.migration.application.plan.PlanTrackClassification;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
-import com.spotifyyoutube.migrator.migration.review.domain.CandidateDecision;
-import com.spotifyyoutube.migrator.migration.review.domain.MatchCandidate;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrack;
+import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrackStatus;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewTrackRepository;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
@@ -97,29 +98,51 @@ public class EndToEndAsyncMigrationLifecycleIT {
         bob = userRepository.save(new User("bob@example.com"));
 
         sessionAlice = new ReviewSession(alice, "sp_pl_alice", "Alice Favs", UUID.randomUUID());
-        sessionAlice.setStatus(ReviewSessionStatus.COMPLETED);
-        sessionAlice = reviewSessionRepository.save(sessionAlice);
 
         // Track 0
-        ReviewTrack t0 = new ReviewTrack(sessionAlice, 0, "sp0", "Song 0", "Artist 0", Duration.ofMinutes(3), "Alb0");
-        MatchCandidate c0 = new MatchCandidate("yt0", "Song 0 (Audio)", "Channel", Duration.ofMinutes(3), 0.98);
-        t0.addCandidate(c0);
-        t0.applyDecision(CandidateDecision.APPROVE, c0.getId(), ReviewDecisionSource.AUTOMATIC, "Match");
+        ReviewTrack t0 = new ReviewTrack();
+        t0.setPosition(0);
+        t0.setSourceTrackId("sp0");
+        t0.setSourceTitle("Song 0");
+        t0.setSourceArtist("Artist 0");
+        t0.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        t0.setOriginalCandidateId("yt0");
+        t0.setOriginalCandidateTitle("Song 0 (Audio)");
+        t0.setOriginalCandidateChannel("Channel");
+        t0.setOriginalCandidateDurationMs(Duration.ofMinutes(3).toMillis());
+        t0.setOriginalMatchScore(0.98);
+        t0.setOriginalMatchDecision(MatchDecision.MATCH);
+        t0.acceptOriginalMatch();
+        sessionAlice.addTrack(t0);
 
         // Track 1
-        ReviewTrack t1 = new ReviewTrack(sessionAlice, 1, "sp1", "Song 1", "Artist 1", Duration.ofMinutes(4), "Alb1");
-        MatchCandidate c1 = new MatchCandidate("yt1", "Song 1 (Audio)", "Channel", Duration.ofMinutes(4), 0.95);
-        t1.addCandidate(c1);
-        t1.applyDecision(CandidateDecision.APPROVE, c1.getId(), ReviewDecisionSource.USER_SELECTED, "Match");
+        ReviewTrack t1 = new ReviewTrack();
+        t1.setPosition(1);
+        t1.setSourceTrackId("sp1");
+        t1.setSourceTitle("Song 1");
+        t1.setSourceArtist("Artist 1");
+        t1.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        t1.setOriginalCandidateId("yt1");
+        t1.setOriginalCandidateTitle("Song 1 (Audio)");
+        t1.setOriginalCandidateChannel("Channel");
+        t1.setOriginalCandidateDurationMs(Duration.ofMinutes(4).toMillis());
+        t1.setOriginalMatchScore(0.95);
+        t1.setOriginalMatchDecision(MatchDecision.MATCH);
+        t1.acceptOriginalMatch();
+        t1.setDecisionSource(ReviewDecisionSource.USER_SELECTED);
+        t1.setReviewStatus(ReviewTrackStatus.USER_SELECTED);
+        sessionAlice.addTrack(t1);
 
+        sessionAlice.setStatus(ReviewSessionStatus.COMPLETED);
+        sessionAlice = reviewSessionRepository.save(sessionAlice);
         reviewTrackRepository.saveAll(List.of(t0, t1));
 
         // Mock MusicDestination
         when(musicDestination.getPlatform()).thenReturn(Platform.YOUTUBE);
         when(musicDestination.createPlaylist(eq(alice.getId()), any(CreateDestinationPlaylistRequest.class)))
-                .thenReturn(new DestinationPlaylist("yt_pl_alice_1", "Alice Favs", "https://music.youtube.com/playlist?list=yt_pl_alice_1", Platform.YOUTUBE));
+                .thenReturn(new DestinationPlaylist("yt_pl_alice_1", "Alice Favs", "Alice Favs Description", "private", "https://music.youtube.com/playlist?list=yt_pl_alice_1", Platform.YOUTUBE));
 
-        when(musicDestination.insertTrack(eq(alice.getId()), any(AddTrackToDestinationPlaylistRequest.class)))
+        when(musicDestination.addTrackToPlaylist(eq(alice.getId()), eq("yt_pl_alice_1"), any(AddTrackToDestinationPlaylistRequest.class)))
                 .thenReturn(new DestinationPlaylistItem("item_yt_" + UUID.randomUUID(), "yt_pl_alice_1", "yt_vid", 0));
     }
 
@@ -129,7 +152,7 @@ public class EndToEndAsyncMigrationLifecycleIT {
     void endToEndAsyncLifecycleSuccessfulExecution() throws Exception {
         RunMigrationApiRequest request = new RunMigrationApiRequest(
                 sessionAlice.getId(),
-                null, null, null, null, null, null
+                null, null, null, null, null
         );
 
         // 1. Submit migration -> Expect 202 Accepted with Location header
@@ -193,7 +216,7 @@ public class EndToEndAsyncMigrationLifecycleIT {
         // Create an execution owned by Alice
         RunMigrationApiRequest request = new RunMigrationApiRequest(
                 sessionAlice.getId(),
-                null, null, null, null, null, null
+                null, null, null, null, null
         );
 
         // Attempt submission by Bob for Alice's review session -> 404 Not Found (Anti-IDOR)

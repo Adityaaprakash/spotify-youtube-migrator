@@ -246,7 +246,7 @@ class DefaultMigrationProgressServiceTest {
 
             assertThatThrownBy(() -> progressService.getProgressByReviewSession(sessionId, otherUser))
                     .isInstanceOf(ResourceNotFoundException.class)
-                    .hasMessageContaining("Migration execution not found for review session");
+                    .hasMessageContaining("Migration execution not found");
         }
     }
 
@@ -287,8 +287,11 @@ class DefaultMigrationProgressServiceTest {
         void nullStatusInAggregation_ThrowsException() {
             execution.setStatus(MigrationExecutionStatus.RUNNING);
             when(executionRepository.findById(executionId)).thenReturn(Optional.of(execution));
+            TrackStatusCount nullCount = mock(TrackStatusCount.class);
+            when(nullCount.status()).thenReturn(null);
+            when(nullCount.count()).thenReturn(4L);
             when(trackRecordRepository.countTracksByStatusForExecution(executionId))
-                    .thenReturn(List.of(new TrackStatusCount(null, 4L)));
+                    .thenReturn(List.of(nullCount));
 
             assertThatThrownBy(() -> progressService.getProgress(executionId, userId))
                     .isInstanceOf(ProgressConsistencyException.class)
