@@ -327,6 +327,23 @@ In Phase 13B, the failure classification engine was implemented in `com.spotifyy
 7. **`ExternalProviderException`**: Extended with a backward-compatible `providerReason` field and getter.
 8. **Unit Test Coverage**: Comprehensive test suites in `RetryAfterParserTest` (20 tests) and `ProviderFailureClassifierTest` (25 tests) verifying all parsing formats, error categories, edge cases, and credential sanitization.
 
+### 8.2 Implemented Phase 13C Retry Policy & Backoff Engine Subsystem
+In Phase 13C, the retry decision and backoff engine was implemented in `com.spotifyyoutube.migrator.migration.reliability.policy`:
+1. **`RetryOperationType` (Enum)**: Distinguishes external mutating write operations (`DESTINATION_PLAYLIST_CREATION`, `TRACK_INSERTION`) whose transport failures are ambiguous from idempotent read queries (`PROVIDER_READ`).
+2. **`ExecutionTier` (Enum)**: Implements the strict 2.0-second execution boundary (`IN_FLIGHT`, `DEFERRED`, `NONE`).
+3. **`DelaySource` (Enum)**: Tracks delay provenance (`PROVIDER_RETRY_AFTER`, `FULL_JITTER_BACKOFF`, `NONE`).
+4. **`RetryDecisionType` (Enum)**: Structured decision outcomes (`RETRY_PERMITTED`, `DEFERRED_QUOTA_RESET`, `RECONCILIATION_REQUIRED`, `BUDGET_EXHAUSTED`, `NON_RETRYABLE`, `REQUIRES_REAUTHORIZATION`).
+5. **`RetryBudget` (Record)**: Immutable value object representing total attempt accounting (`totalAttempts`, default: 3) where `maxAttempts` strictly includes the initial attempt (`attempt 1`) plus at most two retries (`attempt 2` and `3`).
+6. **`BackoffCalculator` (Class)**: Implements AWS Full Jitter exponential backoff: `delay = random(0, min(cap, baseDelay * 2^attempt))`. Default base delay 500 ms, default cap 30 s. Fully overflow-safe against large attempt values (up to $2^{62}$), guarantees non-negative lower bound, and supports an injectable `DoubleSupplier` for deterministic unit testing.
+7. **`RetryDecision` (Record)**: Immutable decision outcome containing authorization, tier, delay, delay source, budget, and diagnostic rationale.
+8. **`RetryPolicy` (Interface) & `DefaultRetryPolicy` (Class)**:
+   - Consumes Phase 13B `ProviderFailureClassification` without duplicating classification logic.
+   - Enforces RFC 9110 precedence: valid provider `Retry-After` is respected and never shortened by local caps.
+   - Two-tier execution strategy: delay $\le 2,000\text{ ms}$ on initial attempt retry authorizes `IN_FLIGHT` micro-retry; delay $> 2,000\text{ ms}$ or attempt count $> 1$ requires `DEFERRED` worker thread release.
+   - Ambiguous write protection: 5xx server errors or timeouts on mutating operations (`DESTINATION_PLAYLIST_CREATION`, `TRACK_INSERTION`) yield `RECONCILIATION_REQUIRED` and `DEFERRED` to prevent duplicate remote mutations.
+   - Quota deferral: `quotaExceeded` (`DEFERRED_RESET`) is deferred until quota reset without retrying in the active window.
+9. **Unit Test Coverage**: Comprehensive unit test suites in `BackoffCalculatorTest` (9 tests), `RetryBudgetTest` (6 tests), and `RetryPolicyTest` (17 tests) covering all 32 required test scenarios.
+
 ---
 
 ## 9. API Idempotency Contract & Lifecycle Retention
@@ -437,7 +454,7 @@ graph TD
 | Subphase | Deliverables & Scope | Dependencies |
 |---|---|---|
 | **13B** | [COMPLETE & TESTED] Provider Failure Classifier: parses YouTube `error.errors[].reason` (separating `quotaExceeded` vs `userRateLimitExceeded`), HTTP 429 `Retry-After` parsing (delta-seconds and HTTP-date). Implemented in `com.spotifyyoutube.migrator.migration.reliability.classification`. | 13A |
-| **13C** | Retry Engine: AWS Full Jitter algorithm, thread-release threshold ($> 2\text{ s}$), bounded in-flight micro-retry context. | 13B |
+| **13C** | [COMPLETE & TESTED] Retry Policy & Backoff Engine: AWS Full Jitter algorithm with overflow protection, thread-release threshold ($> 2\text{ s}$), bounded in-flight micro-retry context, RFC 9110 Retry-After precedence, ambiguous write protection, quota deferral. Implemented in `com.spotifyyoutube.migrator.migration.reliability.policy`. | 13B |
 | **13D** | Durable Lease & Atomic Scheduler: Flyway V10, `lease_owner`, `fencing_token`, 60s lease with 15s heartbeat, atomic claim query with `SKIP LOCKED`. | 13C |
 | **13E** | API Idempotency: `migration_idempotency_keys` table, canonical `v1:SHA-256` fingerprinting, replay filters, terminal-only 72h TTL. | 13A |
 | **13F** | External Operation Safety: Destination playlist creation with `[ref: migrator-op:<id>]` marker and pre-allocation intent; track insertion multi-stage reconciliation. | 13D, 13E |

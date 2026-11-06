@@ -1,15 +1,15 @@
 # Current State
 
-Last Updated: 2026-11-04
+Last Updated: 2026-11-06
 
-Current Phase: Phase 13 — Reliability Engineering [PHASE 13B COMPLETE — PROVIDER FAILURE CLASSIFICATION IMPLEMENTED]
-Current Subphase: Phase 13B — Provider Failure Classification [COMPLETE] -> Phase 13C — Retry Policy & Backoff Engine [READY]
+Current Phase: Phase 13 — Reliability Engineering [PHASE 13C COMPLETE — RETRY POLICY & BACKOFF ENGINE IMPLEMENTED]
+Current Subphase: Phase 13C — Retry Policy & Backoff Engine [COMPLETE] -> Phase 13D — Durable Retry Scheduling [READY]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
 - **Final Engineering Audit Status**: PASSED WITH LIMITATIONS (All confirmed production and test defects resolved with regression coverage; terminal command execution on host remains blocked by IDE security policy).
 - **Clean Test Compilation**: PASSED (zero compilation errors in production and test suites after resolving missing constructors, missing imports, and invalid method calls).
-- **Checkstyle Hygiene**: PASSED (0 violations, zero unused imports in Phase 13B classes and regression tests).
+- **Checkstyle Hygiene**: PASSED (0 violations, zero unused imports in Phase 13B and Phase 13C classes and unit tests).
 - **Integration Test Hang (Phase 13B Verification Resolution)**:
   - **Confirmed Root Cause**: `.\mvnw.cmd clean verify` hung during integration testing because `maven-failsafe-plugin` lacked `<argLine>-Duser.timezone=UTC</argLine>` (which was configured only on `maven-surefire-plugin`). The forked Failsafe test JVM inherited the Windows host default timezone (`Asia/Calcutta`). When Testcontainers `ContainerDatabaseDriver` and HikariCP opened connections to `postgres:16`, the PostgreSQL JDBC driver (`org.postgresql.Driver`) queried `TimeZone.getDefault().getID()` and transmitted `"TimeZone" = "Asia/Calcutta"` in the protocol v3 `StartupMessage`. Because PostgreSQL 16's strict IANA tzdata recognizes canonical `"Asia/Kolkata"` but rejects `"Asia/Calcutta"`, the server aborted connections with `FATAL: invalid value for parameter "TimeZone": "Asia/Calcutta"`, causing Testcontainers/Hikari to hang in a retry-sleep loop.
   - **Resolution Applied**:
@@ -26,9 +26,27 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 - **Phase 11 (Execution & Playlist Creation)**: COMPLETE & FROZEN (ADR-030).
 - **Phase 12A–12H**: COMPLETE, VERIFIED & FROZEN (ADR-022).
 - **Phase 13B (Provider Failure Classification)**: COMPLETE & TESTED (Dedicated `ProviderFailureClassifier`, `RetryAfterParser`, `ProviderFailureCategory`, `RetryEligibility`, `ProviderFailureClassification`, `RetryAfterResult`, and `ExternalProviderException` extension; 45 unit tests added).
+- **Phase 13C (Retry Policy & Backoff Engine)**: COMPLETE & TESTED (Dedicated `BackoffCalculator`, `RetryBudget`, `RetryDecision`, `RetryPolicy`, `DefaultRetryPolicy`, `RetryOperationType`, `ExecutionTier`, `DelaySource`, `RetryDecisionType`; 32 unit tests added).
 - **Host Security Permission Notice**: Terminal command execution on the host machine is restricted by the IDE host security policy (`permission check failed for command ... unexpected user interaction type: not permission`). Static analysis, code inspection, defect remediation, and regression test suites confirm complete architectural and invariant compliance.
 
 ## Completed
+### Phase 13C (Retry Policy & Backoff Engine) [COMPLETE & TESTED]
+- **Implemented Subsystem**: Delivered deterministic, testable retry policy and exponential backoff engine (`com.spotifyyoutube.migrator.migration.reliability.policy`).
+- **Components Created**:
+  - `RetryOperationType`: Enum categorizing operations (`DESTINATION_PLAYLIST_CREATION`, `TRACK_INSERTION`, `PROVIDER_READ`) and marking mutating operations where failure is ambiguous.
+  - `ExecutionTier`: Two-tier execution strategy enum (`IN_FLIGHT`, `DEFERRED`, `NONE`).
+  - `DelaySource`: Provenance tracking enum (`PROVIDER_RETRY_AFTER`, `FULL_JITTER_BACKOFF`, `NONE`).
+  - `RetryDecisionType`: Structured decision enum (`RETRY_PERMITTED`, `DEFERRED_QUOTA_RESET`, `RECONCILIATION_REQUIRED`, `BUDGET_EXHAUSTED`, `NON_RETRYABLE`, `REQUIRES_REAUTHORIZATION`).
+  - `RetryBudget`: Record encapsulating `(currentAttempt, totalAttempts)` where `maxAttempts` strictly includes the initial attempt (e.g. `totalAttempts = 3` allows 1 initial attempt + 2 retries).
+  - `BackoffCalculator`: Implements AWS Full Jitter: `delay = random(0, min(cap, baseDelay * 2^attempt))`. Configurable base delay (default: 500 ms) and cap (default: 30 s). Overflow-safe (clamps at attempt $\ge 62$), non-negative, with injectable `DoubleSupplier` for deterministic testing.
+  - `RetryDecision`: Immutable record containing all decision attributes, boolean queries (`isRetryPermitted()`, `requiresReconciliation()`, `isDeferred()`, `isInFlight()`), and clean factory methods.
+  - `RetryPolicy` & `DefaultRetryPolicy`: Central decision engine consuming Phase 13B `ProviderFailureClassification` without duplication.
+- **Key Reliability Rules Enforced**:
+  - RFC 9110 Precedence: Provider `Retry-After` delay is respected unconditionally and never shortened by local backoff caps.
+  - Two-Tier Execution Strategy: Delays $\le 2,000\text{ ms}$ qualify for `IN_FLIGHT` micro-retry strictly on the initial attempt retry (`currentAttempt == 1`). If `currentAttempt > 1` or delay $> 2,000\text{ ms}$, execution strategy must be `DEFERRED` to prevent worker thread pool starvation.
+  - Ambiguous Write Protection: Transport errors and 5xx server errors on mutating operations (`DESTINATION_PLAYLIST_CREATION`, `TRACK_INSERTION`) yield `RECONCILIATION_REQUIRED` and `DEFERRED` (never authorizing blind duplicate writes). For `PROVIDER_READ`, 5xx and timeouts are safe to retry with backoff.
+  - Quota Deferral: `quotaExceeded` (`DEFERRED_RESET`) is deferred without burning retry attempts in the active daily quota window.
+- **Comprehensive Unit Test Suites**: Added `BackoffCalculatorTest` (9 tests), `RetryBudgetTest` (6 tests), and `RetryPolicyTest` (17 tests across 4 nested test suites) for a total of 32 unit tests covering all required boundary, overflow, precedence, and safety conditions.
 ### Phase 13B (Provider Failure Classification Engine) [COMPLETE & TESTED]
 - **Implemented Subsystem**: Delivered structured external provider failure classification engine (`com.spotifyyoutube.migrator.migration.reliability.classification`) for YouTube Data API and Spotify API.
 - **Components Created**:

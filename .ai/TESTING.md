@@ -741,7 +741,49 @@ Implemented and verified (34 dedicated Phase 11H tests across 4 test classes):
     - Anti-IDOR: unauthorized user receives HTTP 404 Not Found on progress polling and submission.
     - Idempotent resubmission returns HTTP 200 OK without creating duplicate playlist.
 
+### Reliability Engineering & Fault Tolerance Testing Scope (Phase 13B & Phase 13C Complete)
+
+Implemented and verified (5 test suites covering Phase 13B provider classification and Phase 13C retry engine):
+- `RetryAfterParserTest` (20 tests):
+  - Delta-seconds parsing: valid positive integers (45s, 0s, 120s), rejection of explicit positive signs (`+45`), negative values (`-10`), decimals (`12.5`), whitespace, and non-numeric garbage.
+  - HTTP-date parsing: RFC-1123, RFC-850, and ASCTIME date formats parsed accurately against injected `Clock`.
+  - Past dates: HTTP dates in the past resolve to `Duration.ZERO`.
+  - Overflow safety: delta-seconds exceeding `Long.MAX_VALUE` fail safely as `INVALID` rather than throwing uncaught exceptions.
+  - Result typing: strongly typed `VALID`, `MISSING`, and `INVALID` variants.
+- `ProviderFailureClassifierTest` (25 tests):
+  - YouTube 403 separation: distinguishes `quotaExceeded` (`DEFERRED_RESET`) from `userRateLimitExceeded` / `rateLimitExceeded` (`RETRYABLE`).
+  - Permission and auth errors: 403 `forbidden` / `insufficientFilePermissions` (`NON_RETRYABLE`), 401 `invalidCredentials` / `tokenExpired` (`REQUIRES_REAUTHORIZATION`).
+  - Resource not found: 404 `videoNotFound` / `playlistNotFound` (`NON_RETRYABLE`).
+  - Server errors: 500, 502, 503, 504 classified as transient server errors (`RETRYABLE`).
+  - Spring `RestClientException`: parses nested response bodies and headers; redacting tokens and secrets from diagnostic messages.
+- `BackoffCalculatorTest` (9 tests):
+  - First retry range: verifies `delay <= baseDelay * 2^1` (0 to 1,000 ms with default 500 ms base).
+  - Exponential growth: verified across multiple attempt levels with fixed random supplier.
+  - Max delay capping: delay never exceeds configured `maxDelay` regardless of high attempt count.
+  - Full Jitter distribution: verifies bounded random variation within `[0, min(cap, baseDelay * 2^attempt)]`.
+  - Zero lower bound: minimum generated delay is non-negative (`Duration.ZERO` or positive).
+  - Overflow safety: massive attempt counts (e.g. 62, 100, 1000) do not cause arithmetic overflow or negative delays (clamped at attempt 62).
+  - Controlled determinism: custom `DoubleSupplier` yields predictable delays.
+  - Invalid configuration rejection: rejects null base delay, non-positive base delay, and cap less than base delay.
+- `RetryBudgetTest` (6 tests):
+  - Initial attempt accounting: `currentAttempt = 1` correctly reports 0 retries consumed and `maxAttempts - 1` remaining retries.
+  - Single-attempt policy: `totalAttempts = 1` allows no subsequent retries; `hasRemainingAttempts()` returns false at attempt 1.
+  - Three-attempt policy (`totalAttempts = 3`): allows 1 initial attempt and at most 2 retries; attempt 3 exhausts budget.
+  - Remaining attempts computation: accurately decrements on each successive attempt.
+  - Next attempt generation: increments attempt count monotonically.
+  - Boundary validation: rejects negative or zero attempt counts and total attempts.
+- `RetryPolicyTest` (17 tests across 4 nested test suites):
+  - Retry eligibility & budget: authorizes retry with budget remaining; rejects when budget exhausted; rejects non-retryable errors; delegates reauthorization; defers quota resets.
+  - Two-tier execution strategy: delays $\le 2,000\text{ ms}$ on attempt 1 qualify for `IN_FLIGHT`; delays $> 2,000\text{ ms}$ or attempt count $> 1$ mandate `DEFERRED`.
+  - Delay calculation & precedence: provider `Retry-After` takes absolute precedence and is never capped by local maximums; fallback to Full Jitter backoff on missing/invalid `Retry-After`; past dates yield zero delay.
+  - Operation-specific safety & reconciliation: mutating operations (`DESTINATION_PLAYLIST_CREATION`, `TRACK_INSERTION`) encountering 5xx server errors or timeouts require `RECONCILIATION_REQUIRED` and `DEFERRED` (preventing blind duplicate writes); idempotent `PROVIDER_READ` allows standard backoff retry.
+
 ## Current Blockers & Status
+
+- **Phase 13 (Reliability Engineering)**: IN PROGRESS (Phases 13A, 13B, 13C Complete).
+  - Implementation & Architecture: Phase 13A architecture audited and approved (ADR-031). Phase 13B provider failure classification engine (`ProviderFailureClassifier`, `RetryAfterParser`, and classification models) implemented and verified across 45 unit tests. Phase 13C retry policy and backoff engine (`DefaultRetryPolicy`, `BackoffCalculator`, `RetryBudget`, `RetryDecision`, `RetryOperationType`, `ExecutionTier`, `DelaySource`, `RetryDecisionType`) implemented and verified across 32 unit tests.
+  - Failsafe Integration Test UTC Fix: Diagnosed and resolved Failsafe Testcontainers PostgreSQL 16 timezone hang via Maven configuration and `options=-c%20timezone=UTC`.
+  - Next Phase: Phase 13D (Durable Retry Scheduling).
 
 - **Phase 12 (Async Migration & Progress)**: COMPLETE & FROZEN (ADR-022).
   - Implementation & Architecture: All 8 subphases (12A–12H) fully implemented and statically verified.
