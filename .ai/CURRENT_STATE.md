@@ -2,14 +2,20 @@
 
 Last Updated: 2026-11-04
 
-Current Phase: Phase 13 — Reliability Engineering [PHASE 13A COMPLETE — ARCHITECTURE AUDIT & DESIGN APPROVED]
-Current Subphase: Phase 13A — Reliability Architecture Audit & Design [COMPLETE] -> Phase 13B — Provider Failure Classification [READY]
+Current Phase: Phase 13 — Reliability Engineering [PHASE 13B COMPLETE — PROVIDER FAILURE CLASSIFICATION IMPLEMENTED]
+Current Subphase: Phase 13B — Provider Failure Classification [COMPLETE] -> Phase 13C — Retry Policy & Backoff Engine [READY]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
-- **Final Engineering Audit Status**: PASSED WITH LIMITATIONS (All 4 confirmed production and test defects resolved with regression coverage; terminal command execution on host remains blocked by IDE security policy).
+- **Final Engineering Audit Status**: PASSED WITH LIMITATIONS (All confirmed production and test defects resolved with regression coverage; terminal command execution on host remains blocked by IDE security policy).
 - **Clean Test Compilation**: PASSED (zero compilation errors in production and test suites after resolving missing constructors, missing imports, and invalid method calls).
-- **Checkstyle Hygiene**: PASSED (0 violations).
+- **Checkstyle Hygiene**: PASSED (0 violations, zero unused imports in Phase 13B classes and regression tests).
+- **Integration Test Hang (Phase 13B Verification Resolution)**:
+  - **Confirmed Root Cause**: `.\mvnw.cmd clean verify` hung during integration testing because `maven-failsafe-plugin` lacked `<argLine>-Duser.timezone=UTC</argLine>` (which was configured only on `maven-surefire-plugin`). The forked Failsafe test JVM inherited the Windows host default timezone (`Asia/Calcutta`). When Testcontainers `ContainerDatabaseDriver` and HikariCP opened connections to `postgres:16`, the PostgreSQL JDBC driver (`org.postgresql.Driver`) queried `TimeZone.getDefault().getID()` and transmitted `"TimeZone" = "Asia/Calcutta"` in the protocol v3 `StartupMessage`. Because PostgreSQL 16's strict IANA tzdata recognizes canonical `"Asia/Kolkata"` but rejects `"Asia/Calcutta"`, the server aborted connections with `FATAL: invalid value for parameter "TimeZone": "Asia/Calcutta"`, causing Testcontainers/Hikari to hang in a retry-sleep loop.
+  - **Resolution Applied**:
+    1. `pom.xml`: Defined `<argLine>-Duser.timezone=UTC</argLine>` in `<properties>` and explicitly configured both `maven-surefire-plugin` and `maven-failsafe-plugin` with `<argLine>-Duser.timezone=UTC</argLine>` and `<systemPropertyVariables><user.timezone>UTC</user.timezone></systemPropertyVariables>`.
+    2. `application-test.yml`: Configured `url: jdbc:tc:postgresql:16:///spotify_youtube_test?options=-c%20timezone=UTC` and `hibernate.jdbc.time_zone: UTC` for defense-in-depth, preventing `org.postgresql.Driver` from sending host timezones.
+    3. Regression tests: Added `TimezoneConfigurationTest` (verifying Surefire JVM UTC properties) and `PostgreSqlTimezoneIT` (verifying Failsafe Testcontainers PostgreSQL connection and `current_setting('TimeZone') = 'UTC'`).
 - **Phase 12 Defect Resolutions**:
   - **Defect 1 (CRITICAL COMPILATION DEFECT)**: Missing overloaded constructors in `MigrationExecutionSummary.java` resolved by implementing 14-parameter and 17-parameter constructors delegating to canonical record constructor with defaults.
   - **Defect 2 (TEST METHOD MISMATCH DEFECT)**: Invalid method calls (`queueForExecution`, `completeExecution`, `failExecution`, `markRecoveryRequired`) in `AtomicQueuedExecutionClaimIT.java` and `ActiveMigrationProgressIT.java` corrected to canonical `setStatus(MigrationExecutionStatus)`, `markQueued()`, and `reconcileCounts()`.
@@ -19,18 +25,35 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
   - **Regression Coverage**: Added dedicated regression tests in `MigrationSubmissionResponseTest.java` (verifying overloaded constructors and field mappings) and `RunMigrationApiRequestTest.java` (verifying canonical and convenience constructors).
 - **Phase 11 (Execution & Playlist Creation)**: COMPLETE & FROZEN (ADR-030).
 - **Phase 12A–12H**: COMPLETE, VERIFIED & FROZEN (ADR-022).
+- **Phase 13B (Provider Failure Classification)**: COMPLETE & TESTED (Dedicated `ProviderFailureClassifier`, `RetryAfterParser`, `ProviderFailureCategory`, `RetryEligibility`, `ProviderFailureClassification`, `RetryAfterResult`, and `ExternalProviderException` extension; 45 unit tests added).
 - **Host Security Permission Notice**: Terminal command execution on the host machine is restricted by the IDE host security policy (`permission check failed for command ... unexpected user interaction type: not permission`). Static analysis, code inspection, defect remediation, and regression test suites confirm complete architectural and invariant compliance.
 
 ## Completed
-### Phase 13A (Reliability Architecture Audit & Design) [COMPLETE & AUDITED]
-- **Architectural Audit**: Completed comprehensive audit of Phase 12 asynchronous processing subsystem, identifying 7 operational reliability gaps (transient fault abortion, in-memory queue volatility on JVM crash, ambiguous mutation hazards on YouTube playlist/track operations, absence of `Idempotency-Key` contract, and concurrent submission races).
-- **Comprehensive Failure Scenario Matrix**: Cataloged 16 discrete failure scenarios across Spotify, YouTube, network, database, and process termination lifecycles with deterministic classifications, retry eligibility, state transitions, and external reconciliation requirements.
-- **Two-Tier Retry Architecture**: Designed a provider-neutral retry architecture combining Tier 1 in-flight transient retries (exponential backoff with AWS Full Jitter, `Retry-After` header support, bounded attempts $\le 3$, zero DB locks held during sleep) and Tier 2 durable scheduled retries (PostgreSQL-backed polling with `FOR UPDATE SKIP LOCKED`, zero Redis/Kafka dependencies).
-- **API Idempotency Architecture**: Designed an IETF-compliant `Idempotency-Key` contract for `POST /api/migrations` with user scoping `(user_id, idempotency_key)`, canonical request SHA-256 fingerprinting, replay semantics (200 OK / 202 Accepted), and 409 Conflict rejection on mismatched payload.
-- **External Operation Safety & Reconciliation**: Formulated a zero-duplicate recovery pattern for ambiguous mutations. YouTube playlist creation timeout is reconciled by querying user playlists (`playlists.list?mine=true`, 1 quota unit) before re-creating. Ambiguous track insertion timeouts are reconciled via Phase 11G remote playlist inspection (`inspectPlaylist`) with timestamp correlation and exclusion of previously assigned items.
-- **Database Schema Proposals**: Designed Flyway migration `V10__phase13_reliability_and_idempotency.sql` introducing `migration_idempotency_keys` table and extending `migration_executions` with durable retry fields (`retry_count`, `max_retries`, `next_retry_at`, `last_failure_reason`).
-- **Progress Conservation Invariant**: Strictly preserved the 8-status count conservation invariant without introducing a database `RETRYING` state.
-- **Documentation & ADR**: Authored comprehensive design document `.ai/PHASE_13_DESIGN.md` and formal architecture decision record `.ai/ADR/ADR-031-reliability-architecture-and-fault-tolerance.md`. Prepared Phase 13B–13I implementation roadmap.
+### Phase 13B (Provider Failure Classification Engine) [COMPLETE & TESTED]
+- **Implemented Subsystem**: Delivered structured external provider failure classification engine (`com.spotifyyoutube.migrator.migration.reliability.classification`) for YouTube Data API and Spotify API.
+- **Components Created**:
+  - `ProviderFailureCategory`: 9 granular failure categories (`RATE_LIMITED`, `USER_RATE_LIMITED`, `QUOTA_EXCEEDED`, `PERMISSION_DENIED`, `AUTH_EXPIRED`, `NOT_FOUND`, `INVALID_REQUEST`, `TRANSIENT_SERVER_ERROR`, `UNKNOWN`).
+  - `RetryEligibility`: Structured retry signaling (`RETRYABLE`, `NON_RETRYABLE`, `DEFERRED_RESET`, `REQUIRES_REAUTHORIZATION`).
+  - `RetryAfterResult`: Strongly-typed header parsing result (`VALID`, `MISSING`, `INVALID`) preserving raw header and failure reasons.
+  - `RetryAfterParser`: RFC 9110 compliant parser supporting delta-seconds (strictly non-negative decimal digits `1*DIGIT`, rejecting explicit positive signs, negative numbers, and decimals), RFC-1123 / RFC-850 / ASCTIME HTTP-dates, past date -> `Duration.ZERO` handling, overflow rejection, and injectable `Clock`.
+  - `ProviderFailureClassification`: Immutable result record encapsulating category, HTTP status, provider reason, retry eligibility, parsed `Duration` delay, and sanitized diagnostics.
+  - `ProviderFailureClassifier`: Core classification engine parsing status codes, YouTube error JSON bodies (`error.errors[].reason`), and Spring `RestClient` exceptions with credential redacting.
+  - `ExternalProviderException`: Backward-compatible extension with `providerReason` field and getter.
+- **Granular YouTube 403 Separation**: HTTP 403 `quotaExceeded` (`DEFERRED_RESET`) is strictly separated from 403 `userRateLimitExceeded` / `rateLimitExceeded` (`RETRYABLE`) and 403 `insufficientFilePermissions` / `forbidden` (`NON_RETRYABLE`).
+- **Comprehensive Unit Test Suites**: Added `RetryAfterParserTest` (20 test cases) and `ProviderFailureClassifierTest` (25 test cases) covering all required success, failure, edge-case, and security sanitization scenarios.
+- **Architectural Isolation**: Implemented without modifying frozen Phase 5, 6, 7, 11, or 12 orchestration or aggregate behavior; ready for Phase 13C retry policy consumption.
+### Phase 13A (Reliability Architecture Audit & Design — Revised & Finalized) [COMPLETE & AUDITED]
+- **Architectural Audit & Review**: Completed comprehensive audit of Phase 12 asynchronous processing subsystem and integrated critical architecture review revisions across 9 reliability dimensions.
+- **Granular Operation-Level Retry Metadata Ownership**: Rejected monolithic counters on `MigrationExecution`. Assigned independent retry metadata ownership: `ExecutionTrackRecord` owns individual track insertion retries (`max_attempts`, `next_attempt_at`, `last_failure_classification`, `retry_backoff_ms`), while `MigrationExecution` owns playlist creation retries (`playlist_creation_attempt_count`, `playlist_creation_max_attempts`, `playlist_creation_next_attempt_at`).
+- **External Playlist Creation Safety**: Eliminated ambiguous title/timestamp matching. Formulated pre-allocation intent (`ALLOCATING_DESTINATION`) and deterministic correlation marker `[ref: migrator-op:<playlist_creation_operation_id>]` in the YouTube playlist description. On timeout, queries user playlists (`playlists.list?mine=true`, 1 quota unit) to verify presence before re-creating.
+- **Durable Worker Ownership, Heartbeats & Fencing**: Replaced static 5-minute threshold with a durable 60-second lease, 15-second active worker heartbeat, and generational fencing token (`lease_generation`). Track mutations verify the caller's fencing token against `migration_executions`, immunizing the system against zombie-worker split-brain writes.
+- **RFC 9110 Compliant `Retry-After` Semantics**: Corrected retry formula to ensure provider `Retry-After` headers are never shortened by local maximum delays. Supported delta-seconds and HTTP-date formats. Enforced thread-release threshold: delays $> 2\text{ s}$ immediately release worker threads back to the bounded pool.
+- **Complete Two-Phase Atomic Scheduling Protocol**: Designed atomic PostgreSQL claim protocol using `WITH claimable AS (...) UPDATE ... RETURNING` with `SKIP LOCKED`. Post-commit worker dispatch rolls back safely on executor saturation without holding database transactions open during HTTP calls.
+- **Track Insertion Reconciliation**: Reconciles YouTube eventual consistency replication lag (3-second grace delay), preserves intentional duplicate source tracks via `assignedPlaylistItemIds` and 1-to-1 position-item bijections, and pauses execution in `RECOVERY_REQUIRED` on ambiguous outcomes without breaking canonical order.
+- **Granular YouTube Error Classification**: Separated transient `userRateLimitExceeded` (retryable with backoff) from permanent `quotaExceeded` (non-retryable in current window; deferred until Pacific midnight).
+- **API Idempotency & Terminal-Only 72h Retention**: Designed `Idempotency-Key` contract with `(user_id, idempotency_key)` uniqueness and canonical `v1:SHA-256` fingerprinting. Idempotency records associated with active/recoverable executions never expire (`expires_at = NULL`); 72-hour TTL begins strictly after reaching terminal status (`COMPLETED`, `FAILED`, `ROLLED_BACK`).
+- **Database Schema Proposals**: Designed Flyway migration `V10__phase13_reliability_and_idempotency.sql` introducing `migration_idempotency_keys` table and extending `migration_executions` and `execution_track_records` with lease, fencing, and retry metadata.
+- **Documentation & ADR**: Authored revised `.ai/PHASE_13_DESIGN.md` and revised `.ai/ADR/ADR-031-reliability-architecture-and-fault-tolerance.md`. Prepared Phase 13B–13I implementation roadmap.
 
 ### Phase 12H (Final Documentation, Architecture Audit & Phase 12 Freeze) [COMPLETE & AUDITED / FROZEN]
 - **Architectural Audit**: Completed comprehensive audit of all 8 Phase 12 subphases. Confirmed `MigrationExecution` is the single persistent aggregate, `ApprovedMigrationOrchestrator` is the canonical orchestration boundary, YouTube API calls remain outside database transactions, bounded executor scaling and rejection reset behavior operates without orphaned jobs, and progress calculations strictly enforce the 8-status count conservation invariant.

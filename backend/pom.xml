@@ -32,6 +32,7 @@
 		     sends an API version that Docker Engine 29.x rejects with HTTP 500.
 		     Testcontainers 1.21.4 ships a version that supports Docker 29+ fully. -->
 		<testcontainers.version>1.21.4</testcontainers.version>
+		<argLine>-Duser.timezone=UTC</argLine>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -101,6 +102,9 @@
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
 					<argLine>-Duser.timezone=UTC</argLine>
+					<systemPropertyVariables>
+						<user.timezone>UTC</user.timezone>
+					</systemPropertyVariables>
 				</configuration>
 			</plugin>
 			<plugin>
@@ -110,6 +114,12 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-failsafe-plugin</artifactId>
+				<configuration>
+					<argLine>-Duser.timezone=UTC</argLine>
+					<systemPropertyVariables>
+						<user.timezone>UTC</user.timezone>
+					</systemPropertyVariables>
+				</configuration>
 				<executions>
 					<execution>
 						<goals>

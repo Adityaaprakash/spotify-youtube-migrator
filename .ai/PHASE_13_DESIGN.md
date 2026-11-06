@@ -1,7 +1,7 @@
-# Phase 13 — Reliability Engineering Architecture & Design Document (Phase 13A)
+# Phase 13 — Reliability Engineering Architecture & Design Document (Phase 13A — Revised)
 
 **Author:** Senior Java System Architect, Reliability Engineer, Database Architect  
-**Status:** APPROVED FOR DESIGN / IMPLEMENTATION READY (Phase 13A Complete)  
+**Status:** REVISED & FINALIZED FOR PHASE 13A (Architecture Review Corrections Integrated)  
 **Date:** 2026-11-05  
 **Target Subphases:** Phase 13B – Phase 13I  
 
@@ -9,307 +9,359 @@
 
 ## 1. Executive Summary & Context
 
-Phase 12 established an asynchronous migration processing pipeline with durable database state, atomic worker claiming, progress tracking, and polling rate limiting. However, the system currently lacks automated resilience:
-- External network timeouts or transient HTTP 5xx responses cause immediate stopping of migration execution and mark all subsequent tracks as `SKIPPED`.
-- In-memory worker queue tasks (`ThreadPoolTaskExecutor`'s `LinkedBlockingQueue`) are volatile: an unhandled process termination or server restart drops pending migrations, requiring manual intervention.
-- Remote mutation calls (playlist creation and track insertion) to YouTube do not support upstream idempotency tokens. Ambiguous outcomes (timeouts or 503 errors during mutations) risk either creating duplicate destination playlists or duplicating tracks.
-- Clients resubmitting requests without or with repeated tokens face inconsistent HTTP 409 Conflict rejections instead of clean idempotent replay semantics.
-
-Phase 13 introduces **end-to-end reliability engineering**:
-1. Provider-neutral failure classification and retry policies with exponential backoff and full jitter.
-2. Durable, PostgreSQL-backed retry and crash recovery scheduling (zero distributed infrastructure dependencies: no Redis, Kafka, or RabbitMQ).
-3. First-class API idempotency (`Idempotency-Key` header, canonical request fingerprinting, user scoping).
-4. Evidence-based reconciliation for ambiguous external mutations, ensuring zero duplicate playlists and zero duplicate track insertions.
-5. Strict preservation of Phase 11/12 domain boundaries: `MigrationExecution` remains the single authoritative aggregate, and the 8-state track progress conservation invariant remains strictly enforced.
+Phase 12 established an asynchronous migration execution pipeline with durable database state, atomic worker claiming, progress tracking, and polling rate limiting. However, a rigorous architectural review identified critical reliability vulnerabilities:
+- **Retry Metadata Granularity**: Placing retry counters solely on `MigrationExecution` is insufficient because a migration comprises multiple independently retryable operations (destination playlist creation, individual track insertions, and upstream read queries).
+- **External Playlist Creation Safety**: Relying on playlist title and creation timestamp matching cannot guarantee playlist ownership. A deterministic correlation marker in the playlist description, combined with pre-allocated creation intent, is required.
+- **Worker Lease & Zombie Protection**: Phase 12 relies on a static 5-minute threshold without an active worker heartbeat, lease owner identity, or fencing tokens. A zombie worker waking after a pause could corrupt state.
+- **`Retry-After` Semantics**: The original retry formula erroneously shortened provider `Retry-After` instructions when they exceeded local maximums, violating HTTP specifications.
+- **Worker Thread Blocking**: Sleeping on worker threads during backoffs starves the bounded thread pool (2–4 threads). Backoffs $> 2\text{ s}$ must be durably scheduled, releasing the thread.
+- **Atomic Scheduling Protocol**: `SELECT ... FOR UPDATE SKIP LOCKED` must be part of an end-to-end atomic state transition, lease acquisition, and post-commit dispatch protocol.
+- **Track Insertion Reconciliation**: YouTube's eventual consistency (read-after-write replication lag), intentional duplicate source tracks, and user modifications require multi-phase evidence reconciliation rather than a single immediate read.
+- **Granular YouTube 403 Classification**: YouTube returns both transient user rate limits (`userRateLimitExceeded`) and permanent daily quota exhaustion (`quotaExceeded`) under HTTP 403; these require completely distinct handling.
+- **Idempotency Retention Lifecycle**: Idempotency keys must never expire while an execution is active or recoverable. The 72-hour TTL applies strictly after reaching a terminal state.
 
 ---
 
-## 2. Phase 12 Architecture Audit & Reliability Gap Analysis
+## 2. Operation-Level Retry Metadata Ownership
 
-### 2.1 Current Architecture Components
-- **Orchestration Boundary**: `ApprovedMigrationOrchestrator` / `DefaultApprovedMigrationOrchestrator` coordinates pre-mutation validation, destination playlist creation, durable execution initialization, and sequential track insertion.
-- **Durable Persistence Aggregate**: `MigrationExecution` entity binds `review_session_id` (unique 1:1) to a destination playlist on YouTube. Tracks individual track states via `ExecutionTrackRecord` (ordered by `target_position`).
-- **Worker & Dispatcher**: `MigrationJobDispatcher` executes Stage 1 (synchronous preparation) and Stage 2 (async submit to `ThreadPoolTaskExecutor`).
-- **Worker Concurrency**: Core pool size: 2, max pool size: 4, queue capacity: 50. Rejection policy: `AbortPolicy` with controlled reset from `QUEUED` to `INITIALIZED`.
-- **Claim Locking**: Atomic conditional database updates using `claimExecutionRunningWithVersion` and `claimTrackRollingBack` with `@Version` optimistic concurrency.
-- **Reconciliation & Rollback**: Phase 11F failure classification and rollback (`ExecutionRollbackRecord`), and Phase 11G remote state verification (`ExecutionReconciliationRecord`) using `MusicDestination.inspectPlaylist`.
-
-### 2.2 Reliability Gaps Identified in Phase 12
-
-| ID | Component | Current Behavior | Reliability Risk / Failure Mode |
-|---|---|---|---|
-| **GAP-01** | `DefaultDestinationPlaylistCreationService` | Performs remote playlist creation before persisting `MigrationExecution`. | If YouTube creates the playlist but the network times out or the JVM crashes before database insertion, an orphaned playlist is leaked. Resubmission creates a **duplicate playlist**. |
-| **GAP-02** | `DefaultMigrationExecutionStateService.executePendingTracks` | Catch blocks for `ResourceAccessException` or `ExternalProviderException` immediately set `stopRemaining = true` and abort. | Transient 503 or network socket timeouts immediately abort the entire migration and mark remaining tracks as `SKIPPED` without a single retry attempt. |
-| **GAP-03** | `AsyncMigrationConfig` & Dispatcher | Queue is an in-memory `LinkedBlockingQueue<Runnable>` in JVM heap. | JVM restart or pod crash permanently drops all queued migrations from memory. While state remains `QUEUED` or `RUNNING` in PostgreSQL, there is no automatic startup or polling sweeper to resume them. |
-| **GAP-04** | `MigrationController` Submission Endpoints | Does not support or evaluate the standard `Idempotency-Key` HTTP header. | Network disconnections during client submission can cause duplicate submissions. Resubmissions of `RUNNING` or `QUEUED` migrations throw `InvalidStateException` returning HTTP 409 Conflict rather than returning the existing execution. |
-| **GAP-05** | Track Insertion Ambiguity | On timeout during `addTrackToPlaylist`, the track is marked `UNCERTAIN` and paused for manual intervention. | Does not attempt automated evidence-based verification against the remote playlist before halting the worker pipeline. |
-| **GAP-06** | Rate Limit Replenishment | On 429 Too Many Requests, worker thread aborts track processing. | Does not parse or wait for upstream `Retry-After` headers; immediately stops remaining tracks. |
-| **GAP-07** | Concurrent Submission Race | Two concurrent requests for the same review session can both pass `getExecutionByReviewSession == null` check before either inserts. | Both threads invoke YouTube API to create a playlist concurrently, creating two playlists on the user's account before one fails database unique constraint. |
-
----
-
-## 3. Comprehensive Failure Scenario Matrix
-
-The table below catalogs external and system failure modes across Spotify, YouTube, network, database, and process lifecycles.
-
-| Scenario ID | Operation & Failure Trigger | Classification | Retry Safe? | External Reconciliation Required? | State Transition (Execution / Track) | Manual Recovery Required? | Resolution & Architectural Action |
-|---|---|---|:---:|:---:|---|:---:|---|
-| **F-01** | Spotify Playlist/Tracks: HTTP 429 | `CONFIRMED_RETRYABLE_PROVIDER_REJECTION` | **YES** | NO | No transition (in-flight read) | NO | Respect `Retry-After` header; apply exponential backoff with full jitter up to max budget. |
-| **F-02** | Spotify Playlist/Tracks: HTTP 500/502/503/504 | `CONFIRMED_RETRYABLE_PROVIDER_REJECTION` | **YES** | NO | No transition (in-flight read) | NO | Read operation is idempotent. Retry with exponential backoff (attempts $\le$ 3). |
-| **F-03** | Spotify API: Read/Connect Timeout | `CONFIRMED_RETRYABLE_PROVIDER_REJECTION` | **YES** | NO | No transition (in-flight read) | NO | Transient network fault on read. Retry with exponential backoff. |
-| **F-04** | Spotify / Google: OAuth Token Expired (401) | `AUTHENTICATION_OR_AUTHORIZATION_FAILURE` | **CONDITIONAL** | NO | `FAILED` / unchanged | CONDITIONAL | Attempt synchronous token refresh via `OAuthTokenLifecycleService`. If refresh succeeds, retry operation once; if refresh fails, transition to `FAILED` with actionable message. |
-| **F-05** | Google / YouTube: 403 `quotaExceeded` | `CONFIRMED_PROVIDER_OPERATION_FAILURE` | **NO** | NO | `FAILED` / `FAILED` (remaining `SKIPPED`) | **YES** | Daily quota exhausted (10,000 units). Fast-fail execution immediately; log quota exhaustion; do not retry until quota resets (midnight Pacific). |
-| **F-06** | Google / YouTube: 403 Insufficient Scope | `AUTHENTICATION_OR_AUTHORIZATION_FAILURE` | **NO** | NO | `FAILED` / `FAILED` | **YES** | User revoked or withheld required OAuth scopes (`youtube` or `youtube.force-ssl`). Re-authentication required. |
-| **F-07** | YouTube: Create Playlist HTTP 429 | `CONFIRMED_RETRYABLE_PROVIDER_REJECTION` | **YES** | NO | `QUEUED` / `PENDING` | NO | Parse `Retry-After`; schedule durable retry. |
-| **F-08** | YouTube: Create Playlist Timeout / 500/503 | `MANUAL_INTERVENTION_REQUIRED` (UNCERTAIN) | **NO** (blind) | **YES** | `INITIALIZED` (with intent) or `RECOVERY_REQUIRED` | NO (if automated) | **Ambiguous Playlist Creation**: Query user's channel (`playlists.list?mine=true`) for playlist matching title created in last 10m. If found, adopt; if not, safe to create. |
-| **F-09** | YouTube: Add Track HTTP 429 | `CONFIRMED_RETRYABLE_PROVIDER_REJECTION` | **YES** | NO | `RUNNING` / `ADDING` $\to$ `ADDING` | NO | Rate limit is checked before insertion mutation occurs. Safe to back off and retry in-flight. |
-| **F-10** | YouTube: Add Track Timeout / Socket Reset | `MANUAL_INTERVENTION_REQUIRED` (UNCERTAIN) | **NO** (blind) | **YES** | `RUNNING` $\to$ `RECOVERY_REQUIRED` / `ADDING` $\to$ `UNCERTAIN` | NO (if automated) | **Ambiguous Track Insertion**: Do NOT blind retry. Execute inline inspection of destination playlist. If confirmed present, mark `ADDED`; if confirmed absent, mark `PENDING` and retry. |
-| **F-11** | YouTube: Add Track HTTP 500/503 | `MANUAL_INTERVENTION_REQUIRED` (UNCERTAIN) | **NO** (blind) | **YES** | `RUNNING` $\to$ `RECOVERY_REQUIRED` / `ADDING` $\to$ `UNCERTAIN` | NO (if automated) | Server internal error during mutation may have committed. Reconcile against playlist items before retrying. |
-| **F-12** | YouTube: Add Track HTTP 404 Video Not Found | `CONFIRMED_NON_RETRYABLE_PROVIDER_REJECTION` | **NO** | NO | `PARTIALLY_COMPLETED` / `FAILED` | NO | Video removed, copyright blocked, or private. Mark track `FAILED`. Mark subsequent tracks `SKIPPED` to preserve canonical ordering. |
-| **F-13** | JVM Crash / Termination during `ADDING` | `MANUAL_INTERVENTION_REQUIRED` (Stale Lease) | **NO** (blind) | **YES** | `RUNNING` $\to$ `RECOVERY_REQUIRED` / `ADDING` $\to$ `UNCERTAIN` | NO (if automated) | Lease expiration ($> 5$ min). Startup sweeper identifies stale `ADDING` tracks and invokes Phase 11G remote state verification. |
-| **F-14** | JVM Crash with migrations in `QUEUED` | `LOCAL_PERSISTENCE_FAILURE` (Lost Task) | **YES** | NO | `QUEUED` $\to$ `RUNNING` | NO | In-memory queue dropped. PostgreSQL startup recovery sweeper claims unexecuted `QUEUED` jobs and re-submits to worker pool. |
-| **F-15** | Concurrent Submissions for Same Session | Concurrency Race Condition | **NO** | NO | Original `QUEUED`; Duplicate `REJECTED` | NO | Idempotency key or distributed database mutex (`uq_migrationexecution_reviewsession`) ensures only one execution is initialized; second caller receives existing execution. |
-| **F-16** | Database Transaction Failure / Deadlock | `LOCAL_PERSISTENCE_FAILURE` | **YES** | NO | Rollback to prior committed state | NO | Transient DB deadlock or lock timeout during per-track state update. Retry the short DB transaction with backoff. |
-
----
-
-## 4. Provider-Neutral Retry Architecture (Phase 13B, 13C, 13D)
-
-### 4.1 Retry Classification & Policy Abstraction
-The retry engine defines a strict separation between **Confirmed Failures** and **Ambiguous Operations**:
-- **Confirmed Retryable**: The provider explicitly confirmed the request was rejected prior to state change (e.g., HTTP 429, temporary connection rejection, read timeout).
-- **Confirmed Non-Retryable**: The provider rejected the request permanently (e.g., HTTP 400 Bad Request, HTTP 403 Quota Exceeded, HTTP 404 Video Not Found).
-- **Ambiguous Mutation (Uncertain)**: Network dropped or server errored (HTTP 500/503/timeout) during a state-changing write. Blind retry is strictly forbidden. Must undergo remote state verification prior to any re-attempt.
+A migration execution aggregate (`MigrationExecution`) coordinates multiple distinct operations, each with its own lifecycle, error budget, and retry history:
 
 ```
-                              ┌────────────────────────┐
-                              │    Operation Error     │
-                              └───────────┬────────────┘
-                                          │
-                        Is it a Read or Write Mutation?
-                                          │
-                     ┌────────────────────┴────────────────────┐
-                     ▼                                         ▼
-            [ Read Operation ]                        [ Write Mutation ]
-                     │                                         │
-        Is HTTP 429, 5xx, or Timeout?             Is HTTP 429 Rate Limit?
-        ├── YES: CONFIRMED_RETRYABLE              ├── YES: CONFIRMED_RETRYABLE (Checked pre-mutation)
-        └── NO: Check Auth / Client               ├── 400/404/Quota 403: NON_RETRYABLE
-                                                  └── 5xx / Timeout: UNCERTAIN (Ambiguous)
-                                                                │
-                                                                ▼
-                                                    [ Remote Reconciliation ]
-                                                    ├── Verified Absent: Safe to Retry
-                                                    ├── Verified Present: Mark ADDED (Done)
-                                                    └── Indeterminate: Pause for Review
+                            MigrationExecution
+                             (Aggregate Root)
+                                     │
+         ┌───────────────────────────┼───────────────────────────┐
+         ▼                           ▼                           ▼
+[ Playlist Creation ]    [ Track Insertion (0..N) ]     [ Provider Reads ]
+- 1 per execution        - 1 per track position         - Spotify/YouTube API
+- Owned by MigrationExecution  - Owned by ExecutionTrackRecord - In-flight context
 ```
 
-### 4.2 Exponential Backoff and Full Jitter Algorithm
-To prevent thundering herds when upstream providers (or the local database) recover, the system uses the standard AWS Full Jitter backoff algorithm:
+### 2.1 Metadata Ownership Model
 
-$$\text{sleep} = \text{random}(0, \min(M, B \times 2^{\text{attempt}}))$$
+| Operation Type | Owning Entity | Attempt Count & Max | Next Eligible Attempt | Failure Classification | Lease & Fencing |
+|---|---|---|---|---|---|
+| **Destination Playlist Creation** | `MigrationExecution` | `playlist_creation_attempt_count`<br>`playlist_creation_max_attempts` (default: 3) | `playlist_creation_next_attempt_at` | `playlist_creation_failure_code` | `lease_owner`<br>`fencing_token` |
+| **Track Insertion** | `ExecutionTrackRecord` | `attempt_count`<br>`max_attempts` (default: 3) | `next_attempt_at` | `last_failure_classification`<br>`error_message` | `execution.fencing_token`<br>`track.version` |
+| **Provider Read Operations** | In-Memory `RetryContext` | Local attempt counter (max: 3) | Immediate backoff | Transient exception analysis | Local worker thread |
+
+### 2.2 Operational Metadata Contract
+For every durable operation, the schema maintains:
+1. **Operation Identity**: Immutable UUID (`id` on `ExecutionTrackRecord`, `playlist_creation_operation_id` on `MigrationExecution`).
+2. **Attempt Tracking**: `attempt_count` (int $\ge 0$) and `max_attempts` (int $\ge 1$).
+3. **Temporal Bounds**: `started_at` (last attempt time), `next_attempt_at` (earliest eligibility), `completed_at`.
+4. **Diagnostic Provenance**: `last_failure_classification` (enum/string), `error_message` (sanitized text), `retry_backoff_ms` (long).
+5. **Ownership & Lease**: `lease_owner` (worker node/thread ID), `lease_until` (timestamp), `fencing_token` (generational counter).
+
+---
+
+## 3. External Destination Playlist Creation Safety
+
+### 3.1 The Ambiguity Problem
+YouTube Data API v3 `POST /playlists` does not support client idempotency tokens. If a creation call times out (`ResourceAccessException`) or encounters HTTP 503, YouTube may have successfully created the playlist. Blindly retrying creates duplicate playlists on the user's account. Matching by title and timestamp alone is error-prone because users may already possess identically named playlists.
+
+### 3.2 Correlation Marker & Pre-Allocated Intent Protocol
+
+```
+                        1. Persist Intent (Pre-Allocation)
+                        - status: ALLOCATING_DESTINATION
+                        - playlist_creation_operation_id: <UUID opId>
+                        - destination_playlist_id: NULL
+                                       │
+                                       ▼
+                        2. Construct YouTube Payload
+                        - Title: targetPlaylistTitle
+                        - Description: userDescription +
+                          "\n\n[migrator-ref: <opId>]"
+                                       │
+                                       ▼
+                        3. POST /playlists to YouTube
+                                       │
+                     ┌─────────────────┴─────────────────┐
+                [ Success ]                         [ Timeout / 5xx ]
+                     │                                   │
+           Store playlistId                              ▼
+           Status -> QUEUED             4. Reconcile via GET /playlists?mine=true
+                                                         │
+                                        ┌────────────────┴────────────────┐
+                             [ Discovered Marker ]              [ No Marker Found ]
+                                        │                                 │
+                             Link discovered playlist        Is matching title present?
+                             Status -> QUEUED                ├── NO: Safe to re-create
+                                                             └── YES: Ambiguous -> RECOVERY_REQUIRED
+```
+
+### 3.3 Protocol Specification
+1. **Pre-Allocation Intent**: `MigrationExecution` is persisted with `status = 'ALLOCATING_DESTINATION'` and a newly generated `playlist_creation_operation_id` (UUID).
+2. **Correlation Marker in Description**:
+   - The backend appends a deterministic, machine-readable correlation signature:
+     ```text
+     [ref: migrator-op:<playlist_creation_operation_id>]
+     ```
+   - **User-Visible Implication**: Occupies ~45 characters out of YouTube's 5,000-character limit. It appears unobtrusively at the bottom of the playlist description, establishing indisputable proof of ownership.
+3. **Reconciliation Rules**:
+   - When a creation attempt experiences a timeout or 5xx, the worker queries `GET https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true` (costs 1 quota unit, vs 50 for creation).
+   - It iterates user playlists (up to 50 items) checking for `snippet.description` containing `[ref: migrator-op:<playlist_creation_operation_id>]`.
+   - **Marker Found**: Conclusively proves YouTube executed the request. The backend extracts `playlist.id`, links it, and transitions to `QUEUED`. Exactly-once destination binding achieved.
+   - **Marker Absent & No Duplicate Titles**: Conclusively proves the request was never applied. The backend safely retries creation.
+   - **Matching Title Found Without Marker**: A playlist with the identical title exists but lacks the operation marker. The system **refuses to guess**; it transitions to `RECOVERY_REQUIRED` and alerts the user.
+
+---
+
+## 4. Durable Worker Ownership, Heartbeating & Fencing Tokens
+
+Phase 12 uses a passive 5-minute threshold on `started_at` without worker identity, heartbeats, or fencing. This creates a zombie-worker hazard: a worker paused by GC or network partition could resume writing after a new worker has claimed the execution.
+
+### 4.1 Durable Lease Architecture
+
+```
+                  Worker Instance W1                         PostgreSQL
+                          │                                      │
+     1. Claim Execution   ├─────────────────────────────────────>│ UPDATE ... 
+                          │                                      │ SET lease_owner = 'W1',
+                          │<─────────────────────────────────────┤     lease_generation = 105,
+                          │  (Token: 105, Lease: 60s)            │     lease_until = NOW() + 60s
+                          │                                      │
+     2. Heartbeat Task    ├─────────────────────────────────────>│ UPDATE ...
+        (Every 15s)       │                                      │ SET lease_until = NOW() + 60s,
+                          │<─────────────────────────────────────┤     heartbeat_at = NOW()
+                          │                                      │ WHERE lease_generation = 105
+                          │                                      │
+     3. Insert Track      │                                      │ UPDATE execution_track_records
+        (Pass Token: 105) ├─────────────────────────────────────>│ SET status = 'ADDED'
+                          │                                      │ WHERE ... AND 
+                          │                                      │ 105 = (SELECT lease_generation ...)
+```
+
+### 4.2 Fencing Token Invariants
+1. **`lease_generation` (Monotonic Counter)**:
+   - Each successful claim increments `lease_generation` by 1.
+   - Every mutation query on `execution_track_records` includes a fencing predicate:
+     ```sql
+     UPDATE execution_track_records
+     SET status = :newStatus, destination_playlist_item_id = :itemId, updated_at = NOW()
+     WHERE id = :trackId
+       AND execution_id = :executionId
+       AND :fencingToken = (SELECT lease_generation FROM migration_executions WHERE id = :executionId);
+     ```
+   - If a zombie worker attempts to write after lease recovery has assigned ownership to a new worker, the row count is $0$, throwing `OptimisticLockException` and stopping the zombie worker immediately.
+2. **Heartbeat Protocol**:
+   - Lease duration: **60 seconds** (justified by maximum provider socket timeout of 30s + DB write latency).
+   - Heartbeat interval: **15 seconds** (executed asynchronously by the active worker while processing tracks).
+   - Stale threshold: An execution is considered abandoned if `heartbeat_at < NOW() - INTERVAL '60 seconds'`.
+3. **Graceful Shutdown**:
+   - On JVM shutdown (`ContextClosedEvent`), the active worker releases its lease cooperatively:
+     `UPDATE migration_executions SET status = 'QUEUED', lease_owner = NULL, lease_until = NULL WHERE id = :id AND lease_generation = :fencingToken;`
+
+---
+
+## 5. Correct `Retry-After` Semantics
+
+### 5.1 The RFC 9110 Specification
+Under RFC 9110 §10.2.3, when an upstream provider returns HTTP 429 or 503 with a `Retry-After` header, clients **must not** send further requests until the indicated time has elapsed.
+
+The initial formula `min(maxDelay, max(retryAfter, jitter))` was critically flawed: it shortened provider delays $> 30\text{ s}$ down to $30\text{ s}$.
+
+### 5.2 Corrected Evaluation Algorithm
+
+$$\text{effectiveDelay} = \begin{cases}
+\text{parsedRetryAfter}, & \text{if } \text{Retry-After header is present and valid} \\
+\text{random}(0, \min(M, B \times 2^{\text{attempt}})), & \text{otherwise (Full Jitter)}
+\end{cases}$$
 
 Where:
-- $B$ = Base backoff delay (Default: $1.0\text{ s}$)
-- $M$ = Maximum backoff delay (Default: $30.0\text{ s}$)
-- $\text{attempt}$ = Zero-indexed retry attempt count ($0, 1, 2, \dots$)
-- $\text{random}(0, X)$ = Uniform random duration between $0$ and $X$.
+- Delta-Seconds Parser: Non-negative integer seconds.
+- HTTP-Date Parser: RFC 1123 / RFC 850 timestamp (`Instant - Instant.now()`).
+- Malformed / Negative Fallback: Defaults to exponential backoff with full jitter.
 
-**Upstream `Retry-After` Handling**:
-When the provider supplies a `Retry-After` header (integer seconds or RFC 1123 HTTP date):
-$$\text{effectiveDelay} = \min(M, \max(\text{retryAfterHeader}, \text{calculatedJitterDelay}))$$
+### 5.3 Thread-Release Threshold Rule
+- **If $\text{effectiveDelay} \le 2.0\text{ seconds}$**: Bounded in-flight micro-retry on worker thread via non-blocking scheduled task (max 1 attempt).
+- **If $\text{effectiveDelay} > 2.0\text{ seconds}$**:
+  1. The worker thread **must not sleep**.
+  2. Persist `next_attempt_at = NOW() + effectiveDelay`.
+  3. Release the worker thread back to the pool immediately.
+  4. Scheduled poller claims the job when `next_attempt_at` arrives.
+- **Provider Quota Exceeded**:
+  YouTube `quotaExceeded` resets at midnight Pacific Time (07:00 / 08:00 UTC). If `quotaExceeded` is encountered, set `next_retry_at = nextPacificMidnight` or transition to `FAILED` with explicit user notification.
 
-### 4.3 Two-Tier Retry Hierarchy: In-Flight vs. Durable Scheduled
+---
 
-#### Tier 1: In-Flight Transient Retry (Local Worker Thread)
-- **Scope**: Transient HTTP 429, brief network blips, or read timeouts.
-- **Budget**: Maximum 3 attempts, maximum elapsed time 45 seconds per track.
-- **Thread Model**: Non-blocking sleep on worker thread using `Thread.sleep` or scheduled executor task.
-- **Invariant**: No database connection or open transaction is held during the backoff sleep.
+## 6. Atomic Durable Scheduling Protocol
 
-#### Tier 2: Durable Scheduled Retry (PostgreSQL-Backed)
-- **Scope**: Prolonged rate limits, worker saturation, or recovery across application restarts.
-- **Mechanism**: The execution or track record is persisted in PostgreSQL with:
-  - `status = 'QUEUED'`
-  - `retry_count = retry_count + 1`
-  - `next_retry_at = NOW() + calculated_delay`
-  - `last_failure_reason = sanitized_error`
-- **Zero External Infrastructure**: Evaluates PostgreSQL using `FOR UPDATE SKIP LOCKED`.
+A bare `SELECT ... FOR UPDATE SKIP LOCKED` does not prevent race conditions if the claiming transaction remains open during HTTP calls, or if dispatch fails post-commit.
 
-### 4.4 PostgreSQL Durable Retry & Startup Recovery Sweeper
-A lightweight Spring component running at fixed intervals (default: 5 seconds) polls for ready executions:
+### 6.1 Complete Two-Phase Atomic Claiming Protocol
+
+```
+                     [ Scheduler Poller (Every 5s) ]
+                                    │
+                                    ▼
+       Phase 1: Atomic Database Claim (Short Transaction, ~5ms)
+       - Lock eligible QUEUED row via SKIP LOCKED
+       - Verify lease_until IS NULL OR lease_until < NOW()
+       - UPDATE:
+           status = 'RUNNING'
+           lease_owner = :workerInstanceId
+           lease_generation = lease_generation + 1
+           lease_until = NOW() + INTERVAL '60s'
+           heartbeat_at = NOW()
+       - COMMIT Transaction
+                                    │
+                         ┌──────────┴──────────┐
+                    [ Committed ]         [ No Rows ]
+                         │                     │
+                         ▼                     ▼
+       Phase 2: Post-Commit Worker Dispatch   Sleep until next poll
+       - Submit to ThreadPoolTaskExecutor
+                         │
+              ┌──────────┴──────────┐
+         [ Accepted ]          [ Rejected (Pool Saturated) ]
+              │                     │
+              ▼                     ▼
+     Worker thread begins      Phase 3: Rollback Claim Transaction
+     execution with fresh      - UPDATE:
+     fencing token                 status = 'QUEUED'
+                                   lease_owner = NULL
+                                   lease_until = NULL
+                                   next_retry_at = NOW() + INTERVAL '10s'
+                               - COMMIT Transaction
+```
+
+### 6.2 SQL Implementation (PostgreSQL Dialect)
 
 ```sql
-SELECT id FROM migration_executions
-WHERE status = 'QUEUED'
-  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-ORDER BY next_retry_at ASC NULLS FIRST, created_at ASC
-FOR UPDATE SKIP LOCKED
-LIMIT :batchSize;
+WITH claimable AS (
+    SELECT id FROM migration_executions
+    WHERE status = 'QUEUED'
+      AND (next_retry_at IS NULL OR next_retry_at <= NOW())
+      AND (lease_until IS NULL OR lease_until < NOW())
+    ORDER BY next_retry_at ASC NULLS FIRST, created_at ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE migration_executions m
+SET status = 'RUNNING',
+    lease_owner = :instanceId,
+    lease_generation = m.lease_generation + 1,
+    lease_until = NOW() + INTERVAL '60 seconds',
+    heartbeat_at = NOW(),
+    updated_at = NOW()
+FROM claimable
+WHERE m.id = claimable.id
+RETURNING m.id, m.user_id, m.lease_generation;
 ```
-
-**Crash Recovery on Startup**:
-When the application starts, a dedicated recovery scan executes:
-1. Queries executions in `status = 'RUNNING'` whose `updated_at` is older than the lease threshold (5 minutes).
-2. For each, reconciles in-flight `ADDING` tracks (marking them `UNCERTAIN` under Phase 11E/11G invariants).
-3. If no uncertain tracks exist, resets the execution to `QUEUED` with immediate `next_retry_at` so it resumes processing automatically.
 
 ---
 
-## 5. API Idempotency Architecture (Phase 13E)
+## 7. Track Insertion Reconciliation with Eventual Consistency & Duplicate Tracks
 
-### 5.1 The `Idempotency-Key` Contract
-The asynchronous migration submission endpoint (`POST /api/migrations` and `POST /api/migrations/submit`) supports the standard IETF draft `Idempotency-Key` HTTP request header:
+### 7.1 Nuances Addressed
+1. **Eventual Consistency / Replication Lag**: YouTube Data API is distributed. An item inserted via `POST /playlistItems` may not be immediately visible on a subsequent `GET /playlistItems` read. Absence in a single immediate read is **NOT** definitive proof of failed insertion.
+2. **Intentional Duplicate Tracks**: Spotify playlists frequently contain identical tracks (same YouTube `videoId`) at multiple positions (e.g., Track 0 and Track 12). Matching must maintain a deterministic bijection between source positions and destination item IDs.
+3. **User Interleaving**: The user may concurrently add or delete items on YouTube.
 
-- **Header Name**: `Idempotency-Key` (case-insensitive)
-- **Format**: Valid UUID or ASCII string ($1 \le \text{length} \le 128$)
-- **Scope**: User-scoped. Uniqueness is enforced on `(user_id, idempotency_key)`. Different users may supply the identical key without collision.
-- **Retention**: Idempotency records are retained for 72 hours.
-
-### 5.2 Canonical Request Fingerprinting
-To detect payload tampering or accidental key reuse with different parameters, the backend computes a SHA-256 fingerprint of the canonicalized request payload:
-
-$$\text{RequestFingerprint} = \text{SHA-256}\left(\text{reviewSessionId} \parallel \text{targetTitle} \parallel \text{targetDescription} \parallel \text{isPrivate}\right)$$
-
-### 5.3 Idempotency State Machine & Replay Semantics
+### 7.2 Multi-Stage Evidence Reconciliation Protocol
 
 ```
-Client Request with Idempotency-Key: K, Payload: P
-                     │
-                     ▼
-       Lookup (user_id, K) in Database
-                     │
-        ┌────────────┴────────────┐
-   [ Found ]                 [ Not Found ]
-        │                         │
-  Matches Fingerprint(P)?     Atomic INSERT (user_id, K, Fingerprint(P), status=PROCESSING)
-  ├── NO:  Return HTTP 409    (If DB duplicate key collision -> Re-read existing)
-  │        (Conflict: Key reused with different payload)
-  │
-  └── YES: Check Execution State:
-           ├── status = PROCESSING: Return HTTP 202 Accepted (In progress)
-           ├── status = QUEUED:     Return HTTP 202 Accepted (Location: /progress)
-           ├── status = RUNNING:    Return HTTP 202 Accepted (Location: /progress)
-           └── status = COMPLETED:  Return HTTP 200 OK       (Location: /progress)
+                        Track Insertion Timeout / 503
+                                      │
+                                      ▼
+                        Wait 3s Consistency Delay
+                                      │
+                                      ▼
+                  Query GET /playlistItems (Full Inspection)
+                                      │
+              Filter out playlistItemIds already mapped to
+                 prior ADDED tracks (assignedPlaylistItemIds)
+                                      │
+                   Match unassigned items by videoId
+                                      │
+              ┌───────────────────────┼───────────────────────┐
+       [ 0 Matches ]             [ 1 Match ]             [ >1 Matches ]
+              │                       │                       │
+      Wait 5s & Read Again    Check publishedAt vs            │
+              │               startedAt (±30s skew)           │
+       ┌──────┴──────┐                │                       │
+ [ Still 0 ]    [ 1 Found ]     ┌─────┴─────┐                 │
+      │              │       [ Valid ]  [ Invalid ]           │
+Confirmed NOT      Confirmed Confirmed  Ambiguous             ▼
+  Inserted         Inserted    ADDED    (Timestamp       AMBIGUOUS
+      │              │           │       mismatch)     (Cannot safely
+Revert PENDING    Assign ID      ▼           │          disambiguate)
+ & Safe Retry    & Next Track  Proceed       └────────┬───────┘
+                                                      │
+                                                      ▼
+                                            Mark Track UNCERTAIN
+                                            Status -> RECOVERY_REQUIRED
 ```
 
-- **Same Key + Identical Payload**: Returns the existing execution and progress URL with the appropriate HTTP status (202 Accepted if in-flight/queued, 200 OK if completed).
-- **Same Key + Different Payload**: Rejects immediately with HTTP 409 Conflict and error code `IDEMPOTENCY_CONFLICT`.
-- **Concurrent Submissions with Same Key**: PostgreSQL unique constraint on `(user_id, idempotency_key)` guarantees exactly one thread succeeds in claiming; concurrent requests wait or read the committed record.
+### 7.3 Canonical Ordering Protection
+If reconciliation cannot confirm a track outcome with 100% certainty, the execution transitions to `RECOVERY_REQUIRED` and pauses. Subsequent tracks remain `PENDING`. They are **never** skipped or inserted out of order, preserving canonical ordering and Phase 12 count conservation invariants.
 
 ---
 
-## 6. External Operation Safety & Ambiguity Reconciliation (Phase 13F)
+## 8. Granular YouTube Provider Error Classification
 
-### 6.1 Safe Destination Playlist Creation
-**Problem**: YouTube Data API v3 `POST /playlists` does not accept client idempotency tokens. If a creation call times out or throws HTTP 503, YouTube may have created the playlist, and a retry creates a duplicate.
+YouTube API returns diverse error conditions under HTTP 403 and 400 that require distinct handling:
 
-**Architecture Solution: Two-Phase Allocation & Pre-Creation Verification**:
-1. **Durable Intent Record**: The backend initializes `MigrationExecution` in a new pre-mutation state `ALLOCATING_DESTINATION` *before* invoking YouTube.
-2. **Ambiguity Reconciliation on Timeout**:
-   If `createPlaylist` times out or fails with 5xx:
-   - The backend queries `GET https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true` (costs only 1 quota unit, compared to 50 for creation).
-   - Filters user playlists for title matching `targetPlaylistTitle` created within $\pm 5$ minutes of the recorded start time.
-   - **If a matching playlist is discovered**: The backend links that playlist ID and transitions execution to `QUEUED`. Zero duplicate playlists created!
-   - **If verified absent**: The backend safely creates the playlist on retry.
+| Status Code | Error Reason / Domain | Meaning | Retry Policy | Action |
+|---|---|---|:---:|---|
+| **403** | `quotaExceeded` | Daily project quota (10,000 units) exhausted. | **NON-RETRYABLE** (in-window) | Halt execution; set `next_retry_at = nextPacificMidnight`; alert user. |
+| **403** | `userRateLimitExceeded` | Per-user short-term QPS limit exceeded. | **RETRYABLE** | Exponential backoff with full jitter; durable release if $> 2\text{ s}$. |
+| **403** | `rateLimitExceeded` | System-wide short-term rate limit exceeded. | **RETRYABLE** | Exponential backoff with full jitter. |
+| **403** | `insufficientPermissions`<br>`forbidden` | OAuth scope revoked or account suspended. | **NON-RETRYABLE** | Fast-fail execution; prompt for re-authorization. |
+| **401** | `invalidCredentials`<br>`tokenExpired` | Access token expired. | **CONDITIONAL** | Refresh token via `OAuthTokenLifecycleService`. If successful, retry once. If failed, require login. |
+| **404** | `videoNotFound` | Video removed or private. | **NON-RETRYABLE** | Mark track `FAILED`; mark subsequent tracks `SKIPPED`. |
+| **404** | `playlistNotFound` | Destination playlist deleted on YouTube. | **NON-RETRYABLE** | Halt execution; transition to `FAILED`. |
+| **429** | Standard HTTP 429 | Rate limit. | **RETRYABLE** | Parse `Retry-After`; back off accordingly. |
+| **500 / 503** | Server Error | Internal provider error during mutation. | **AMBIGUOUS** | Do not blind retry. Invoke Section 7 multi-stage reconciliation. |
 
-```
-                  ┌──────────────────────────────────────────────┐
-                  │ 1. Record Execution: ALLOCATING_DESTINATION  │
-                  └──────────────────────┬───────────────────────┘
-                                         │
-                         2. POST /playlists to YouTube
-                                         │
-                       ┌─────────────────┴─────────────────┐
-                  [ Success ]                         [ Timeout / 5xx ]
-                       │                                   │
-             Store playlistId                              ▼
-             Transition -> QUEUED         3. Query GET /playlists?mine=true
-                                                           │
-                                            ┌──────────────┴──────────────┐
-                                       [ Found ]                     [ Absent ]
-                                            │                             │
-                                  Link discovered playlist       Safely re-invoke createPlaylist
-                                  Transition -> QUEUED           Transition -> QUEUED
-```
-
-### 6.2 Safe Ordered Track Insertion
-**Problem**: YouTube Data API v3 `POST /playlistItems` does not accept client idempotency tokens. Retrying an ambiguous timeout blindly causes duplicate tracks in the playlist and corrupts canonical ordering. Furthermore, Spotify source playlists may legitimately contain duplicate tracks (e.g., Track 2 and Track 10 are the same video ID).
-
-**Architecture Solution: Evidence-Based Inline Reconciliation**:
-Before retrying any track that experienced a network timeout or 503:
-1. Invoke `MusicDestination.inspectPlaylist(...)` (Phase 11G remote state verification).
-2. Retrieve all items currently in the YouTube playlist.
-3. Exclude all `playlistItemId`s already assigned to existing confirmed `ADDED` tracks (`assignedPlaylistItemIds`).
-4. Evaluate unassigned items matching `destinationTrackId`:
-   - **Zero unassigned items found**: Proves the item was **never inserted**. Transition track back to `PENDING` and safely retry.
-   - **Exactly one unassigned item found with matching timestamp**: Proves the item was **successfully inserted**. Transition track to `ADDED`, record `destinationPlaylistItemId`, increment destination index, and proceed to next track.
-   - **Multiple unassigned items found**: Ambiguous duplicate condition. Mark track `UNCERTAIN`, transition execution to `RECOVERY_REQUIRED`, and require human review.
-
-This completely eliminates duplicate track insertions without relying on blind retries!
+### 8.1 Implemented Phase 13B Classification Subsystem
+In Phase 13B, the failure classification engine was implemented in `com.spotifyyoutube.migrator.migration.reliability.classification`:
+1. **`ProviderFailureCategory` (Enum)**: 9 structured categories (`RATE_LIMITED`, `USER_RATE_LIMITED`, `QUOTA_EXCEEDED`, `PERMISSION_DENIED`, `AUTH_EXPIRED`, `NOT_FOUND`, `INVALID_REQUEST`, `TRANSIENT_SERVER_ERROR`, `UNKNOWN`).
+2. **`RetryEligibility` (Enum)**: Signals downstream retry policies whether an error is `RETRYABLE`, `NON_RETRYABLE`, `DEFERRED_RESET`, or `REQUIRES_REAUTHORIZATION`.
+3. **`RetryAfterResult` (Record)**: Strongly-typed outcome of `Retry-After` header parsing (`VALID`, `MISSING`, `INVALID`) providing parsed `Duration`, original header value, and failure diagnostics.
+4. **`RetryAfterParser` (Class)**: RFC 9110 Section 10.2.3 compliant parser supporting delta-seconds (strictly non-negative decimal digits `1*DIGIT`, rejecting explicit positive signs, negative numbers, and decimals) and RFC-1123 / RFC-850 / ASCTIME HTTP-dates. Never truncates provider-specified delays; returns `Duration.ZERO` for dates in the past; safely handles `Long.MAX_VALUE` overflows; and supports injectable `Clock` for deterministic testing.
+5. **`ProviderFailureClassification` (Record)**: Immutable classification result carrying category, HTTP status, provider error reason, retry eligibility, parsed `Duration` delay, and sanitized diagnostic message.
+6. **`ProviderFailureClassifier` (Class)**: Engine evaluating status codes, provider JSON error bodies (`error.errors[].reason`), and Spring `RestClient` exceptions. Strictly keeps YouTube HTTP 403 `quotaExceeded` distinct from `userRateLimitExceeded` and treats unknown provider reasons defensively as non-retryable. Implements regex token sanitization redacting credentials from diagnostic messages.
+7. **`ExternalProviderException`**: Extended with a backward-compatible `providerReason` field and getter.
+8. **Unit Test Coverage**: Comprehensive test suites in `RetryAfterParserTest` (20 tests) and `ProviderFailureClassifierTest` (25 tests) verifying all parsing formats, error categories, edge cases, and credential sanitization.
 
 ---
 
-## 7. State Transition Machine & Invariants
+## 9. API Idempotency Contract & Lifecycle Retention
 
-### 7.1 Authoritative Execution Lifecycle State Machine
+### 9.1 Request Fingerprint Specification
+To guarantee canonical serialization across platforms and versions, the request fingerprint is computed as:
 
-```mermaid
-stateDiagram-v2
-    [*] --> INITIALIZING: Client submits
-    INITIALIZING --> QUEUED: Playlist created & tracks persisted
-    INITIALIZING --> ALLOCATING_DESTINATION: Resolving destination playlist
-    ALLOCATING_DESTINATION --> QUEUED: Destination verified/created
-    
-    QUEUED --> RUNNING: Claimed by worker thread
-    QUEUED --> INITIALIZED: Worker queue saturated (AbortPolicy reset)
-    
-    RUNNING --> RUNNING: Transient track retry (in-flight backoff)
-    RUNNING --> COMPLETED: All tracks ADDED
-    RUNNING --> PARTIALLY_COMPLETED: Finished with some FAILED/SKIPPED
-    RUNNING --> RECOVERY_REQUIRED: UNCERTAIN track or lease expired
-    RUNNING --> FAILED: Zero tracks added, unrecoverable provider failure
-    
-    RECOVERY_REQUIRED --> RUNNING: Automated/manual reconciliation confirms state
-    PARTIALLY_COMPLETED --> QUEUED: Scheduled retry for eligible tracks
-    
-    COMPLETED --> PARTIALLY_ROLLED_BACK: Rollback initiated
-    PARTIALLY_ROLLED_BACK --> ROLLED_BACK: All tracks removed
-    ROLLED_BACK --> [*]
-    COMPLETED --> [*]
-    FAILED --> [*]
-```
+$$\text{RequestFingerprint} = \text{"v1:"} \parallel \text{HEX}(\text{SHA-256}(U \parallel R \parallel T \parallel D \parallel P))$$
 
-### 7.2 Track Lifecycle States & Count Conservation Invariant
+Where fields are separated by the ASCII Unit Separator (`\u001F`):
+- $U$: `userId.toString()`
+- $R$: `reviewSessionId.toString()`
+- $T$: `targetPlaylistTitle.trim()`
+- $D$: `targetPlaylistDescription != null ? targetPlaylistDescription.trim() : ""`
+- $P$: `isPrivate ? "true" : "false"`
 
-The 8 track statuses established in Phase 11E/12F remain strictly conserved:
-$$\text{totalTracks} = \text{pending} + \text{adding} + \text{added} + \text{failed} + \text{uncertain} + \text{skipped} + \text{rollingBack} + \text{rolledBack}$$
-
-$$\text{processedTracks} = \text{added} + \text{failed} + \text{uncertain} + \text{skipped} + \text{rolledBack}$$
-
-$$\text{remainingTracks} = \text{totalTracks} - \text{processedTracks}$$
-
-$$\text{progressPercentage} = \text{round}\left(\frac{\text{processedTracks}}{\text{totalTracks}} \times 100.0, 1\right)$$
-
-**State Transition Safety Rule**:
-During an automatic retry, a track transitions:
-$$\text{ADDING} \longrightarrow \text{RETRYING} \longrightarrow \text{ADDING} \longrightarrow \text{ADDED}$$
-To preserve the 8-state invariant without altering database check constraints or breaking Phase 12 progress calculations:
-- While waiting between retry attempts, the track remains in status `PENDING` (with `attempt_count` incremented) or `ADDING`.
-- When an attempt begins, it is `ADDING`.
-- Only settled terminal attempts transition to `ADDED`, `FAILED`, or `UNCERTAIN`.
+### 9.2 Lifecycle Retention Policy
+1. **Active & Recoverable Executions**: Idempotency records associated with executions in `INITIALIZING`, `ALLOCATING_DESTINATION`, `QUEUED`, `RUNNING`, `RECOVERY_REQUIRED`, or `PARTIALLY_COMPLETED` **NEVER EXPIRE** (`expires_at = NULL`).
+2. **Terminal Executions**: When an execution transitions to `COMPLETED`, `FAILED`, or `ROLLED_BACK`, the idempotency record's `expires_at` is set to:
+   $$\text{expires_at} = \text{NOW}() + \text{INTERVAL '72 hours'}$$
+3. **Purge Sweeper Safety**:
+   ```sql
+   DELETE FROM migration_idempotency_keys
+   WHERE expires_at IS NOT NULL AND expires_at < NOW()
+     AND status IN ('COMPLETED', 'FAILED');
+   ```
+   Ensures an active migration can never have its idempotency protection stripped while executing or awaiting recovery.
+4. **Header Requirement**: `Idempotency-Key` remains **optional** for backward compatibility on `POST /api/migrations`, but **mandatory** on the typed endpoint `POST /api/migrations/submit`.
 
 ---
 
-## 8. Database Schema Evolution Proposals (Flyway V10)
-
-The proposed schema changes build cleanly on the existing `migration_executions` and `execution_track_records` tables without creating redundant job aggregates.
-
-### 8.1 Flyway Migration `V10__phase13_reliability_and_idempotency.sql`
+## 10. Database Schema Evolution Proposals (Flyway V10)
 
 ```sql
 -- V10__phase13_reliability_and_idempotency.sql
--- Phase 13: Reliability Engineering, Durable Retries & API Idempotency
 
 -- 1. Dedicated Idempotency Table
 CREATE TABLE migration_idempotency_keys (
@@ -318,103 +370,112 @@ CREATE TABLE migration_idempotency_keys (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
     user_id UUID NOT NULL,
     idempotency_key VARCHAR(128) NOT NULL,
-    request_hash VARCHAR(64) NOT NULL,
+    request_hash VARCHAR(67) NOT NULL, -- "v1:" + 64 hex chars
     execution_id UUID,
     status VARCHAR(50) NOT NULL DEFAULT 'PROCESSING',
     response_status INT,
     response_body TEXT,
-    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE, -- NULL while execution is active!
     version BIGINT NOT NULL DEFAULT 0,
     CONSTRAINT fk_idempotency_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT fk_idempotency_execution FOREIGN KEY (execution_id) REFERENCES migration_executions (id) ON DELETE SET NULL,
     CONSTRAINT uq_idempotency_user_key UNIQUE (user_id, idempotency_key)
 );
 
-CREATE INDEX idx_idempotency_expires_at ON migration_idempotency_keys(expires_at);
+CREATE INDEX idx_idempotency_expires_at ON migration_idempotency_keys(expires_at) WHERE expires_at IS NOT NULL;
 CREATE INDEX idx_idempotency_user_created ON migration_idempotency_keys(user_id, created_at);
 
--- 2. Enhance migration_executions for Durable Retry Scheduling
+-- 2. Durable Worker Lease & Playlist Creation Retry on migration_executions
 ALTER TABLE migration_executions
+ALTER COLUMN destination_playlist_id DROP NOT NULL, -- Nullable during ALLOCATING_DESTINATION!
+ADD COLUMN lease_owner VARCHAR(128),
+ADD COLUMN lease_until TIMESTAMP WITH TIME ZONE,
+ADD COLUMN heartbeat_at TIMESTAMP WITH TIME ZONE,
+ADD COLUMN lease_generation BIGINT NOT NULL DEFAULT 0,
 ADD COLUMN retry_count INT NOT NULL DEFAULT 0,
 ADD COLUMN max_retries INT NOT NULL DEFAULT 3,
 ADD COLUMN next_retry_at TIMESTAMP WITH TIME ZONE,
-ADD COLUMN last_retry_at TIMESTAMP WITH TIME ZONE,
-ADD COLUMN last_failure_reason TEXT;
+ADD COLUMN last_failure_reason TEXT,
+ADD COLUMN playlist_creation_operation_id UUID,
+ADD COLUMN playlist_creation_attempt_count INT NOT NULL DEFAULT 0,
+ADD COLUMN playlist_creation_max_attempts INT NOT NULL DEFAULT 3,
+ADD COLUMN playlist_creation_next_attempt_at TIMESTAMP WITH TIME ZONE;
 
-CREATE INDEX idx_migrationexecutions_retry_poll 
-ON migration_executions(status, next_retry_at) 
-WHERE status = 'QUEUED';
+CREATE INDEX idx_migrationexecutions_poll 
+ON migration_executions(status, next_retry_at, lease_until) 
+WHERE status IN ('QUEUED', 'RUNNING');
 
--- 3. Enhance execution_track_records for Retry Diagnostics
+-- 3. Track Insertion Retry Metadata on execution_track_records
 ALTER TABLE execution_track_records
-ADD COLUMN last_retry_at TIMESTAMP WITH TIME ZONE,
+ADD COLUMN max_attempts INT NOT NULL DEFAULT 3,
+ADD COLUMN next_attempt_at TIMESTAMP WITH TIME ZONE,
+ADD COLUMN last_failure_classification VARCHAR(50),
 ADD COLUMN retry_backoff_ms BIGINT;
+
+CREATE INDEX idx_executiontracks_retry 
+ON execution_track_records(execution_id, status, next_attempt_at) 
+WHERE status IN ('PENDING', 'ADDING');
 ```
 
 ---
 
-## 9. API Contract Proposals
+## 11. Updated Phase 13B–13I Implementation Breakdown & Dependencies
 
-### 9.1 Request Header Specifications
-Clients may supply `Idempotency-Key` when submitting migrations:
-
-```http
-POST /api/migrations HTTP/1.1
-Host: api.spotifyyoutubemigrator.com
-Authorization: Bearer <user_jwt>
-Idempotency-Key: 7b9c1d2e-3f4a-4b5c-8d9e-0f1a2b3c4d5e
-Content-Type: application/json
-
-{
-  "reviewSessionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
-}
+```mermaid
+graph TD
+    A[Phase 13A: Architecture Audit & Design] --> B[Phase 13B: Provider Failure Classification Engine]
+    B --> C[Phase 13C: Retry Policy & Exponential Backoff Engine]
+    C --> D[Phase 13D: Durable Lease & Atomic Scheduler]
+    A --> E[Phase 13E: API Idempotency Contract]
+    D --> F[Phase 13F: External Operation Safety & Reconciliation]
+    E --> F
+    F --> G[Phase 13G: Migration Recovery & Resume Integration]
+    G --> H[Phase 13H: Reliability & Fault-Injection Testing]
+    H --> I[Phase 13I: Verification, Documentation & Freeze]
 ```
 
-### 9.2 Response Headers & Schemas
-Responses generated from idempotent endpoints include:
-- `Idempotency-Key`: Echoes the provided key.
-- `Location`: `/api/migrations/{executionId}/progress`
-- `Retry-After`: Included when returning HTTP 429 (saturation or rate limit).
-
-#### Error Response: Idempotency Conflict (HTTP 409)
-Returned when an `Idempotency-Key` is reused with a different request payload:
-```json
-{
-  "code": "CONFLICT",
-  "message": "Idempotency key '7b9c1d2e-...' was previously used with a different request payload",
-  "timestamp": "2026-11-05T00:30:00Z",
-  "path": "/api/migrations"
-}
-```
+| Subphase | Deliverables & Scope | Dependencies |
+|---|---|---|
+| **13B** | [COMPLETE & TESTED] Provider Failure Classifier: parses YouTube `error.errors[].reason` (separating `quotaExceeded` vs `userRateLimitExceeded`), HTTP 429 `Retry-After` parsing (delta-seconds and HTTP-date). Implemented in `com.spotifyyoutube.migrator.migration.reliability.classification`. | 13A |
+| **13C** | Retry Engine: AWS Full Jitter algorithm, thread-release threshold ($> 2\text{ s}$), bounded in-flight micro-retry context. | 13B |
+| **13D** | Durable Lease & Atomic Scheduler: Flyway V10, `lease_owner`, `fencing_token`, 60s lease with 15s heartbeat, atomic claim query with `SKIP LOCKED`. | 13C |
+| **13E** | API Idempotency: `migration_idempotency_keys` table, canonical `v1:SHA-256` fingerprinting, replay filters, terminal-only 72h TTL. | 13A |
+| **13F** | External Operation Safety: Destination playlist creation with `[ref: migrator-op:<id>]` marker and pre-allocation intent; track insertion multi-stage reconciliation. | 13D, 13E |
+| **13G** | Recovery & Resume Integration: Orchestrator integration, automatic background resumption, zero manual clicks required for transient faults. | 13F |
+| **13H** | Fault-Injection Testing: WireMock simulated 429s with `Retry-After`, 503 cascades, simulated network timeouts during writes, JVM termination mid-batch. | 13G |
+| **13I** | Subsystem Verification & Freeze: Documentation reconciliation, 0 Checkstyle violations, all tests passing. | 13H |
 
 ---
 
-## 10. Phase 13B–13I Implementation Plan
+## 12. Architectural Decisions & Governance Register
 
-| Subphase | Title & Scope | Involved Components | Required Tests | Acceptance Criteria |
-|---|---|---|---|---|
-| **13B** | **Provider Failure Classification** | `ExecutionFailureClassifier`, `ExecutionFailureAnalysis`, `ExternalProviderException` | Unit tests for all Spotify/YouTube 4xx/5xx/timeout codes and mutation contexts. | Deterministic classification: confirmed retryable, confirmed non-retryable, or ambiguous (uncertain). |
-| **13C** | **Retry Policy & Backoff Engine** | `RetryPolicy`, `ExponentialBackoff`, `FullJitterEngine`, `RetryContext` | Mathematical unit tests for backoff progression, full jitter distribution, and `Retry-After` capping. | Sleep duration is bounded by min/max; thundering herds prevented; provider `Retry-After` respected. |
-| **13D** | **Durable Retry Scheduling** | `DurableRetryScheduler`, `MigrationExecutionRepository`, Flyway V10 | PostgreSQL integration tests with `SKIP LOCKED`, concurrent sweeper claiming, startup crash recovery. | Stale `RUNNING` jobs recovered on startup; retryable `QUEUED` jobs scheduled and executed automatically without Redis. |
-| **13E** | **API Idempotency** | `IdempotencyFilter`, `IdempotencyService`, `migration_idempotency_keys` | WebMvc & concurrency tests: duplicate requests, mismatched payload 409, 202/200 replay, user scoping. | Zero duplicate executions created; concurrent identical calls return identical responses; cross-user isolation. |
-| **13F** | **External Operation Idempotency & Reconciliation** | `DefaultDestinationPlaylistCreationService`, `DefaultMigrationExecutionStateService`, `YouTubePlaylistService` | Mock destination tests: simulated timeouts during playlist creation and track insertion. | Zero duplicate playlists created on YouTube; zero duplicate tracks inserted; ambiguous mutations verified via inspection. |
-| **13G** | **Migration Recovery & Resume Integration** | `ApprovedMigrationOrchestrator`, `DefaultApprovedMigrationOrchestrator`, `MigrationJobDispatcher` | End-to-end integration tests with injected transient failures and automatic resumption. | Multi-track migrations recover seamlessly from simulated network drops without manual user clicks. |
-| **13H** | **Reliability & Fault-Injection Testing** | Testcontainers, WireMock / MockWebServer fault injection suite | Chaos testing: dropped connections, 503 cascades, rate limits, JVM killed mid-track. | 100% state conservation maintained; zero data corruption; zero orphaned in-flight locks. |
-| **13I** | **Documentation, Verification & Freeze** | `.ai/CURRENT_STATE.md`, `.ai/ROADMAP.md`, `.ai/ARCHITECTURE.md` | Full Maven verification: `mvn clean verify` with Testcontainers. | 0 Checkstyle violations; 0 test failures; formal architectural freeze of Phase 13. |
+### 12.1 Confirmed Decisions
+1. **Granular Operation-Level Retry Metadata**: Rejected monolithic execution-level retry counters. Retry metadata is owned independently by `ExecutionTrackRecord` for track insertions, by `MigrationExecution` for destination playlist creation, and by transient `RetryContext` for provider read operations.
+2. **Durable Worker Leases with Generational Fencing**: Replaced passive 5-minute timeout with a 60-second lease, 15-second active worker heartbeat, and monotonic `lease_generation` fencing token. All per-track mutations verify the caller's fencing token against `migration_executions`, eliminating zombie-worker split-brain hazards.
+3. **Strict RFC 9110 `Retry-After` Adherence**: Provider `Retry-After` instructions (delta-seconds or HTTP-date) must never be shortened by local configuration.
+4. **Worker Thread Release on Long Backoffs**: Worker threads must never sleep on long backoffs. Delays $> 2\text{ s}$ immediately release worker threads back to the bounded pool (2–4 threads) and transition to durable scheduled retries via `next_attempt_at`.
+5. **Two-Phase Atomic Claiming Protocol**: Implemented using PostgreSQL `WITH claimable AS (...) UPDATE ... RETURNING` with `FOR UPDATE SKIP LOCKED`. Post-commit dispatch safely rolls back to `QUEUED` on executor saturation without holding DB transactions open during external HTTP calls.
+6. **Terminal-Only 72-Hour Idempotency Retention**: Idempotency records associated with active or recoverable migrations never expire (`expires_at = NULL`). The 72-hour TTL begins strictly after reaching a terminal state (`COMPLETED`, `FAILED`, `ROLLED_BACK`).
+7. **Strict Progress Invariant Preservation**: The 8 track statuses and the Phase 12F mathematical count conservation invariant remain strictly preserved. No database `RETRYING` state is introduced.
+8. **YouTube Quota Deferral**: YouTube `quotaExceeded` is non-retryable within the current daily window; executions are deferred until Pacific midnight (quota reset) or fast-failed with actionable user notifications.
+9. **Zero Distributed Infrastructure**: Rejects Redis, RabbitMQ, and Kafka. PostgreSQL MVCC and row-level locking satisfy all durable queuing and scheduling requirements.
 
----
+### 12.2 Proposed Decisions
+1. **Description Correlation Marker**: Embed `\n\n[ref: migrator-op:<playlist_creation_operation_id>]` in the YouTube playlist description (~45 characters out of 5,000 limit) to achieve deterministic, machine-verifiable destination ownership without relying on fuzzy title matching.
+2. **Pre-Allocation State (`ALLOCATING_DESTINATION`)**: Persist `MigrationExecution` with `destination_playlist_id = NULL` and a unique `playlist_creation_operation_id` before calling YouTube, enabling exact post-timeout reconciliation.
+3. **Idempotency Header Requirement Policy**: `Idempotency-Key` remains optional for backward compatibility on legacy `POST /api/migrations`, but is enforced as mandatory on the typed endpoint `POST /api/migrations/submit`.
+4. **Replication Lag Multi-Stage Verification**: To account for YouTube's eventual consistency, track reconciliation enforces a 3-second grace period and second verification read before concluding an item was not applied.
 
-## 11. Risk Register & Unresolved Architectural Decisions
+### 12.3 Unresolved Questions
+1. **Automated Quota Reset Scheduling**: Should the scheduler automatically wake deferred `quotaExceeded` migrations at 00:05 Pacific Time, or should resumption require explicit user initiation the following day? (Proposed resolution: Implement automated scheduling in Phase 13D with an opt-out configuration flag).
+2. **Correlation Marker Customization**: Should advanced API callers be permitted to suppress or customize the `[ref: migrator-op:<id>]` description signature? (Proposed resolution: Keep standard and mandatory in Phase 13 to guarantee zero duplicate playlists; evaluate user-facing preferences in Phase 15).
+3. **High-Volume Key Purge Optimization**: For large multi-tenant deployments, should `migration_idempotency_keys` adopt monthly table partitioning by `created_at`? (Proposed resolution: Single table with composite index is sufficient for Phase 13; table partitioning deferred to Phase 19 deployment architecture).
 
-| ID | Category | Risk / Decision Description | Impact | Proposed Mitigation / Decision |
-|---|---|---|:---:|---|
-| **R-01** | External API | YouTube API daily quota exhaustion (10,000 units/day). Retrying too aggressively will rapidly consume daily quota. | **HIGH** | Strict retry caps on mutation calls: maximum 2 retries for track insertion (each insert = 50 units). Immediate non-retryable halt on `quotaExceeded`. |
-| **R-02** | Concurrency | Concurrent database polling sweepers in clustered deployment could contend for retry records. | **MEDIUM** | Use PostgreSQL `FOR UPDATE SKIP LOCKED` on the retry polling query to ensure zero lock contention between instances. |
-| **R-03** | Storage | `migration_idempotency_keys` table growth over time. | **LOW** | Include `expires_at` column (72-hour TTL). A lightweight daily scheduled purge removes expired keys. |
-| **R-04** | Latency | Inline remote playlist inspection adds latency to worker processing during network timeouts. | **MEDIUM** | Only perform inspection when a timeout or 5xx occurs; inspection is paginated (up to 50 items/page). Total timeout budget capped at 15s. |
-| **DEC-01** | Architecture | **Decision**: Use PostgreSQL for durable retry scheduling instead of introducing Redis or RabbitMQ. | **CONFIRMED** | In accordance with ADR-003 and ADR-007, PostgreSQL MVCC with `SKIP LOCKED` fully satisfies throughput requirements for our bounded pool (4 workers) without infrastructure complexity. |
-| **DEC-02** | Architecture | **Decision**: Retain 8 track statuses in domain model; do not introduce `RETRYING` track status in database. | **CONFIRMED** | Preserves Phase 12 mathematical count conservation invariant and Flyway check constraints without regression. |
-
----
-
-*Phase 13A Architecture & Design Document Complete. Implementation ready to begin in Phase 13B upon architecture review.*
+### 12.4 Implementation Dependencies
+- **Phase 13B $\to$ 13C**: `ProviderFailureClassifier` and `RetryAfterParser` must be implemented before the `RetryPolicy` and `FullJitterEngine`.
+- **Phase 13C $\to$ 13D**: The backoff engine must be completed before the PostgreSQL `DurableRetryScheduler`.
+- **Phase 13A $\to$ 13E**: `ApiIdempotencyFilter` and `migration_idempotency_keys` schema can proceed in parallel with 13B–13D.
+- **Phase 13D + 13E $\to$ 13F**: Destination playlist pre-allocation and multi-stage track reconciliation depend on both the durable lease scheduler and idempotency tracking.
+- **Phase 13F $\to$ 13G**: Automatic background resumption in `MigrationBackgroundWorker` depends on external operation safety and reconciliation.
+- **Phase 13G $\to$ 13H**: Chaos and fault-injection testing depends on full orchestrator integration.
+- **Phase 13H $\to$ 13I**: Documentation freeze and verification requires all unit and integration fault-injection suites to pass.

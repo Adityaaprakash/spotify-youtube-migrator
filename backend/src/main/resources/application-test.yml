@@ -1,11 +1,15 @@
 spring:
   datasource:
-    url: jdbc:tc:postgresql:16:///spotify_youtube_test
+    url: jdbc:tc:postgresql:16:///spotify_youtube_test?options=-c%20timezone=UTC
     driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
 
   jpa:
     hibernate:
       ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
 
   flyway:
     enabled: true
