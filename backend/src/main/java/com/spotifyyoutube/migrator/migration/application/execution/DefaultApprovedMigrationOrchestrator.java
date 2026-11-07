@@ -13,6 +13,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Migr
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ReconcileExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RecoverExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,6 +65,9 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
         // Step 1: Pre-mutation validated execution context (Phase 11B)
         ExecutionValidationResult validationResult = executionService.validateExecution(request, authenticatedUserId);
         if (!validationResult.isValid()) {
+            if (isSessionNotFoundOrUnauthorized(validationResult)) {
+                throw new ResourceNotFoundException("Review session not found with id: " + sessionId);
+            }
             log.warn("Approved migration execution rejected by validator for review session {}: {}",
                     sessionId, validationResult.errors());
             throw new MigrationExecutionValidationException("Approved migration execution validation failed", validationResult);
@@ -147,6 +151,9 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
         // Step 1: Pre-mutation validated execution context (Phase 11B)
         ExecutionValidationResult validationResult = executionService.validateExecution(request, authenticatedUserId);
         if (!validationResult.isValid()) {
+            if (isSessionNotFoundOrUnauthorized(validationResult)) {
+                throw new ResourceNotFoundException("Review session not found with id: " + sessionId);
+            }
             log.warn("Approved migration rejected by validator for review session {}: {}",
                     sessionId, validationResult.errors());
             throw new MigrationExecutionValidationException("Approved migration execution validation failed", validationResult);
@@ -250,5 +257,20 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
     @Override
     public MigrationExecutionSummary getExecutionSummaryByReviewSession(UUID reviewSessionId, UUID authenticatedUserId) {
         return executionStateService.getExecutionByReviewSession(reviewSessionId, authenticatedUserId);
+    }
+
+    /**
+     * Determines whether a validation failure is caused by an unauthorized access attempt
+     * (cross-user IDOR) or a nonexistent review session, which must be mapped to
+     * {@link ResourceNotFoundException} (HTTP 404) to prevent existence disclosure.
+     */
+    private boolean isSessionNotFoundOrUnauthorized(ExecutionValidationResult result) {
+        if (result == null || result.errors() == null) {
+            return false;
+        }
+        return result.errors().stream().anyMatch(error ->
+                error.code() == ValidationFailureCode.UNAUTHORIZED
+                || (error.code() == ValidationFailureCode.MISSING_CONTEXT && !error.isTrackLevel())
+        );
     }
 }
