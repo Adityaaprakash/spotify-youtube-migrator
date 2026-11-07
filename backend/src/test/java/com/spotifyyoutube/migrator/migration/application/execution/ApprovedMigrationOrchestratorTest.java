@@ -325,6 +325,108 @@ class ApprovedMigrationOrchestratorTest {
                     .isInstanceOf(ResourceNotFoundException.class)
                     .hasMessageContaining("not found");
         }
+
+        @Test
+        @DisplayName("Anti-IDOR: prepareQueuedMigration throws ResourceNotFoundException when review session belongs to another user")
+        void prepareQueuedMigrationThrowsNotFoundOnUnauthorized() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.invalid(List.of(
+                            ExecutionValidationError.sessionLevel(
+                                    ValidationFailureCode.UNAUTHORIZED, "User not authorized to execute review session"
+                            )
+                    )));
+
+            assertThatThrownBy(() -> orchestrator.prepareQueuedMigration(request, userId))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Review session not found with id: " + sessionId);
+
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
+        }
+
+        @Test
+        @DisplayName("Anti-IDOR: prepareQueuedMigration throws ResourceNotFoundException when review session does not exist")
+        void prepareQueuedMigrationThrowsNotFoundOnMissingSession() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.invalid(List.of(
+                            ExecutionValidationError.sessionLevel(
+                                    ValidationFailureCode.MISSING_CONTEXT, "Review session not found with id: " + sessionId
+                            )
+                    )));
+
+            assertThatThrownBy(() -> orchestrator.prepareQueuedMigration(request, userId))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Review session not found with id: " + sessionId);
+
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
+        }
+
+        @Test
+        @DisplayName("Anti-IDOR: executeApprovedMigration throws ResourceNotFoundException when review session belongs to another user")
+        void executeApprovedMigrationThrowsNotFoundOnUnauthorized() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.invalid(List.of(
+                            ExecutionValidationError.sessionLevel(
+                                    ValidationFailureCode.UNAUTHORIZED, "User not authorized"
+                            )
+                    )));
+
+            assertThatThrownBy(() -> orchestrator.executeApprovedMigration(request, userId))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Review session not found with id: " + sessionId);
+
+            verify(playlistCreationService, never()).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), any());
+        }
+
+        @Test
+        @DisplayName("Domain validation: track-level MISSING_CONTEXT throws MigrationExecutionValidationException")
+        void trackLevelMissingContextThrowsMigrationExecutionValidationException() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.invalid(List.of(
+                            ExecutionValidationError.trackLevel(
+                                    ValidationFailureCode.MISSING_CONTEXT, 0, "sp0", "Track at position 0 is null"
+                            )
+                    )));
+
+            assertThatThrownBy(() -> orchestrator.prepareQueuedMigration(request, userId))
+                    .isInstanceOf(MigrationExecutionValidationException.class)
+                    .hasMessageContaining("validation failed");
+        }
+
+        @Test
+        @DisplayName("Domain validation: INCOMPLETE_REVIEW on executeApprovedMigration throws MigrationExecutionValidationException")
+        void executeApprovedMigrationIncompleteReviewThrowsMigrationExecutionValidationException() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.invalid(List.of(
+                            ExecutionValidationError.sessionLevel(
+                                    ValidationFailureCode.INCOMPLETE_REVIEW, "Review session is still in progress"
+                            )
+                    )));
+
+            assertThatThrownBy(() -> orchestrator.executeApprovedMigration(request, userId))
+                    .isInstanceOf(MigrationExecutionValidationException.class)
+                    .hasMessageContaining("validation failed");
+        }
+
+        @Test
+        @DisplayName("Anti-IDOR Policy: Multiple errors including UNAUTHORIZED take precedence and throw ResourceNotFoundException")
+        void multipleErrorsUnauthorizedTakesPrecedence() {
+            when(executionService.validateExecution(request, userId))
+                    .thenReturn(ExecutionValidationResult.invalid(List.of(
+                            ExecutionValidationError.sessionLevel(
+                                    ValidationFailureCode.INCOMPLETE_REVIEW, "Review in progress"
+                            ),
+                            ExecutionValidationError.sessionLevel(
+                                    ValidationFailureCode.UNAUTHORIZED, "Unauthorized user"
+                            ),
+                            ExecutionValidationError.trackLevel(
+                                    ValidationFailureCode.UNRESOLVED_TRACK, 1, "sp1", "Unresolved track"
+                            )
+                    )));
+
+            assertThatThrownBy(() -> orchestrator.prepareQueuedMigration(request, userId))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Review session not found with id: " + sessionId);
+        }
     }
 
     @Nested

@@ -7,11 +7,13 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Appr
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,6 +24,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -46,6 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("test")
 @Import(JpaConfig.class)
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DisplayName("Phase 12G-C: PostgreSQL Atomic QUEUED Execution Claiming Integration Test")
 public class AtomicQueuedExecutionClaimIT {
 
@@ -59,13 +64,29 @@ public class AtomicQueuedExecutionClaimIT {
     private MigrationExecutionRepository executionRepository;
 
     @Autowired
+    private ExecutionTrackRecordRepository trackRecordRepository;
+
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     private User testUser;
 
     @BeforeEach
     void setUp() {
+        cleanDatabase();
         testUser = userRepository.save(new User("claim-it-" + UUID.randomUUID() + "@example.com"));
+    }
+
+    @AfterEach
+    void tearDown() {
+        cleanDatabase();
+    }
+
+    private void cleanDatabase() {
+        trackRecordRepository.deleteAll();
+        executionRepository.deleteAll();
+        reviewSessionRepository.deleteAll();
+        userRepository.deleteAll();
     }
 
     private MigrationExecution createExecutionInStatus(MigrationExecutionStatus initialStatus) {
@@ -131,19 +152,21 @@ public class AtomicQueuedExecutionClaimIT {
             });
         }
 
-        boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
-        executor.shutdown();
+        try {
+            boolean completed = doneLatch.await(10, TimeUnit.SECONDS);
+            assertThat(completed).isTrue();
+            // EXACTLY ONE worker claimed the execution
+            assertThat(successfulClaims.get()).isEqualTo(1);
+            // All other workers were rejected
+            assertThat(rejectedClaims.get()).isEqualTo(workerCount - 1);
 
-        assertThat(completed).isTrue();
-        // EXACTLY ONE worker claimed the execution
-        assertThat(successfulClaims.get()).isEqualTo(1);
-        // All other workers were rejected
-        assertThat(rejectedClaims.get()).isEqualTo(workerCount - 1);
-
-        // Verify database state: status is RUNNING and version was incremented
-        MigrationExecution updated = executionRepository.findById(executionId).orElseThrow();
-        assertThat(updated.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
-        assertThat(updated.getVersion()).isEqualTo(initialVersion + 1L);
+            // Verify database state: status is RUNNING and version was incremented
+            MigrationExecution updated = executionRepository.findById(executionId).orElseThrow();
+            assertThat(updated.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
+            assertThat(updated.getVersion()).isEqualTo(initialVersion + 1L);
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     @Test

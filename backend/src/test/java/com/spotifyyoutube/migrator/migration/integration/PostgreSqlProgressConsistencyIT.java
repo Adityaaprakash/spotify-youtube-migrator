@@ -6,7 +6,6 @@ import com.spotifyyoutube.migrator.identity.repository.UserRepository;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
-import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
@@ -16,6 +15,7 @@ import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +26,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -39,8 +41,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 /**
  * Integration test for PostgreSQL REPEATABLE_READ snapshot consistency and progress calculation (Phase 12G-B).
@@ -49,6 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("test")
 @Import({JpaConfig.class, DefaultMigrationProgressService.class})
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DisplayName("Phase 12G-B: PostgreSQL REPEATABLE_READ Progress Consistency Integration Test")
 public class PostgreSqlProgressConsistencyIT {
 
@@ -76,6 +81,8 @@ public class PostgreSqlProgressConsistencyIT {
 
     @BeforeEach
     void setUp() {
+        cleanDatabase();
+
         testUser = userRepository.save(new User("progress-it-" + UUID.randomUUID() + "@example.com"));
 
         ReviewSession session = new ReviewSession(testUser, "sp_pl_" + UUID.randomUUID(), "Source PL", UUID.randomUUID());
@@ -102,6 +109,18 @@ public class PostgreSqlProgressConsistencyIT {
         assertThat(persistedTracks).hasSize(5);
     }
 
+    @AfterEach
+    void tearDown() {
+        cleanDatabase();
+    }
+
+    private void cleanDatabase() {
+        trackRecordRepository.deleteAll();
+        executionRepository.deleteAll();
+        reviewSessionRepository.deleteAll();
+        userRepository.deleteAll();
+    }
+
     @Test
     @DisplayName("Test 1 & 2: Stable REPEATABLE_READ snapshot survives concurrent modification, and subsequent read observes committed state")
     void stableRepeatableReadSnapshotAcrossConcurrentModification() throws Exception {
@@ -118,44 +137,55 @@ public class PostgreSqlProgressConsistencyIT {
         CountDownLatch concurrentWriteCommitted = new CountDownLatch(1);
         ExecutorService writerExecutor = Executors.newSingleThreadExecutor();
 
+        AtomicReference<Throwable> readerError = new AtomicReference<>(null);
+
         try {
             Future<Void> readerFuture = writerExecutor.submit(() -> {
-                repeatableReadTemplate.execute(status -> {
-                    // First read inside REPEATABLE_READ transaction: all 5 PENDING
-                    MigrationProgressSnapshot snapshot1 = progressService.getProgress(executionId, userId);
-                    assertThat(snapshot1.totalTracks()).isEqualTo(5);
-                    assertThat(snapshot1.pendingTracks()).isEqualTo(5);
-                    assertThat(snapshot1.addedTracks()).isEqualTo(0);
-                    assertThat(snapshot1.processedTracks()).isEqualTo(0);
-                    assertThat(snapshot1.progressPercentage()).isEqualTo(0.0);
+                try {
+                    repeatableReadTemplate.execute(status -> {
+                        // First read inside REPEATABLE_READ transaction: all 5 PENDING
+                        MigrationProgressSnapshot snapshot1 = progressService.getProgress(executionId, userId);
+                        assertThat(snapshot1.totalTracks()).isEqualTo(5);
+                        assertThat(snapshot1.pendingTracks()).isEqualTo(5);
+                        assertThat(snapshot1.addedTracks()).isEqualTo(0);
+                        assertThat(snapshot1.processedTracks()).isEqualTo(0);
+                        assertThat(snapshot1.progressPercentage()).isEqualTo(0.0);
 
+                        firstReadDone.countDown();
+
+                        // Wait for the concurrent writer to commit changes
+                        try {
+                            boolean awaited = concurrentWriteCommitted.await(5, TimeUnit.SECONDS);
+                            assertThat(awaited).isTrue();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new RuntimeException(e);
+                        }
+
+                        // Second read inside the SAME REPEATABLE_READ transaction:
+                        // In PostgreSQL MVCC, this transaction MUST NOT see the committed writes from the other transaction!
+                        MigrationProgressSnapshot snapshot2 = progressService.getProgress(executionId, userId);
+                        assertThat(snapshot2.totalTracks()).isEqualTo(5);
+                        assertThat(snapshot2.pendingTracks()).isEqualTo(5);
+                        assertThat(snapshot2.addedTracks()).isEqualTo(0);
+                        assertThat(snapshot2.processedTracks()).isEqualTo(0);
+                        assertThat(snapshot2.progressPercentage()).isEqualTo(0.0);
+
+                        return null;
+                    });
+                } catch (Throwable t) {
+                    readerError.compareAndSet(null, t);
                     firstReadDone.countDown();
-
-                    // Wait for the concurrent writer to commit changes
-                    try {
-                        boolean awaited = concurrentWriteCommitted.await(5, TimeUnit.SECONDS);
-                        assertThat(awaited).isTrue();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException(e);
-                    }
-
-                    // Second read inside the SAME REPEATABLE_READ transaction:
-                    // In PostgreSQL MVCC, this transaction MUST NOT see the committed writes from the other transaction!
-                    MigrationProgressSnapshot snapshot2 = progressService.getProgress(executionId, userId);
-                    assertThat(snapshot2.totalTracks()).isEqualTo(5);
-                    assertThat(snapshot2.pendingTracks()).isEqualTo(5);
-                    assertThat(snapshot2.addedTracks()).isEqualTo(0);
-                    assertThat(snapshot2.processedTracks()).isEqualTo(0);
-                    assertThat(snapshot2.progressPercentage()).isEqualTo(0.0);
-
-                    return null;
-                });
+                    throw t;
+                }
                 return null;
             });
 
             // Wait for the reader to complete its first read
             boolean read1Done = firstReadDone.await(5, TimeUnit.SECONDS);
+            if (readerError.get() != null) {
+                fail("Reader thread failed during execution: " + readerError.get().getMessage(), readerError.get());
+            }
             assertThat(read1Done).isTrue();
 
             // Perform concurrent write in a separate transaction and commit
@@ -194,7 +224,7 @@ public class PostgreSqlProgressConsistencyIT {
             });
 
         } finally {
-            writerExecutor.shutdown();
+            writerExecutor.shutdownNow();
         }
     }
 

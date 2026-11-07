@@ -27,6 +27,7 @@ import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrack;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewTrackRepository;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -86,6 +87,7 @@ public class QueuedMigrationDispatcherIT {
 
     @BeforeEach
     void setUp() {
+        cleanDatabase();
         testUser = userRepository.save(new User("queued-it-" + UUID.randomUUID() + "@example.com"));
 
         testSession = new ReviewSession(testUser, "sp_pl_" + UUID.randomUUID(), "Queued Dispatcher PL", UUID.randomUUID());
@@ -132,6 +134,19 @@ public class QueuedMigrationDispatcherIT {
 
         when(musicDestination.addTrackToPlaylist(eq(testUser.getId()), eq("yt_pl_created_123"), any(AddTrackToDestinationPlaylistRequest.class)))
                 .thenReturn(new DestinationPlaylistItem("item_yt_" + UUID.randomUUID(), "yt_pl_created_123", "yt_t", 0));
+    }
+
+    @AfterEach
+    void tearDown() {
+        cleanDatabase();
+    }
+
+    private void cleanDatabase() {
+        trackRecordRepository.deleteAll();
+        executionRepository.deleteAll();
+        reviewTrackRepository.deleteAll();
+        reviewSessionRepository.deleteAll();
+        userRepository.deleteAll();
     }
 
     @Test

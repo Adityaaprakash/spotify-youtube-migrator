@@ -137,8 +137,8 @@ class RetryPolicyTest {
         }
 
         @Test
-        @DisplayName("Defers quota exhaustion (DEFERRED_RESET) without retrying in current quota window")
-        void defersQuotaExhaustion() {
+        @DisplayName("Defers quota exhaustion (DEFERRED_RESET) with provider delay without retrying in current window")
+        void defersQuotaExhaustionWithProviderDelay() {
             ProviderFailureClassification classification = new ProviderFailureClassification(
                     ProviderFailureCategory.QUOTA_EXCEEDED,
                     403,
@@ -160,7 +160,39 @@ class RetryPolicyTest {
             assertThat(decision.decisionType()).isEqualTo(RetryDecisionType.DEFERRED_QUOTA_RESET);
             assertThat(decision.executionTier()).isEqualTo(ExecutionTier.DEFERRED);
             assertThat(decision.delay()).isEqualTo(Duration.ofHours(5));
+            assertThat(decision.hasKnownDelay()).isTrue();
+            assertThat(decision.delayOptional()).contains(Duration.ofHours(5));
             assertThat(decision.delaySource()).isEqualTo(DelaySource.PROVIDER_RETRY_AFTER);
+        }
+
+        @Test
+        @DisplayName("Defers quota exhaustion without fabricating reset timestamp when provider delay is missing")
+        void defersQuotaExhaustionWithoutFabricatingResetTimestamp() {
+            ProviderFailureClassification classification = new ProviderFailureClassification(
+                    ProviderFailureCategory.QUOTA_EXCEEDED,
+                    403,
+                    "quotaExceeded",
+                    RetryEligibility.DEFERRED_RESET,
+                    Optional.empty(),
+                    "Daily quota exceeded"
+            );
+
+            RetryDecision decision = policy.evaluate(
+                    classification,
+                    RetryOperationType.TRACK_INSERTION,
+                    RetryBudget.initial(3)
+            );
+
+            assertThat(decision.isRetryPermitted()).isFalse();
+            assertThat(decision.isQuotaDeferred()).isTrue();
+            assertThat(decision.isDeferred()).isTrue();
+            assertThat(decision.decisionType()).isEqualTo(RetryDecisionType.DEFERRED_QUOTA_RESET);
+            assertThat(decision.executionTier()).isEqualTo(ExecutionTier.DEFERRED);
+            assertThat(decision.delay()).isNull();
+            assertThat(decision.hasKnownDelay()).isFalse();
+            assertThat(decision.delayOptional()).isEmpty();
+            assertThat(decision.delaySource()).isEqualTo(DelaySource.NONE);
+            assertThat(decision.reason()).contains("quota reset time is unknown and must not be retried in current quota window");
         }
 
         @Test
@@ -283,8 +315,8 @@ class RetryPolicyTest {
         }
 
         @Test
-        @DisplayName("Defers when provider delay exceeds maximum excessive ceiling")
-        void defersExcessiveProviderDelay() {
+        @DisplayName("Escalates and rejects normal retry when provider delay exceeds maximum excessive ceiling")
+        void excessiveProviderDelayRequiresEscalation() {
             // 48 hours exceeds the 24 hour excessive threshold
             ProviderFailureClassification classification = new ProviderFailureClassification(
                     ProviderFailureCategory.RATE_LIMITED,
@@ -301,13 +333,18 @@ class RetryPolicyTest {
                     RetryBudget.initial(3)
             );
 
-            assertThat(decision.isRetryPermitted()).isTrue();
+            assertThat(decision.isRetryPermitted()).isFalse();
+            assertThat(decision.isExcessiveDelay()).isTrue();
+            assertThat(decision.isEscalationRequired()).isTrue();
+            assertThat(decision.decisionType()).isEqualTo(RetryDecisionType.EXCESSIVE_DELAY);
             assertThat(decision.isDeferred()).isTrue();
             assertThat(decision.executionTier()).isEqualTo(ExecutionTier.DEFERRED);
-            assertThat(decision.delay()).isEqualTo(Duration.ofHours(48));
+            assertThat(decision.delay()).isEqualTo(Duration.ofHours(48)); // Unshortened!
+            assertThat(decision.delaySource()).isEqualTo(DelaySource.PROVIDER_RETRY_AFTER);
             assertThat(decision.reason()).contains("excessive delay threshold");
         }
     }
+
 
     @Nested
     @DisplayName("3. Two-Tier Execution Strategy (2.0s Boundary)")
@@ -513,5 +550,101 @@ class RetryPolicyTest {
             assertThat(decision.delay()).isEqualTo(Duration.ofSeconds(5));
             assertThat(decision.isDeferred()).isTrue(); // 5s > 2s
         }
+
+        @Test
+        @DisplayName("Rejects blind retry and flags RECONCILIATION_REQUIRED for mutating track insertion with null diagnostic message")
+        void requiresReconciliationForMutatingWriteWithMissingDiagnosticMessage() {
+            ProviderFailureClassification classification = new ProviderFailureClassification(
+                    ProviderFailureCategory.TRANSIENT_SERVER_ERROR,
+                    null,
+                    null,
+                    RetryEligibility.RETRYABLE,
+                    Optional.empty(),
+                    null
+            );
+
+            RetryDecision decision = policy.evaluate(
+                    classification,
+                    RetryOperationType.TRACK_INSERTION,
+                    RetryBudget.initial(3)
+            );
+
+            assertThat(decision.isRetryPermitted()).isFalse();
+            assertThat(decision.isReconciliationRequired()).isTrue();
+            assertThat(decision.decisionType()).isEqualTo(RetryDecisionType.RECONCILIATION_REQUIRED);
+            assertThat(decision.isDeferred()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Rejects blind retry and flags RECONCILIATION_REQUIRED for mutating write with unfamiliar diagnostic message")
+        void requiresReconciliationForMutatingWriteWithUnfamiliarDiagnosticMessage() {
+            ProviderFailureClassification classification = new ProviderFailureClassification(
+                    ProviderFailureCategory.TRANSIENT_SERVER_ERROR,
+                    null,
+                    "CORRUPT_FRAME",
+                    RetryEligibility.RETRYABLE,
+                    Optional.empty(),
+                    "XYZ_UNEXPECTED_FRAME_DROP_ERR_99"
+            );
+
+            RetryDecision decision = policy.evaluate(
+                    classification,
+                    RetryOperationType.DESTINATION_PLAYLIST_CREATION,
+                    RetryBudget.initial(3)
+            );
+
+            assertThat(decision.isRetryPermitted()).isFalse();
+            assertThat(decision.isReconciliationRequired()).isTrue();
+            assertThat(decision.decisionType()).isEqualTo(RetryDecisionType.RECONCILIATION_REQUIRED);
+            assertThat(decision.isDeferred()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Rejects blind retry and flags RECONCILIATION_REQUIRED for mutating write on HTTP 500 with unfamiliar diagnostic message")
+        void requiresReconciliationForMutatingWriteOn500WithUnfamiliarMessage() {
+            ProviderFailureClassification classification = new ProviderFailureClassification(
+                    ProviderFailureCategory.TRANSIENT_SERVER_ERROR,
+                    500,
+                    "unknownInternalError",
+                    RetryEligibility.RETRYABLE,
+                    Optional.empty(),
+                    "Custom backend error message with zero keywords"
+            );
+
+            RetryDecision decision = policy.evaluate(
+                    classification,
+                    RetryOperationType.TRACK_INSERTION,
+                    RetryBudget.initial(3)
+            );
+
+            assertThat(decision.isRetryPermitted()).isFalse();
+            assertThat(decision.isReconciliationRequired()).isTrue();
+            assertThat(decision.decisionType()).isEqualTo(RetryDecisionType.RECONCILIATION_REQUIRED);
+            assertThat(decision.isDeferred()).isTrue();
+        }
+
+        @Test
+        @DisplayName("Authorizes retry for idempotent PROVIDER_READ on unfamiliar transport error")
+        void authorizesRetryForIdempotentProviderReadOnUnfamiliarTransportError() {
+            ProviderFailureClassification classification = new ProviderFailureClassification(
+                    ProviderFailureCategory.TRANSIENT_SERVER_ERROR,
+                    null,
+                    "CORRUPT_FRAME",
+                    RetryEligibility.RETRYABLE,
+                    Optional.empty(),
+                    "XYZ_UNEXPECTED_FRAME_DROP_ERR_99"
+            );
+
+            RetryDecision decision = policy.evaluate(
+                    classification,
+                    RetryOperationType.PROVIDER_READ,
+                    RetryBudget.initial(3)
+            );
+
+            assertThat(decision.isRetryPermitted()).isTrue();
+            assertThat(decision.isReconciliationRequired()).isFalse();
+            assertThat(decision.decisionType()).isEqualTo(RetryDecisionType.RETRY_PERMITTED);
+        }
     }
 }
+

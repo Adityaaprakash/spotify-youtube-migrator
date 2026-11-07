@@ -33,5 +33,11 @@ public enum RetryDecisionType {
     /**
      * Authentication failed or token expired; requires reauthorization before subsequent attempt.
      */
-    REQUIRES_REAUTHORIZATION
+    REQUIRES_REAUTHORIZATION,
+
+    /**
+     * Provider Retry-After exceeds maximum excessive delay threshold; requires escalation.
+     */
+    EXCESSIVE_DELAY
 }
+

@@ -31,12 +31,10 @@ public class DefaultRetryPolicy implements RetryPolicy {
 
     public static final Duration DEFAULT_IN_FLIGHT_THRESHOLD = Duration.ofSeconds(2);
     public static final Duration DEFAULT_MAX_EXCESSIVE_DELAY = Duration.ofHours(24);
-    public static final Duration DEFAULT_QUOTA_DEFERRAL = Duration.ofHours(1);
 
     private final BackoffCalculator backoffCalculator;
     private final Duration inFlightThreshold;
     private final Duration maxExcessiveDelay;
-    private final Duration defaultQuotaDeferral;
 
     /**
      * Constructs a default retry policy with standard backoff calculator and defaults.
@@ -52,7 +50,7 @@ public class DefaultRetryPolicy implements RetryPolicy {
      */
     @Autowired
     public DefaultRetryPolicy(BackoffCalculator backoffCalculator) {
-        this(backoffCalculator, DEFAULT_IN_FLIGHT_THRESHOLD, DEFAULT_MAX_EXCESSIVE_DELAY, DEFAULT_QUOTA_DEFERRAL);
+        this(backoffCalculator, DEFAULT_IN_FLIGHT_THRESHOLD, DEFAULT_MAX_EXCESSIVE_DELAY);
     }
 
     /**
@@ -61,27 +59,21 @@ public class DefaultRetryPolicy implements RetryPolicy {
      * @param backoffCalculator backoff calculation engine
      * @param inFlightThreshold maximum delay eligible for in-flight micro-retry (default 2s)
      * @param maxExcessiveDelay maximum delay ceiling before escalation (default 24h)
-     * @param defaultQuotaDeferral fallback deferral duration when quota is exceeded without Retry-After (default 1h)
      */
     public DefaultRetryPolicy(
             BackoffCalculator backoffCalculator,
             Duration inFlightThreshold,
-            Duration maxExcessiveDelay,
-            Duration defaultQuotaDeferral
+            Duration maxExcessiveDelay
     ) {
         this.backoffCalculator = Objects.requireNonNull(backoffCalculator, "backoffCalculator must not be null");
         this.inFlightThreshold = Objects.requireNonNull(inFlightThreshold, "inFlightThreshold must not be null");
         this.maxExcessiveDelay = Objects.requireNonNull(maxExcessiveDelay, "maxExcessiveDelay must not be null");
-        this.defaultQuotaDeferral = Objects.requireNonNull(defaultQuotaDeferral, "defaultQuotaDeferral must not be null");
 
         if (inFlightThreshold.isNegative()) {
             throw new IllegalArgumentException("inFlightThreshold must not be negative");
         }
         if (maxExcessiveDelay.isNegative() || maxExcessiveDelay.isZero()) {
             throw new IllegalArgumentException("maxExcessiveDelay must be positive");
-        }
-        if (defaultQuotaDeferral.isNegative() || defaultQuotaDeferral.isZero()) {
-            throw new IllegalArgumentException("defaultQuotaDeferral must be positive");
         }
     }
 
@@ -136,18 +128,23 @@ public class DefaultRetryPolicy implements RetryPolicy {
 
         // 4. Daily quota exhaustion (DEFERRED_RESET)
         if (eligibility == RetryEligibility.DEFERRED_RESET) {
-            Duration quotaDelay = classification.retryAfter().orElse(defaultQuotaDeferral);
-            DelaySource delaySource = classification.retryAfter().isPresent()
-                    ? DelaySource.PROVIDER_RETRY_AFTER
-                    : DelaySource.NONE;
-
-            return RetryDecision.deferredQuotaReset(
-                    operationType,
-                    budget,
-                    quotaDelay,
-                    delaySource,
-                    "Provider daily quota exhausted (HTTP 403 quotaExceeded); deferred until quota reset window without retrying in current window"
-            );
+            if (classification.retryAfter().isPresent()) {
+                Duration quotaDelay = classification.retryAfter().get();
+                return RetryDecision.deferredQuotaReset(
+                        operationType,
+                        budget,
+                        quotaDelay,
+                        DelaySource.PROVIDER_RETRY_AFTER,
+                        "Provider daily quota exhausted (HTTP 403 quotaExceeded); deferred until provider-specified reset delay of "
+                                + quotaDelay.toSeconds() + " seconds without retrying in current window"
+                );
+            } else {
+                return RetryDecision.deferredQuotaReset(
+                        operationType,
+                        budget,
+                        "Provider daily quota exhausted (HTTP 403 quotaExceeded); quota reset time is unknown and must not be retried in current quota window"
+                );
+            }
         }
 
         // 5. Unrecognized eligibility fails safely
@@ -168,7 +165,7 @@ public class DefaultRetryPolicy implements RetryPolicy {
             );
         }
 
-        // 7. Ambiguous external mutating write safety check (Section 7)
+        // 7. Ambiguous external mutating write safety check
         if (operationType.isMutating() && isAmbiguousTransportFailure(classification)) {
             return RetryDecision.reconciliationRequired(
                     operationType,
@@ -178,7 +175,7 @@ public class DefaultRetryPolicy implements RetryPolicy {
             );
         }
 
-        // 8. Determine effective delay (Section 5)
+        // 8. Determine effective delay
         Duration delay;
         DelaySource delaySource;
 
@@ -192,7 +189,19 @@ public class DefaultRetryPolicy implements RetryPolicy {
             delaySource = DelaySource.FULL_JITTER_BACKOFF;
         }
 
-        // 9. Two-tier execution strategy (Section 6)
+        // Check if provider delay exceeds excessive delay threshold
+        if (delay.compareTo(maxExcessiveDelay) > 0) {
+            return RetryDecision.excessiveDelay(
+                    operationType,
+                    budget,
+                    delay,
+                    delaySource,
+                    "Provider delay (" + delay + ") exceeds maximum excessive delay threshold ("
+                            + maxExcessiveDelay + "); escalation required, automatic retry not permitted"
+            );
+        }
+
+        // 9. Two-tier execution strategy
         boolean withinInFlightThreshold = delay.compareTo(inFlightThreshold) <= 0;
         boolean isFirstRetryAttempt = budget.isInitialAttempt();
 
@@ -215,11 +224,6 @@ public class DefaultRetryPolicy implements RetryPolicy {
                         + budget.currentAttempt() + " must be durably scheduled";
             }
 
-            if (delay.compareTo(maxExcessiveDelay) > 0) {
-                deferReason = "Deferred execution required: provider delay exceeds excessive delay threshold ("
-                        + maxExcessiveDelay.toHours() + "h)";
-            }
-
             return RetryDecision.retryDeferred(
                     operationType,
                     budget,
@@ -231,31 +235,51 @@ public class DefaultRetryPolicy implements RetryPolicy {
     }
 
     private boolean isAmbiguousTransportFailure(ProviderFailureClassification classification) {
-        // Rate-limits (429 or user-rate-limit 403) are rejected BEFORE execution, so they are not ambiguous.
+        // Rate-limits (429 or user-rate-limit 403) are rejected before execution by the provider gateway/rate-limiter;
+        // the mutation is known NOT to have executed.
         if (classification.isRateLimited()) {
             return false;
         }
 
-        // Server errors (500, 502, 503) or network socket timeouts during mutation leave the remote outcome uncertain.
-        if (classification.isTransientServerError()) {
+        // 1. Missing HTTP status indicates transport-level failure (connection drop, timeout, I/O error).
+        // The server may have received and processed the request before connection was lost.
+        if (classification.httpStatus() == null) {
             return true;
         }
 
+        // 2. 5xx Server Errors (500, 502, 503, 504) or transient server category.
+        if (classification.isTransientServerError() || classification.httpStatus() >= 500) {
+            return true;
+        }
+
+        // 3. Unknown failure category is defensive for mutating writes.
+        if (classification.isUnknown()) {
+            return true;
+        }
+
+        // 4. Provider reason or diagnostic message hints
         String reason = classification.providerReason();
-        if (reason != null) {
-            String lower = reason.toLowerCase();
-            if (lower.contains("timeout") || lower.contains("connection") || lower.contains("network")) {
-                return true;
-            }
+        if (reason != null && isTransportKeyword(reason)) {
+            return true;
         }
 
         String message = classification.diagnosticMessage();
-        if (message != null) {
-            String lower = message.toLowerCase();
-            return lower.contains("timeout") || lower.contains("connection") || lower.contains("resourceaccessexception");
+        if (message != null && isTransportKeyword(message)) {
+            return true;
         }
 
         return false;
+    }
+
+    private boolean isTransportKeyword(String text) {
+        String lower = text.toLowerCase();
+        return lower.contains("timeout")
+                || lower.contains("connection")
+                || lower.contains("network")
+                || lower.contains("socket")
+                || lower.contains("reset")
+                || lower.contains("broken pipe")
+                || lower.contains("resourceaccessexception");
     }
 
     public BackoffCalculator getBackoffCalculator() {
@@ -268,9 +292,5 @@ public class DefaultRetryPolicy implements RetryPolicy {
 
     public Duration getMaxExcessiveDelay() {
         return maxExcessiveDelay;
-    }
-
-    public Duration getDefaultQuotaDeferral() {
-        return defaultQuotaDeferral;
     }
 }

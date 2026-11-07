@@ -16,6 +16,7 @@ import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +27,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -52,6 +55,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("test")
 @Import({JpaConfig.class, DefaultMigrationProgressService.class})
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DisplayName("Phase 12G-F: PostgreSQL Progress Reading During Active Migration Integration Test")
 public class ActiveMigrationProgressIT {
 
@@ -80,6 +84,8 @@ public class ActiveMigrationProgressIT {
 
     @BeforeEach
     void setUp() {
+        cleanDatabase();
+
         testUser = userRepository.save(new User("active-progress-" + UUID.randomUUID() + "@example.com"));
 
         ReviewSession session = new ReviewSession(testUser, "sp_pl_" + UUID.randomUUID(), "Source 60 PL", UUID.randomUUID());
@@ -103,6 +109,18 @@ public class ActiveMigrationProgressIT {
         execution.markQueued();
         execution.claimExecution(); // Transition to RUNNING
         testExecution = executionRepository.saveAndFlush(execution);
+    }
+
+    @AfterEach
+    void tearDown() {
+        cleanDatabase();
+    }
+
+    private void cleanDatabase() {
+        trackRecordRepository.deleteAll();
+        executionRepository.deleteAll();
+        reviewSessionRepository.deleteAll();
+        userRepository.deleteAll();
     }
 
     @Test
@@ -131,13 +149,15 @@ public class ActiveMigrationProgressIT {
 
             for (ExecutionTrackRecord track : records) {
                 txTemplate.execute(status -> {
-                    track.markAdding();
-                    if (track.getTargetPosition() % 10 == 0) {
-                        track.markFailed("Failed track");
-                    } else if (track.getTargetPosition() % 15 == 0) {
+                    if (track.getTargetPosition() % 15 == 0 && track.getTargetPosition() % 10 != 0) {
                         track.markSkipped("Skipped track");
                     } else {
-                        track.markAdded("yt_item_" + track.getTargetPosition());
+                        track.markAdding();
+                        if (track.getTargetPosition() % 10 == 0) {
+                            track.markFailed("Failed track");
+                        } else {
+                            track.markAdded("yt_item_" + track.getTargetPosition());
+                        }
                     }
                     trackRecordRepository.saveAndFlush(track);
                     return null;
@@ -198,16 +218,18 @@ public class ActiveMigrationProgressIT {
             }));
         }
 
-        // Wait for worker to finish
-        workerFuture.get(15, TimeUnit.SECONDS);
+        try {
+            // Wait for worker to finish
+            workerFuture.get(15, TimeUnit.SECONDS);
 
-        // Wait for readers to observe finish
-        for (Future<?> f : readerFutures) {
-            f.get(5, TimeUnit.SECONDS);
+            // Wait for readers to observe finish
+            for (Future<?> f : readerFutures) {
+                f.get(5, TimeUnit.SECONDS);
+            }
+        } finally {
+            workerPool.shutdownNow();
+            readerPool.shutdownNow();
         }
-
-        workerPool.shutdown();
-        readerPool.shutdown();
 
         // Assert no error occurred during concurrent polling
         assertThat(readerError.get()).isNull();

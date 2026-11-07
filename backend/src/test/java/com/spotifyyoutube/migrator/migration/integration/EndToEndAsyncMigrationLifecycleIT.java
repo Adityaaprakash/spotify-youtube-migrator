@@ -14,6 +14,7 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.Desti
 import com.spotifyyoutube.migrator.migration.application.plan.PlanTrackClassification;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
@@ -23,6 +24,7 @@ import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrackStatus;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewTrackRepository;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -85,6 +87,9 @@ public class EndToEndAsyncMigrationLifecycleIT {
     @Autowired
     private MigrationExecutionRepository executionRepository;
 
+    @Autowired
+    private ExecutionTrackRecordRepository trackRecordRepository;
+
     @MockBean
     private MusicDestination musicDestination;
 
@@ -94,6 +99,8 @@ public class EndToEndAsyncMigrationLifecycleIT {
 
     @BeforeEach
     void setUp() {
+        cleanDatabase();
+
         alice = userRepository.save(new User("alice@example.com"));
         bob = userRepository.save(new User("bob@example.com"));
 
@@ -144,6 +151,19 @@ public class EndToEndAsyncMigrationLifecycleIT {
 
         when(musicDestination.addTrackToPlaylist(eq(alice.getId()), eq("yt_pl_alice_1"), any(AddTrackToDestinationPlaylistRequest.class)))
                 .thenReturn(new DestinationPlaylistItem("item_yt_" + UUID.randomUUID(), "yt_pl_alice_1", "yt_vid", 0));
+    }
+
+    @AfterEach
+    void tearDown() {
+        cleanDatabase();
+    }
+
+    private void cleanDatabase() {
+        trackRecordRepository.deleteAll();
+        executionRepository.deleteAll();
+        reviewTrackRepository.deleteAll();
+        reviewSessionRepository.deleteAll();
+        userRepository.deleteAll();
     }
 
     @Test
@@ -220,6 +240,22 @@ public class EndToEndAsyncMigrationLifecycleIT {
         );
 
         // Attempt submission by Bob for Alice's review session -> 404 Not Found (Anti-IDOR)
+        mockMvc.perform(post("/api/migrations")
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @WithMockUser(username = "bob@example.com")
+    @DisplayName("404 Not Found: Submission with nonexistent review session ID")
+    void nonexistentReviewSessionReturns404() throws Exception {
+        RunMigrationApiRequest request = new RunMigrationApiRequest(
+                UUID.randomUUID(),
+                null, null, null, null, null
+        );
+
         mockMvc.perform(post("/api/migrations")
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)

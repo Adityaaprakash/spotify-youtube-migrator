@@ -332,17 +332,18 @@ In Phase 13C, the retry decision and backoff engine was implemented in `com.spot
 1. **`RetryOperationType` (Enum)**: Distinguishes external mutating write operations (`DESTINATION_PLAYLIST_CREATION`, `TRACK_INSERTION`) whose transport failures are ambiguous from idempotent read queries (`PROVIDER_READ`).
 2. **`ExecutionTier` (Enum)**: Implements the strict 2.0-second execution boundary (`IN_FLIGHT`, `DEFERRED`, `NONE`).
 3. **`DelaySource` (Enum)**: Tracks delay provenance (`PROVIDER_RETRY_AFTER`, `FULL_JITTER_BACKOFF`, `NONE`).
-4. **`RetryDecisionType` (Enum)**: Structured decision outcomes (`RETRY_PERMITTED`, `DEFERRED_QUOTA_RESET`, `RECONCILIATION_REQUIRED`, `BUDGET_EXHAUSTED`, `NON_RETRYABLE`, `REQUIRES_REAUTHORIZATION`).
+4. **`RetryDecisionType` (Enum)**: Structured decision outcomes (`RETRY_PERMITTED`, `DEFERRED_QUOTA_RESET`, `RECONCILIATION_REQUIRED`, `BUDGET_EXHAUSTED`, `NON_RETRYABLE`, `REQUIRES_REAUTHORIZATION`, `EXCESSIVE_DELAY`).
 5. **`RetryBudget` (Record)**: Immutable value object representing total attempt accounting (`totalAttempts`, default: 3) where `maxAttempts` strictly includes the initial attempt (`attempt 1`) plus at most two retries (`attempt 2` and `3`).
-6. **`BackoffCalculator` (Class)**: Implements AWS Full Jitter exponential backoff: `delay = random(0, min(cap, baseDelay * 2^attempt))`. Default base delay 500 ms, default cap 30 s. Fully overflow-safe against large attempt values (up to $2^{62}$), guarantees non-negative lower bound, and supports an injectable `DoubleSupplier` for deterministic unit testing.
-7. **`RetryDecision` (Record)**: Immutable decision outcome containing authorization, tier, delay, delay source, budget, and diagnostic rationale.
+6. **`BackoffCalculator` (Class)**: Implements AWS Full Jitter exponential backoff: `delay = random(0, min(cap, baseDelay * 2^attempt))`. Default base delay 500 ms, default cap 30 s. Registered as a Spring `@Component`. Fully overflow-safe against large attempt values (up to $2^{62}$) and extreme durations (up to `Long.MAX_VALUE` with nanosecond, millisecond, and second fallbacks), safely handles sub-millisecond durations without division-by-zero errors, guarantees non-negative lower bound, and supports an injectable `DoubleSupplier` for deterministic unit testing.
+7. **`RetryDecision` (Record)**: Immutable decision outcome containing authorization, tier, delay, delay source, budget, and diagnostic rationale. Supports nullable delay for unknown quota reset times via `hasKnownDelay()` and `delayOptional()`.
 8. **`RetryPolicy` (Interface) & `DefaultRetryPolicy` (Class)**:
    - Consumes Phase 13B `ProviderFailureClassification` without duplicating classification logic.
    - Enforces RFC 9110 precedence: valid provider `Retry-After` is respected and never shortened by local caps.
+   - Excessive provider delay escalation: provider delays exceeding `maxExcessiveDelay` (default 24h) yield `EXCESSIVE_DELAY` and are not labeled as retry-permitted, while preserving the original provider delay.
    - Two-tier execution strategy: delay $\le 2,000\text{ ms}$ on initial attempt retry authorizes `IN_FLIGHT` micro-retry; delay $> 2,000\text{ ms}$ or attempt count $> 1$ requires `DEFERRED` worker thread release.
-   - Ambiguous write protection: 5xx server errors or timeouts on mutating operations (`DESTINATION_PLAYLIST_CREATION`, `TRACK_INSERTION`) yield `RECONCILIATION_REQUIRED` and `DEFERRED` to prevent duplicate remote mutations.
-   - Quota deferral: `quotaExceeded` (`DEFERRED_RESET`) is deferred until quota reset without retrying in the active window.
-9. **Unit Test Coverage**: Comprehensive unit test suites in `BackoffCalculatorTest` (9 tests), `RetryBudgetTest` (6 tests), and `RetryPolicyTest` (17 tests) covering all 32 required test scenarios.
+   - Ambiguous write protection: any retryable failure on mutating operations with null HTTP status (transport failure), 5xx server error, or unknown category yields `RECONCILIATION_REQUIRED` and `DEFERRED` without relying exclusively on diagnostic message substrings. Rate-limit rejections (429, user-rate-limit 403) are preserved as safe to retry.
+   - Quota deferral: `quotaExceeded` (`DEFERRED_RESET`) is deferred until quota reset without retrying in the active window. Missing quota reset delays remain unknown without fabricating a 1-hour timestamp.
+9. **Unit & Spring Context Test Coverage**: Comprehensive test suites in `BackoffCalculatorTest` (12 tests), `RetryBudgetTest` (6 tests), `RetryPolicyTest` (24 tests), and `DefaultRetryPolicySpringContextTest` (1 test) covering all 43 required test scenarios.
 
 ---
 

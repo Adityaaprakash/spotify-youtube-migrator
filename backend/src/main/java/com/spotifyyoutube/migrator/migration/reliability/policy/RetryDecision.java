@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.reliability.policy;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Immutable decision outcome produced by {@link RetryPolicy} (Phase 13C).
@@ -12,7 +13,7 @@ import java.util.Objects;
  * @param decisionType structured decision outcome
  * @param operationType type of operation evaluated
  * @param budget retry budget reflecting current and total attempts
- * @param delay effective delay duration before next attempt (ZERO if not retryable)
+ * @param delay effective delay duration before next attempt (null if unknown, e.g. unknown quota reset)
  * @param delaySource provenance of the delay (PROVIDER_RETRY_AFTER, FULL_JITTER_BACKOFF, or NONE)
  * @param executionTier execution strategy (IN_FLIGHT, DEFERRED, or NONE)
  * @param reason human-readable diagnostic explanation of the decision
@@ -31,10 +32,28 @@ public record RetryDecision(
         Objects.requireNonNull(decisionType, "decisionType must not be null");
         Objects.requireNonNull(operationType, "operationType must not be null");
         Objects.requireNonNull(budget, "budget must not be null");
-        Objects.requireNonNull(delay, "delay must not be null");
+        // delay can be null when unknown (e.g. unknown quota reset)
         Objects.requireNonNull(delaySource, "delaySource must not be null");
         Objects.requireNonNull(executionTier, "executionTier must not be null");
         Objects.requireNonNull(reason, "reason must not be null");
+    }
+
+    /**
+     * Checks if this decision has a known delay.
+     *
+     * @return true if delay is present and known
+     */
+    public boolean hasKnownDelay() {
+        return delay != null;
+    }
+
+    /**
+     * Returns the delay wrapped in an Optional.
+     *
+     * @return Optional containing delay if known, or empty if unknown
+     */
+    public Optional<Duration> delayOptional() {
+        return Optional.ofNullable(delay);
     }
 
     /**
@@ -109,6 +128,24 @@ public record RetryDecision(
         return decisionType == RetryDecisionType.REQUIRES_REAUTHORIZATION;
     }
 
+    /**
+     * Checks if provider Retry-After delay exceeds the maximum excessive delay threshold, requiring escalation.
+     *
+     * @return true if decisionType is EXCESSIVE_DELAY
+     */
+    public boolean isExcessiveDelay() {
+        return decisionType == RetryDecisionType.EXCESSIVE_DELAY;
+    }
+
+    /**
+     * Checks if this failure requires operational or user escalation.
+     *
+     * @return true if escalation is required
+     */
+    public boolean isEscalationRequired() {
+        return decisionType == RetryDecisionType.EXCESSIVE_DELAY;
+    }
+
     // Factory methods
 
     public static RetryDecision retryInFlight(
@@ -156,6 +193,40 @@ public record RetryDecision(
     ) {
         return new RetryDecision(
                 RetryDecisionType.DEFERRED_QUOTA_RESET,
+                operationType,
+                budget,
+                delay,
+                delaySource,
+                ExecutionTier.DEFERRED,
+                reason
+        );
+    }
+
+    public static RetryDecision deferredQuotaReset(
+            RetryOperationType operationType,
+            RetryBudget budget,
+            String reason
+    ) {
+        return new RetryDecision(
+                RetryDecisionType.DEFERRED_QUOTA_RESET,
+                operationType,
+                budget,
+                null,
+                DelaySource.NONE,
+                ExecutionTier.DEFERRED,
+                reason
+        );
+    }
+
+    public static RetryDecision excessiveDelay(
+            RetryOperationType operationType,
+            RetryBudget budget,
+            Duration delay,
+            DelaySource delaySource,
+            String reason
+    ) {
+        return new RetryDecision(
+                RetryDecisionType.EXCESSIVE_DELAY,
                 operationType,
                 budget,
                 delay,

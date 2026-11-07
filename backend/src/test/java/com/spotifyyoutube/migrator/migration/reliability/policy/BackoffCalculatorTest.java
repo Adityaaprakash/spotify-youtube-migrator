@@ -155,4 +155,61 @@ class BackoffCalculatorTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("out of range [0.0, 1.0]");
     }
+
+    @Test
+    @DisplayName("Handles sub-millisecond base delay safely with nanosecond precision without division by zero")
+    void subMillisecondBaseDelayConfiguration() {
+        Duration base = Duration.ofNanos(500); // 0.5 microseconds
+        Duration max = Duration.ofMillis(10);
+
+        BackoffCalculator minCalc = new BackoffCalculator(base, max, () -> 0.0);
+        BackoffCalculator midCalc = new BackoffCalculator(base, max, () -> 0.5);
+        BackoffCalculator maxCalc = new BackoffCalculator(base, max, () -> 1.0);
+
+        // Attempt 1 ceiling = min(10ms, 500ns * 2) = 1,000 ns
+        assertThat(midCalc.calculateCeiling(1)).isEqualTo(Duration.ofNanos(1000));
+        assertThat(minCalc.calculateBackoff(1)).isEqualTo(Duration.ZERO);
+        assertThat(midCalc.calculateBackoff(1)).isEqualTo(Duration.ofNanos(500));
+        assertThat(maxCalc.calculateBackoff(1)).isEqualTo(Duration.ofNanos(1000));
+
+        // Sub-millisecond toMillis safely returns 0 without arithmetic error
+        assertThat(midCalc.calculateCeilingMillis(1)).isEqualTo(0L);
+    }
+
+    @Test
+    @DisplayName("Handles extremely large durations up to Long.MAX_VALUE without arithmetic overflow")
+    void extremelyLargeDurationsWithoutOverflow() {
+        Duration base = Duration.ofSeconds(10);
+        Duration max = Duration.ofSeconds(Long.MAX_VALUE);
+
+        BackoffCalculator calc = new BackoffCalculator(base, max, () -> 1.0);
+
+        // Attempt 1: 10s * 2^1 = 20s
+        assertThat(calc.calculateCeiling(1)).isEqualTo(Duration.ofSeconds(20));
+        assertThat(calc.calculateBackoff(1)).isEqualTo(Duration.ofSeconds(20));
+
+        // Attempt 63: clamps safely to maxDelay
+        assertThat(calc.calculateCeiling(63)).isEqualTo(max);
+        assertThat(calc.calculateBackoff(63)).isEqualTo(max);
+
+        // calculateCeilingMillis safely clamps to Long.MAX_VALUE
+        assertThat(calc.calculateCeilingMillis(63)).isEqualTo(Long.MAX_VALUE);
+    }
+
+    @Test
+    @DisplayName("Scales durations exceeding nanosecond capacity (> 292 years) safely using millisecond fallback")
+    void extremelyLargeBaseDelayScaling() {
+        Duration base = Duration.ofDays(365 * 1000); // 1,000 years, exceeds 292 years nanosecond capacity
+        Duration max = Duration.ofDays(365 * 2000);
+
+        BackoffCalculator calc = new BackoffCalculator(base, max, () -> 0.5);
+
+        // Ceiling for attempt 0 is 1000 years
+        assertThat(calc.calculateCeiling(0)).isEqualTo(base);
+
+        // Backoff with factor 0.5 safely yields 500 years via millisecond scaling fallback
+        Duration backoff = calc.calculateBackoff(0);
+        assertThat(backoff.toDays()).isEqualTo(365 * 500);
+    }
 }
+
