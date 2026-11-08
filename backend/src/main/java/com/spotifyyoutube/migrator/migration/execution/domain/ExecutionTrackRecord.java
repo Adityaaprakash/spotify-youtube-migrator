@@ -65,6 +65,18 @@ public class ExecutionTrackRecord extends BaseEntity {
     @Column(name = "attempt_count", nullable = false)
     private int attemptCount = 0;
 
+    @Column(name = "max_attempts", nullable = false)
+    private int maxAttempts = 3;
+
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
+
+    @Column(name = "last_failure_classification", length = 50)
+    private String lastFailureClassification;
+
+    @Column(name = "retry_backoff_ms")
+    private Long retryBackoffMs;
+
     @Column(name = "started_at")
     private Instant startedAt;
 
@@ -431,5 +443,99 @@ public class ExecutionTrackRecord extends BaseEntity {
 
     public Long getVersion() {
         return version;
+    }
+
+    // --- Phase 13D-A Track-Level Retry Scheduling Domain Methods ---
+
+    /**
+     * Schedules this track for a deferred retry following an authorized retry decision (Phase 13D-A).
+     * Reverts status back to PENDING, records backoff delay and failure classification,
+     * and clears the in-flight startedAt timestamp while preserving attempt count.
+     *
+     * @param nextAttemptAt earliest timestamp when this track is eligible for retry
+     * @param failureClassification provider failure classification category
+     * @param backoffMs backoff duration in milliseconds
+     */
+    public void scheduleRetry(Instant nextAttemptAt, String failureClassification, Long backoffMs) {
+        if (status != ExecutionTrackStatus.ADDING && status != ExecutionTrackStatus.PENDING) {
+            throw new InvalidStateException(String.format(
+                    "Cannot schedule retry for track at position %d: current status is %s, expected ADDING or PENDING",
+                    targetPosition, status
+            ));
+        }
+        this.status = ExecutionTrackStatus.PENDING;
+        this.nextAttemptAt = Objects.requireNonNull(nextAttemptAt, "nextAttemptAt must not be null");
+        this.lastFailureClassification = failureClassification;
+        this.retryBackoffMs = backoffMs;
+        this.startedAt = null;
+    }
+
+    /**
+     * Returns true if this track is currently due for an attempt (status is PENDING and nextAttemptAt is null or in the past).
+     *
+     * @param now reference timestamp
+     * @return true if due
+     */
+    public boolean isDue(Instant now) {
+        if (this.status != ExecutionTrackStatus.PENDING) {
+            return false;
+        }
+        Instant ref = now != null ? now : Instant.now();
+        return this.nextAttemptAt == null || !this.nextAttemptAt.isAfter(ref);
+    }
+
+    /**
+     * Returns true if this track has a future scheduled retry.
+     *
+     * @param now reference timestamp
+     * @return true if deferred
+     */
+    public boolean isDeferred(Instant now) {
+        if (this.status != ExecutionTrackStatus.PENDING) {
+            return false;
+        }
+        Instant ref = now != null ? now : Instant.now();
+        return this.nextAttemptAt != null && this.nextAttemptAt.isAfter(ref);
+    }
+
+    /**
+     * Returns true if the track has not exhausted its maximum attempt budget.
+     *
+     * @return true if attemptCount < maxAttempts
+     */
+    public boolean hasRemainingAttempts() {
+        return this.attemptCount < this.maxAttempts;
+    }
+
+    public int getMaxAttempts() {
+        return maxAttempts;
+    }
+
+    public void setMaxAttempts(int maxAttempts) {
+        this.maxAttempts = maxAttempts;
+    }
+
+    public Instant getNextAttemptAt() {
+        return nextAttemptAt;
+    }
+
+    public void setNextAttemptAt(Instant nextAttemptAt) {
+        this.nextAttemptAt = nextAttemptAt;
+    }
+
+    public String getLastFailureClassification() {
+        return lastFailureClassification;
+    }
+
+    public void setLastFailureClassification(String lastFailureClassification) {
+        this.lastFailureClassification = lastFailureClassification;
+    }
+
+    public Long getRetryBackoffMs() {
+        return retryBackoffMs;
+    }
+
+    public void setRetryBackoffMs(Long retryBackoffMs) {
+        this.retryBackoffMs = retryBackoffMs;
     }
 }

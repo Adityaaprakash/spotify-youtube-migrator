@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.execution.domain;
 
 import com.spotifyyoutube.migrator.common.domain.BaseEntity;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
+import com.spotifyyoutube.migrator.migration.reliability.scheduling.StaleLeaseOwnershipException;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
@@ -25,8 +26,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -98,6 +101,21 @@ public class MigrationExecution extends BaseEntity {
 
     @Column(name = "completed_at")
     private Instant completedAt;
+
+    @Column(name = "lease_owner", length = 128)
+    private String leaseOwner;
+
+    @Column(name = "lease_until")
+    private Instant leaseUntil;
+
+    @Column(name = "heartbeat_at")
+    private Instant heartbeatAt;
+
+    @Column(name = "lease_generation", nullable = false)
+    private Long leaseGeneration = 0L;
+
+    @Column(name = "next_attempt_at")
+    private Instant nextAttemptAt;
 
     @Version
     @Column(name = "version", nullable = false)
@@ -511,5 +529,232 @@ public class MigrationExecution extends BaseEntity {
 
     public List<ExecutionTrackRecord> getMutableTrackRecords() {
         return trackRecords;
+    }
+
+    // --- Phase 13D-A Durable Lease & Fencing Domain Methods ---
+
+    /**
+     * Atomically acquires worker lease ownership on this execution with a monotonically incremented fencing generation.
+     *
+     * @param workerId worker node/thread identity
+     * @param leaseUntil lease expiration timestamp
+     * @param heartbeatAt heartbeat timestamp
+     * @return the newly assigned lease generation fencing token
+     */
+    public long acquireLease(String workerId, Instant leaseUntil, Instant heartbeatAt) {
+        if (workerId == null || workerId.isBlank()) {
+            throw new IllegalArgumentException("workerId must not be blank");
+        }
+        Objects.requireNonNull(leaseUntil, "leaseUntil must not be null");
+
+        Instant now = heartbeatAt != null ? heartbeatAt : Instant.now();
+        if (this.status == MigrationExecutionStatus.RUNNING && isLeaseActive(now) && !isOwner(workerId, this.leaseGeneration != null ? this.leaseGeneration : 0L)) {
+            throw new InvalidStateException(String.format(
+                    "Cannot acquire lease on execution %s: active lease held by worker '%s' until %s",
+                    getId(), this.leaseOwner, this.leaseUntil
+            ));
+        }
+        if (this.status.isTerminal()) {
+            throw new InvalidStateException("Cannot acquire lease on terminal execution: " + this.status);
+        }
+
+        this.leaseOwner = workerId.trim();
+        this.leaseUntil = leaseUntil;
+        this.heartbeatAt = now;
+        this.leaseGeneration = (this.leaseGeneration != null ? this.leaseGeneration : 0L) + 1L;
+        this.status = MigrationExecutionStatus.RUNNING;
+        this.nextAttemptAt = null;
+        if (this.startedAt == null) {
+            this.startedAt = now;
+        }
+
+        return this.leaseGeneration;
+    }
+
+    /**
+     * Renews the active worker lease heartbeat conditionally on fencing generation ownership.
+     *
+     * @param workerId worker node/thread identity
+     * @param fencingGeneration acquired fencing generation
+     * @param newLeaseUntil new lease expiration timestamp
+     * @param heartbeatAt current heartbeat timestamp
+     */
+    public void renewHeartbeat(String workerId, long fencingGeneration, Instant newLeaseUntil, Instant heartbeatAt) {
+        if (!isOwner(workerId, fencingGeneration)) {
+            throw new StaleLeaseOwnershipException(
+                    getId(),
+                    workerId,
+                    fencingGeneration,
+                    this.leaseGeneration,
+                    String.format(
+                            "Cannot renew heartbeat on execution %s: worker '%s' with generation %d is not the current owner (owner='%s', gen=%d)",
+                            getId(), workerId, fencingGeneration, this.leaseOwner, this.leaseGeneration
+                    )
+            );
+        }
+        Objects.requireNonNull(newLeaseUntil, "newLeaseUntil must not be null");
+        this.leaseUntil = newLeaseUntil;
+        this.heartbeatAt = heartbeatAt != null ? heartbeatAt : Instant.now();
+    }
+
+    /**
+     * Cooperatively releases worker lease ownership upon execution completion or yield.
+     * Guarded against active in-flight track operations (ADDING or ROLLING_BACK).
+     *
+     * @param workerId worker node/thread identity
+     * @param fencingGeneration acquired fencing generation
+     */
+    public void releaseLease(String workerId, long fencingGeneration) {
+        if (!isOwner(workerId, fencingGeneration)) {
+            throw new StaleLeaseOwnershipException(
+                    getId(),
+                    workerId,
+                    fencingGeneration,
+                    this.leaseGeneration,
+                    String.format(
+                            "Cannot release lease on execution %s: worker '%s' with generation %d is not the current owner (owner='%s', gen=%d)",
+                            getId(), workerId, fencingGeneration, this.leaseOwner, this.leaseGeneration
+                    )
+            );
+        }
+        if (hasActiveInFlightTracks()) {
+            throw new InvalidStateException(String.format(
+                    "Cannot release lease on execution %s: tracks are actively in-flight",
+                    getId()
+            ));
+        }
+        this.leaseOwner = null;
+        this.leaseUntil = null;
+    }
+
+    /**
+     * Cooperatively releases worker lease and transitions the execution back to QUEUED with a future retry timestamp.
+     * Guarded against active in-flight track operations (ADDING or ROLLING_BACK).
+     *
+     * @param workerId worker node/thread identity
+     * @param fencingGeneration acquired fencing generation
+     * @param nextAttemptAt earliest timestamp when this execution becomes eligible for scheduler claiming
+     */
+    public void releaseLeaseAndScheduleRetry(String workerId, long fencingGeneration, Instant nextAttemptAt) {
+        if (!isOwner(workerId, fencingGeneration)) {
+            throw new StaleLeaseOwnershipException(
+                    getId(),
+                    workerId,
+                    fencingGeneration,
+                    this.leaseGeneration,
+                    String.format(
+                            "Cannot release lease and schedule retry on execution %s: worker '%s' with generation %d is not the current owner (owner='%s', gen=%d)",
+                            getId(), workerId, fencingGeneration, this.leaseOwner, this.leaseGeneration
+                    )
+            );
+        }
+        if (hasActiveInFlightTracks()) {
+            throw new InvalidStateException(String.format(
+                    "Cannot release lease and schedule retry on execution %s: tracks are actively in-flight",
+                    getId()
+            ));
+        }
+        this.leaseOwner = null;
+        this.leaseUntil = null;
+        this.status = MigrationExecutionStatus.QUEUED;
+        this.nextAttemptAt = Objects.requireNonNull(nextAttemptAt, "nextAttemptAt must not be null");
+    }
+
+    /**
+     * Returns true if any track in this execution is currently in-flight (ADDING or ROLLING_BACK).
+     *
+     * @return true if active in-flight tracks exist
+     */
+    public boolean hasActiveInFlightTracks() {
+        return trackRecords.stream().anyMatch(record ->
+                record.getStatus() == ExecutionTrackStatus.ADDING || record.getStatus() == ExecutionTrackStatus.ROLLING_BACK);
+    }
+
+    /**
+     * Finds the earliest deferred retry timestamp among all pending tracks in this execution.
+     *
+     * @return earliest nextAttemptAt timestamp, or empty if no pending tracks are deferred
+     */
+    public Optional<Instant> getEarliestDeferredRetry() {
+        return trackRecords.stream()
+                .filter(t -> t.getStatus() == ExecutionTrackStatus.PENDING && t.getNextAttemptAt() != null)
+                .map(ExecutionTrackRecord::getNextAttemptAt)
+                .min(Comparator.naturalOrder());
+    }
+
+    /**
+     * Returns true if a valid lease is currently held by a worker and has not expired.
+     *
+     * @param now reference timestamp
+     * @return true if lease is active
+     */
+    public boolean isLeaseActive(Instant now) {
+        Instant ref = now != null ? now : Instant.now();
+        return this.leaseOwner != null && this.leaseUntil != null && this.leaseUntil.isAfter(ref);
+    }
+
+    /**
+     * Returns true if a lease was assigned but its duration has elapsed.
+     *
+     * @param now reference timestamp
+     * @return true if lease is expired
+     */
+    public boolean isLeaseExpired(Instant now) {
+        Instant ref = now != null ? now : Instant.now();
+        return this.leaseOwner != null && this.leaseUntil != null && !this.leaseUntil.isAfter(ref);
+    }
+
+    /**
+     * Validates whether the given worker ID and generation match the current lease ownership.
+     *
+     * @param workerId worker identifier
+     * @param fencingGeneration generation token
+     * @return true if caller is the active lease owner
+     */
+    public boolean isOwner(String workerId, long fencingGeneration) {
+        return workerId != null
+                && Objects.equals(this.leaseOwner, workerId.trim())
+                && this.leaseGeneration != null
+                && this.leaseGeneration == fencingGeneration;
+    }
+
+    public String getLeaseOwner() {
+        return leaseOwner;
+    }
+
+    public void setLeaseOwner(String leaseOwner) {
+        this.leaseOwner = leaseOwner;
+    }
+
+    public Instant getLeaseUntil() {
+        return leaseUntil;
+    }
+
+    public void setLeaseUntil(Instant leaseUntil) {
+        this.leaseUntil = leaseUntil;
+    }
+
+    public Instant getHeartbeatAt() {
+        return heartbeatAt;
+    }
+
+    public void setHeartbeatAt(Instant heartbeatAt) {
+        this.heartbeatAt = heartbeatAt;
+    }
+
+    public Long getLeaseGeneration() {
+        return leaseGeneration != null ? leaseGeneration : 0L;
+    }
+
+    public void setLeaseGeneration(Long leaseGeneration) {
+        this.leaseGeneration = leaseGeneration != null ? leaseGeneration : 0L;
+    }
+
+    public Instant getNextAttemptAt() {
+        return nextAttemptAt;
+    }
+
+    public void setNextAttemptAt(Instant nextAttemptAt) {
+        this.nextAttemptAt = nextAttemptAt;
     }
 }

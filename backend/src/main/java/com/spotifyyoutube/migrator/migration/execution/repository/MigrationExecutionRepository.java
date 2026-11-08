@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import org.springframework.transaction.annotation.Transactional;
+
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -18,7 +20,7 @@ import java.util.UUID;
  * Spring Data JPA repository for {@link MigrationExecution}.
  */
 @Repository
-public interface MigrationExecutionRepository extends JpaRepository<MigrationExecution, UUID> {
+public interface MigrationExecutionRepository extends JpaRepository<MigrationExecution, UUID>, MigrationExecutionRepositoryCustom {
 
     Optional<MigrationExecution> findByReviewSessionId(UUID reviewSessionId);
 
@@ -87,4 +89,68 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
            "com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus.COMPLETED, " +
            "com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus.ROLLED_BACK)")
     int claimExecutionRunning(@Param("id") UUID id, @Param("now") Instant now);
+
+    /**
+     * Conditionally renews the heartbeat and lease expiration using PostgreSQL database wall-clock time (Phase 13D-A).
+     * Strictly requires matching workerId, fencing leaseGeneration, and an active (unexpired) lease.
+     * Sets lease_until, heartbeat_at, and updated_at exclusively via PostgreSQL clock_timestamp().
+     *
+     * @param id execution ID
+     * @param workerId worker identity
+     * @param leaseGeneration expected fencing token
+     * @param leaseDurationSeconds extension duration in seconds
+     * @return 1 if renewed, 0 if lease ownership, generation, or expiry check failed
+     */
+    @Transactional
+    @Modifying(clearAutomatically = false, flushAutomatically = true)
+    @Query(value = "UPDATE migration_executions " +
+           "SET lease_until = clock_timestamp() + (:leaseDurationSeconds * INTERVAL '1 second'), " +
+           "    heartbeat_at = clock_timestamp(), " +
+           "    updated_at = clock_timestamp() " +
+           "WHERE id = :id " +
+           "  AND lease_owner = :workerId " +
+           "  AND lease_generation = :leaseGeneration " +
+           "  AND lease_until > clock_timestamp()",
+           nativeQuery = true)
+    int renewLeaseHeartbeat(
+            @Param("id") UUID id,
+            @Param("workerId") String workerId,
+            @Param("leaseGeneration") long leaseGeneration,
+            @Param("leaseDurationSeconds") long leaseDurationSeconds
+    );
+
+
+    /**
+     * Conditionally updates execution status protected by fencing generation using PostgreSQL database wall-clock time (Phase 13D-A).
+     *
+     * @param id execution ID
+     * @param workerId worker identity
+     * @param leaseGeneration expected fencing token
+     * @param newStatus target status
+     * @return 1 if updated, 0 if lease ownership or generation is stale
+     */
+    @Transactional
+    @Modifying(clearAutomatically = false, flushAutomatically = true)
+    @Query(value = "UPDATE migration_executions " +
+           "SET status = :newStatus, " +
+           "    updated_at = clock_timestamp() " +
+           "WHERE id = :id " +
+           "  AND lease_owner = :workerId " +
+           "  AND lease_generation = :leaseGeneration",
+           nativeQuery = true)
+    int updateStatusWithFencing(
+            @Param("id") UUID id,
+            @Param("workerId") String workerId,
+            @Param("leaseGeneration") long leaseGeneration,
+            @Param("newStatus") String newStatus
+    );
+
+    default int updateStatusWithFencing(
+            UUID id,
+            String workerId,
+            long leaseGeneration,
+            MigrationExecutionStatus newStatus
+    ) {
+        return updateStatusWithFencing(id, workerId, leaseGeneration, newStatus != null ? newStatus.name() : null);
+    }
 }

@@ -1,9 +1,9 @@
 # Current State
 
-Last Updated: 2026-11-06
+Last Updated: 2026-11-07
 
-Current Phase: Phase 13 — Reliability Engineering [PHASE 13C COMPLETE — RETRY POLICY & BACKOFF ENGINE IMPLEMENTED]
-Current Subphase: Phase 13C — Retry Policy & Backoff Engine [COMPLETE] -> Phase 13D — Durable Retry Scheduling [READY]
+Current Phase: Phase 13 — Reliability Engineering [PHASE 13D-A COMPLETE — DURABLE LEASE FOUNDATION & FENCING IMPLEMENTED]
+Current Subphase: Phase 13D-A — Durable Lease Foundation, Schema & Fencing Primitives [COMPLETE] -> Phase 13D-B — Atomic PostgreSQL Claiming [READY]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
@@ -39,6 +39,36 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 - **Host Security Permission Notice**: Terminal command execution on the host machine is restricted by the IDE host security policy (`permission check failed for command ... unexpected user interaction type: not permission`). Static analysis, code inspection, defect remediation, and regression test suites confirm complete architectural and invariant compliance.
 
 ## Completed
+### Phase 13D-A (Durable Lease Foundation, Schema & Fencing Primitives) [COMPLETE & TESTED]
+- **Implemented Subsystem**: Delivered PostgreSQL schema migration, durable worker ownership, generational fencing, and track-level retry scheduling foundation (`V10__phase13d_durable_leases_and_retry_scheduling.sql`, `com.spotifyyoutube.migrator.migration.reliability.scheduling`).
+- **Database Schema Changes (Flyway V10)**:
+  - Extended `migration_executions`: added `lease_owner VARCHAR(128)`, `lease_until TIMESTAMP WITH TIME ZONE`, `heartbeat_at TIMESTAMP WITH TIME ZONE`, `lease_generation BIGINT NOT NULL DEFAULT 0`, and aggregate `next_attempt_at TIMESTAMP WITH TIME ZONE`.
+  - Added partial index `idx_migrationexecutions_lease_claim` on `(status, next_attempt_at, lease_until) WHERE status IN ('QUEUED', 'RUNNING')`.
+  - Extended `execution_track_records`: added `max_attempts INT NOT NULL DEFAULT 3`, `next_attempt_at TIMESTAMP WITH TIME ZONE`, `last_failure_classification VARCHAR(50)`, and `retry_backoff_ms BIGINT`.
+  - Added partial index `idx_executiontracks_retry_due` on `(execution_id, status, next_attempt_at) WHERE status = 'PENDING'`.
+  - Excluded Phase 13E `migration_idempotency_keys` table and fingerprinting strictly adhering to phase boundaries.
+- **Architectural Resolutions Enforced**:
+  - **Track-Level vs. Execution-Level Scheduling**: Active worker holding the unexpired lease owns the `MigrationExecution` aggregate root in `RUNNING` status while tracks are actively processed. Deferred tracks remain in `PENDING` status with `next_attempt_at` set to a future timestamp, preserving the Phase 12 count conservation invariant with zero synthetic statuses. Completed tracks (`ADDED`, `FAILED`, `SKIPPED`, `UNCERTAIN`, `ROLLED_BACK`) are never re-attempted. When all currently runnable work is completed and remaining tracks are deferred, the worker releases the lease and synchronizes aggregate `execution.next_attempt_at = MIN(deferred_tracks.next_attempt_at)` in `QUEUED` status, avoiding idle thread pool starvation.
+  - **Database Time Invariant**: All lease expirations and heartbeats are verified and updated using PostgreSQL database time (`CURRENT_TIMESTAMP` / `NOW()`) preventing clock skew issues across application nodes.
+  - **Generational Fencing Protection**: Monotonically incrementing `lease_generation` token acquired on claim protects all subsequent database updates. Track state mutations use conditional subqueries verifying caller's fencing token against `migration_executions.lease_generation`. Zombie workers waking after lease expiry fail with 0 rows updated and trigger `StaleLeaseOwnershipException`.
+- **Components Created & Updated**:
+  - `V10__phase13d_durable_leases_and_retry_scheduling.sql`: Flyway schema migration.
+  - `StaleLeaseOwnershipException`: Dedicated exception extending `InvalidStateException` carrying `executionId`, `workerId`, `attemptedGeneration`, and `currentGeneration`.
+  - `MigrationExecution`: Extended with lease fields, `acquireLease`, `renewHeartbeat`, `releaseLease`, `releaseLeaseAndScheduleRetry`, `isLeaseActive`, `isLeaseExpired`, and `isOwner`.
+  - `ExecutionTrackRecord`: Extended with retry metadata fields, `scheduleRetry`, `isDue`, `isDeferred`, and `hasRemainingAttempts`.
+  - `MigrationExecutionRepository`: Added conditional `renewLeaseHeartbeat`, `releaseLease`, and `updateStatusWithFencing` queries.
+  - `ExecutionTrackRecordRepository`: Added `findDuePendingTracks`, `findEarliestDeferredRetry`, and fenced `updateTrackStatusWithFencing` / `scheduleTrackRetryWithFencing` queries.
+- **Comprehensive Unit & Integration Test Suites**:
+  - `DurableWorkerLeaseDomainTest`: 11 unit tests covering default fields, monotonic lease acquisition, expired lease reclamation, competing lease rejection, heartbeat renewal, zombie worker rejection, cooperative lease release, retry scheduling, track retry state, and attempt budget evaluation.
+  - `StaleLeaseOwnershipExceptionTest`: 2 unit tests covering structured and simple constructors and accessors.
+  - `DurableLeaseAndFencingPersistenceIT`: 7 integration tests against PostgreSQL 16 Testcontainers covering V10 migration execution, field persistence, conditional heartbeat renewal, lease release, fenced track status mutation, fenced track retry scheduling, and due/deferred track queries.
+- **Phase 13D Implementation Sequencing**:
+  - `Phase 13D-A`: [COMPLETE] Durable Lease Foundation, Schema & Fencing Primitives.
+  - `Phase 13D-B`: [READY] Atomic PostgreSQL Execution Claiming (`FOR UPDATE SKIP LOCKED`).
+  - `Phase 13D-C`: [READY] Durable Worker Engine, Heartbeat Renewal & Fencing Verification.
+  - `Phase 13D-D`: [READY] Durable Retry Scheduling & Worker Dispatch.
+  - `Phase 13D-E`: [READY] Graceful Shutdown, Multi-Instance Concurrency & Subsystem Freeze.
+
 ### Phase 13C (Retry Policy & Backoff Engine) [COMPLETE & TESTED]
 - **Implemented Subsystem**: Delivered deterministic, testable retry policy and exponential backoff engine (`com.spotifyyoutube.migrator.migration.reliability.policy`).
 - **Components Created**:

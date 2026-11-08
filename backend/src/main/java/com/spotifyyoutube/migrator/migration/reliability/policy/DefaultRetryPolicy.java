@@ -1,6 +1,5 @@
 package com.spotifyyoutube.migrator.migration.reliability.policy;
 
-import com.spotifyyoutube.migrator.migration.reliability.classification.ProviderFailureCategory;
 import com.spotifyyoutube.migrator.migration.reliability.classification.ProviderFailureClassification;
 import com.spotifyyoutube.migrator.migration.reliability.classification.RetryEligibility;
 import org.springframework.beans.factory.annotation.Autowired;
