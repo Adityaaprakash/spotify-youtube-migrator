@@ -80,6 +80,22 @@ public interface MigrationExecutionStateService {
     MigrationExecutionSummary executeQueuedTrackInsertion(UUID executionId, UUID authenticatedUserId);
 
     /**
+     * Executes ordered track insertion for an already-claimed execution under the
+     * acquired fencing generation (Phase 13D-C).
+     * Validates owner identity, RUNNING status, and exact lease generation before proceeding.
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @param leaseGeneration acquired fencing generation
+     * @return updated durable execution summary
+     */
+    MigrationExecutionSummary executeClaimedTrackInsertion(
+            UUID executionId,
+            UUID authenticatedUserId,
+            long leaseGeneration
+    );
+
+    /**
      * Resets a QUEUED execution back to INITIALIZED status if background dispatch was rejected (Phase 12C).
      * Preserves destination playlist and track records for safe retry.
      *

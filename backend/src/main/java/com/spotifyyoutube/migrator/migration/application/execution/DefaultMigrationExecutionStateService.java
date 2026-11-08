@@ -3,6 +3,7 @@ package com.spotifyyoutube.migrator.migration.application.execution;
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.migration.reliability.scheduling.StaleLeaseOwnershipException;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
@@ -460,6 +461,53 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     @Override
     public MigrationExecutionSummary executeQueuedTrackInsertion(UUID executionId, UUID authenticatedUserId) {
         return processInsertion(executionId, authenticatedUserId, false, true);
+    }
+
+    @Override
+    public MigrationExecutionSummary executeClaimedTrackInsertion(
+            UUID executionId,
+            UUID authenticatedUserId,
+            long leaseGeneration
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        // 1. Verify claimed ownership and fencing generation in a short database transaction
+        String playlistId = transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (execution.getStatus() != MigrationExecutionStatus.RUNNING) {
+                throw new InvalidStateException(String.format(
+                        "Cannot execute claimed migration %s: expected status RUNNING, current status is %s",
+                        executionId, execution.getStatus()
+                ));
+            }
+
+            if (execution.getLeaseGeneration() == null || execution.getLeaseGeneration() != leaseGeneration) {
+                throw new StaleLeaseOwnershipException(
+                        executionId,
+                        execution.getLeaseOwner(),
+                        leaseGeneration,
+                        execution.getLeaseGeneration(),
+                        String.format("Worker lease generation %d is stale; active generation is %s",
+                                leaseGeneration, execution.getLeaseGeneration())
+                );
+            }
+
+            return execution.getDestinationPlaylistId();
+        });
+
+        // 2. Perform sequential insertion using short per-track transactions
+        return executePendingTracks(executionId, authenticatedUserId, playlistId);
     }
 
     @Override

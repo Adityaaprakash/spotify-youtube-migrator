@@ -232,6 +232,24 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
     }
 
     @Override
+    public MigrationExecutionSummary executeClaimedMigration(
+            UUID executionId,
+            UUID authenticatedUserId,
+            long leaseGeneration
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        log.info("Orchestrator executing claimed migration {} under generation {} for user {}",
+                executionId, leaseGeneration, authenticatedUserId);
+        return executionStateService.executeClaimedTrackInsertion(executionId, authenticatedUserId, leaseGeneration);
+    }
+
+    @Override
     public MigrationExecutionSummary recoverMigration(UUID executionId, RecoverExecutionRequest request, UUID authenticatedUserId) {
         log.info("Orchestrating recovery for execution {} by user {}", executionId, authenticatedUserId);
         return executionStateService.recoverExecution(executionId, request, authenticatedUserId);

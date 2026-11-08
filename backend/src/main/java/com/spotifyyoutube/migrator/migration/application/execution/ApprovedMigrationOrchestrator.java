@@ -71,6 +71,17 @@ public interface ApprovedMigrationOrchestrator {
     MigrationExecutionSummary executeQueuedMigration(UUID executionId, UUID authenticatedUserId);
 
     /**
+     * Executes an already-claimed playlist migration in a background worker thread under the
+     * acquired fencing generation (Phase 13D-C).
+     *
+     * @param executionId unique execution ID of the claimed migration
+     * @param authenticatedUserId trusted authenticated user ID
+     * @param leaseGeneration acquired fencing generation
+     * @return summary of the durable execution and insertion outcomes
+     */
+    MigrationExecutionSummary executeClaimedMigration(UUID executionId, UUID authenticatedUserId, long leaseGeneration);
+
+    /**
      * Recovers eligible failed tracks in an execution via Phase 11F controlled recovery.
      *
      * @param executionId unique execution ID
