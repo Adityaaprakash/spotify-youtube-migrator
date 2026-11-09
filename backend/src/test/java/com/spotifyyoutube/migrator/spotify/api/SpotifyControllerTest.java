@@ -10,11 +10,13 @@ import com.spotifyyoutube.migrator.playlist.api.dto.TrackResponse;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyIdentityService;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
+import com.spotifyyoutube.migrator.common.config.SecurityConfig;
+import com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -27,8 +29,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(SpotifyController.class)
-@org.springframework.context.annotation.Import(com.spotifyyoutube.migrator.common.config.SecurityConfig.class)
-class SpotifyControllerTest {
+@Import({SecurityConfig.class, GlobalExceptionHandler.class})
+public class SpotifyControllerTest {
 
     @Autowired
     private MockMvc mockMvc;

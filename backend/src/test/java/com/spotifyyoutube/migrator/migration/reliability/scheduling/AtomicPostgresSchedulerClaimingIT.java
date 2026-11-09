@@ -34,16 +34,20 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -223,48 +227,106 @@ public class AtomicPostgresSchedulerClaimingIT {
             createdIds.add(createExecution(MigrationExecutionStatus.QUEUED, null, null, 0L, null).getId());
         }
 
-        Set<UUID> claimedIds = ConcurrentHashMap.newKeySet();
-        CountDownLatch startLatch = new CountDownLatch(1);
+        ConcurrentMap<UUID, String> claimOwners = new ConcurrentHashMap<>();
+        ConcurrentMap<UUID, Long> claimGenerations = new ConcurrentHashMap<>();
 
-        ThrowingConsumer<String> claimTask = (workerId) -> {
-            try {
-                assertThat(startLatch.await(5, TimeUnit.SECONDS)).isTrue();
-                for (int i = 0; i < executionCount; i++) {
-                    Optional<ClaimedExecution> claim = executionRepository.claimNextEligibleExecution(workerId, 60L);
-                    claim.ifPresent(c -> {
-                        boolean added = claimedIds.add(c.executionId());
-                        assertThat(added).as("Duplicate claim detected for execution: " + c.executionId()).isTrue();
-                    });
+        CountDownLatch readyLatch = new CountDownLatch(2);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch firstClaimLatch = new CountDownLatch(2);
+
+        Function<String, Callable<Void>> createWorker = workerId -> () -> {
+            readyLatch.countDown();
+            assertThat(startLatch.await(5, TimeUnit.SECONDS))
+                    .as("Start latch must be released")
+                    .isTrue();
+
+            Instant deadline = Instant.now().plusSeconds(10);
+
+            // Step 3: Both workers must independently obtain one successful claim before either drains remainder
+            boolean firstClaimed = false;
+            while (!firstClaimed && Instant.now().isBefore(deadline)) {
+                Optional<ClaimedExecution> claim = executionRepository.claimNextEligibleExecution(workerId, 60L);
+                if (claim.isPresent()) {
+                    ClaimedExecution c = claim.get();
+                    String prev = claimOwners.putIfAbsent(c.executionId(), workerId);
+                    assertThat(prev).as("Duplicate claim detected for execution: " + c.executionId()).isNull();
+                    claimGenerations.put(c.executionId(), c.leaseGeneration());
+                    firstClaimed = true;
+                    firstClaimLatch.countDown();
+                } else {
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
                 }
-            } catch (Exception ex) {
-                throw new RuntimeException(ex);
             }
+            assertThat(firstClaimed)
+                    .as("Worker " + workerId + " must successfully claim its first execution")
+                    .isTrue();
+            assertThat(firstClaimLatch.await(5, TimeUnit.SECONDS))
+                    .as("Both workers must obtain first claim before draining remainder")
+                    .isTrue();
+
+            // Step 4: Continue claiming until all executions are claimed or deadline expires
+            while (claimOwners.size() < executionCount && Instant.now().isBefore(deadline)) {
+                Optional<ClaimedExecution> claim = executionRepository.claimNextEligibleExecution(workerId, 60L);
+                if (claim.isPresent()) {
+                    ClaimedExecution c = claim.get();
+                    String prev = claimOwners.putIfAbsent(c.executionId(), workerId);
+                    assertThat(prev).as("Duplicate claim detected for execution: " + c.executionId()).isNull();
+                    claimGenerations.put(c.executionId(), c.leaseGeneration());
+                } else {
+                    try {
+                        Thread.sleep(10);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
+            }
+            return null;
         };
 
-        CompletableFuture<Void> worker1 = CompletableFuture.runAsync(
-                () -> {
-                    try {
-                        claimTask.accept("worker-1");
-                    } catch (Exception ex) {
-                        throw new RuntimeException(ex);
-                    }
-                });
+        ExecutorService workerPool = Executors.newFixedThreadPool(2);
+        try {
+            Future<Void> future1 = workerPool.submit(createWorker.apply("worker-1"));
+            Future<Void> future2 = workerPool.submit(createWorker.apply("worker-2"));
 
-        CompletableFuture<Void> worker2 = CompletableFuture.runAsync(
-                () -> {
-                    try {
-                        claimTask.accept("worker-2");
-                    } catch (Exception ex) {
-                        throw new RuntimeException(ex);
-                    }
-                });
+            assertThat(readyLatch.await(5, TimeUnit.SECONDS))
+                    .as("Both workers must report ready")
+                    .isTrue();
+            startLatch.countDown();
 
-        startLatch.countDown();
-        worker1.get(10, TimeUnit.SECONDS);
-        worker2.get(10, TimeUnit.SECONDS);
+            future1.get(10, TimeUnit.SECONDS);
+            future2.get(10, TimeUnit.SECONDS);
 
-        assertThat(claimedIds).hasSize(executionCount);
-        assertThat(claimedIds).containsExactlyInAnyOrderElementsOf(createdIds);
+            // Step 6: Assertions
+            assertThat(claimOwners).hasSize(executionCount);
+            assertThat(claimOwners.keySet()).containsExactlyInAnyOrderElementsOf(createdIds);
+            assertThat(claimOwners.values()).contains("worker-1", "worker-2");
+            assertThat(claimGenerations.values()).allMatch(gen -> gen == 1L);
+
+            // Verify in database that all executions are in RUNNING status with lease_generation 1
+            for (UUID id : createdIds) {
+                MigrationExecution reloaded = executionRepository.findById(id).orElseThrow();
+                assertThat(reloaded.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
+                assertThat(reloaded.getLeaseGeneration()).isEqualTo(1L);
+                assertThat(reloaded.getLeaseOwner()).isEqualTo(claimOwners.get(id));
+                assertThat(reloaded.getNextAttemptAt()).isNull();
+            }
+        } finally {
+            workerPool.shutdown();
+            try {
+                if (!workerPool.awaitTermination(5, TimeUnit.SECONDS)) {
+                    workerPool.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                workerPool.shutdownNow();
+            }
+        }
     }
 
     @Test
@@ -463,10 +525,5 @@ public class AtomicPostgresSchedulerClaimingIT {
             releaseLockLatch.countDown();
             txA.get(5, TimeUnit.SECONDS);
         }
-    }
-
-    @FunctionalInterface
-    private interface ThrowingConsumer<T> {
-        void accept(T t) throws Exception;
     }
 }
