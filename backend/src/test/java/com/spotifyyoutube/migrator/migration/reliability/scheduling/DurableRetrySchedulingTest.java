@@ -5,10 +5,10 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
-import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationExecutionService;
-import com.spotifyyoutube.migrator.migration.application.execution.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.DefaultMigrationExecutionStateService;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureClassifier;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
@@ -115,7 +115,21 @@ class DurableRetrySchedulingTest {
                 0, "sp_0", "Title 0", "Artist 0", "yt_0", "YT 0", "Ch 0",
                 Duration.ofMinutes(3), ReviewDecisionSource.AUTOMATIC, 0
         );
-        approvedContext = new ApprovedMigrationContext(reviewSession.getId(), "Source Playlist", List.of(t0));
+        approvedContext = new ApprovedMigrationContext(
+                reviewSession.getId(),
+                UUID.randomUUID(),
+                userId,
+                "sp_playlist_1",
+                "Source Playlist",
+                "Target Playlist",
+                "Description",
+                false,
+                List.of(t0),
+                1,
+                1,
+                0,
+                Instant.now()
+        );
     }
 
     private MigrationExecution createRunningExecution(UUID execId, long generation) {

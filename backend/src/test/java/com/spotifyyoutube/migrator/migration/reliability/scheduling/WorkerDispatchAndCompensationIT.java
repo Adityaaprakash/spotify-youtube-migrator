@@ -268,7 +268,8 @@ public class WorkerDispatchAndCompensationIT {
         assertThat(reloaded.getLeaseGeneration()).isEqualTo(1L);
 
         // Verify track states and counts are preserved
-        List<ExecutionTrackRecord> tracks = trackRecordRepository.findByExecutionId(execution.getId());
+        List<ExecutionTrackRecord> tracks =
+                trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(execution.getId());
         assertThat(tracks).hasSize(1);
         assertThat(tracks.get(0).getStatus()).isEqualTo(ExecutionTrackStatus.PENDING);
         assertThat(reloaded.getSuccessfulInsertions()).isEqualTo(0);

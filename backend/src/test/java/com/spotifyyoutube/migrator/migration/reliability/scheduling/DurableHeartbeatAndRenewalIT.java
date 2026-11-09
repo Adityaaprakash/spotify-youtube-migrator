@@ -231,7 +231,7 @@ public class DurableHeartbeatAndRenewalIT {
         txTemplate.executeWithoutResult(status -> {
             MigrationExecution exec = executionRepository.findById(execution.getId()).orElseThrow();
             exec.acquireLease("worker-1", Instant.now().plusSeconds(60), Instant.now());
-            exec.markCompleted();
+            exec.setStatus(MigrationExecutionStatus.COMPLETED);
             executionRepository.saveAndFlush(exec);
         });
 

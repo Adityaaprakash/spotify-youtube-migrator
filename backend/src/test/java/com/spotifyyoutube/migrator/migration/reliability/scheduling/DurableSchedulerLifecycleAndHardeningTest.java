@@ -157,7 +157,7 @@ class DurableSchedulerLifecycleAndHardeningTest {
         void compensateRejectionSuccess() {
             UUID execId = UUID.randomUUID();
             ClaimedExecution claim = new ClaimedExecution(
-                    execId, UUID.randomUUID(), 1L, "node-1", Instant.now().plusSeconds(60)
+                    execId, UUID.randomUUID(), 1L, Instant.parse("2026-11-09T12:00:00Z"), "node-1"
             );
 
             when(executionRepository.compensateClaimRejection(eq(execId), eq("node-1"), eq(1L), any(Instant.class)))
@@ -174,7 +174,7 @@ class DurableSchedulerLifecycleAndHardeningTest {
         void compensateRejectionHandlesDbException() {
             UUID execId = UUID.randomUUID();
             ClaimedExecution claim = new ClaimedExecution(
-                    execId, UUID.randomUUID(), 1L, "node-1", Instant.now().plusSeconds(60)
+                    execId, UUID.randomUUID(), 1L, Instant.parse("2026-11-09T12:00:00Z"), "node-1"
             );
 
             when(executionRepository.compensateClaimRejection(any(), any(), anyLong(), any()))

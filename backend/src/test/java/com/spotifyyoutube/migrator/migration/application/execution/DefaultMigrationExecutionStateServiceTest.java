@@ -1124,7 +1124,7 @@ class DefaultMigrationExecutionStateServiceTest {
                     .satisfies(ex -> {
                         StaleLeaseOwnershipException staleEx = (StaleLeaseOwnershipException) ex;
                         assertThat(staleEx.getAttemptedGeneration()).isEqualTo(999L);
-                        assertThat(staleEx.getActiveGeneration()).isEqualTo(1L);
+                        assertThat(staleEx.getCurrentGeneration()).isEqualTo(1L);
                     });
         }
 
