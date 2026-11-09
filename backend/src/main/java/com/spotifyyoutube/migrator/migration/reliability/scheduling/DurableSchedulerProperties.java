@@ -34,6 +34,17 @@ public class DurableSchedulerProperties {
     private long rejectionBackoffSeconds = 10L;
 
     /**
+     * Interval in milliseconds between worker lease heartbeat renewals.
+     * Must be shorter than leaseDurationSeconds.
+     */
+    private long heartbeatIntervalMs = 15000L;
+
+    /**
+     * Grace period in seconds during application shutdown to allow in-flight tasks to complete.
+     */
+    private long shutdownGracePeriodSeconds = 30L;
+
+    /**
      * Maximum number of claims executed in a single scheduler poll cycle.
      */
     private int maxClaimsPerPoll = 4;
@@ -76,6 +87,22 @@ public class DurableSchedulerProperties {
 
     public void setRejectionBackoffSeconds(long rejectionBackoffSeconds) {
         this.rejectionBackoffSeconds = rejectionBackoffSeconds;
+    }
+
+    public long getHeartbeatIntervalMs() {
+        return heartbeatIntervalMs;
+    }
+
+    public void setHeartbeatIntervalMs(long heartbeatIntervalMs) {
+        this.heartbeatIntervalMs = heartbeatIntervalMs;
+    }
+
+    public long getShutdownGracePeriodSeconds() {
+        return shutdownGracePeriodSeconds;
+    }
+
+    public void setShutdownGracePeriodSeconds(long shutdownGracePeriodSeconds) {
+        this.shutdownGracePeriodSeconds = shutdownGracePeriodSeconds;
     }
 
     public int getMaxClaimsPerPoll() {

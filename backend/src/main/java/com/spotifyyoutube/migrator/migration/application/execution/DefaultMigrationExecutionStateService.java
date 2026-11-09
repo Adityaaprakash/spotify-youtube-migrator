@@ -43,6 +43,15 @@ import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepo
 import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureAnalysis;
 import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureClassification;
 import com.spotifyyoutube.migrator.migration.application.execution.failure.ExecutionFailureClassifier;
+import com.spotifyyoutube.migrator.migration.reliability.classification.ProviderFailureClassification;
+import com.spotifyyoutube.migrator.migration.reliability.classification.ProviderFailureClassifier;
+import com.spotifyyoutube.migrator.migration.reliability.policy.DefaultRetryPolicy;
+import com.spotifyyoutube.migrator.migration.reliability.policy.RetryBudget;
+import com.spotifyyoutube.migrator.migration.reliability.policy.RetryDecision;
+import com.spotifyyoutube.migrator.migration.reliability.policy.RetryOperationType;
+import com.spotifyyoutube.migrator.migration.reliability.policy.RetryPolicy;
+import com.spotifyyoutube.migrator.migration.reliability.scheduling.DurableLeaseHeartbeatService;
+import com.spotifyyoutube.migrator.migration.reliability.scheduling.DurableSchedulerProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -50,6 +59,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.ResourceAccessException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -85,6 +95,40 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     private final MusicDestination musicDestination;
     private final ExecutionFailureClassifier failureClassifier;
     private final TransactionTemplate transactionTemplate;
+    private final ProviderFailureClassifier providerFailureClassifier;
+    private final RetryPolicy retryPolicy;
+    private final DurableLeaseHeartbeatService heartbeatService;
+    private final DurableSchedulerProperties schedulerProperties;
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
+            TransactionTemplate transactionTemplate,
+            ProviderFailureClassifier providerFailureClassifier,
+            RetryPolicy retryPolicy,
+            DurableLeaseHeartbeatService heartbeatService,
+            DurableSchedulerProperties schedulerProperties
+    ) {
+        this.executionRepository = Objects.requireNonNull(executionRepository, "MigrationExecutionRepository must not be null");
+        this.trackRecordRepository = Objects.requireNonNull(trackRecordRepository, "ExecutionTrackRecordRepository must not be null");
+        this.rollbackRecordRepository = rollbackRecordRepository;
+        this.reconciliationRecordRepository = reconciliationRecordRepository;
+        this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
+        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
+        this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
+        this.failureClassifier = failureClassifier != null ? failureClassifier : new ExecutionFailureClassifier();
+        this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "TransactionTemplate must not be null");
+        this.providerFailureClassifier = providerFailureClassifier != null ? providerFailureClassifier : new ProviderFailureClassifier();
+        this.retryPolicy = retryPolicy != null ? retryPolicy : new DefaultRetryPolicy();
+        this.heartbeatService = heartbeatService;
+        this.schedulerProperties = schedulerProperties;
+    }
 
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,
@@ -97,15 +141,21 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             ExecutionFailureClassifier failureClassifier,
             TransactionTemplate transactionTemplate
     ) {
-        this.executionRepository = Objects.requireNonNull(executionRepository, "MigrationExecutionRepository must not be null");
-        this.trackRecordRepository = Objects.requireNonNull(trackRecordRepository, "ExecutionTrackRecordRepository must not be null");
-        this.rollbackRecordRepository = rollbackRecordRepository;
-        this.reconciliationRecordRepository = reconciliationRecordRepository;
-        this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
-        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
-        this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
-        this.failureClassifier = failureClassifier != null ? failureClassifier : new ExecutionFailureClassifier();
-        this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "TransactionTemplate must not be null");
+        this(
+                executionRepository,
+                trackRecordRepository,
+                rollbackRecordRepository,
+                reconciliationRecordRepository,
+                reviewSessionRepository,
+                executionService,
+                musicDestination,
+                failureClassifier,
+                transactionTemplate,
+                null,
+                null,
+                null,
+                null
+        );
     }
 
     public DefaultMigrationExecutionStateService(
@@ -154,6 +204,38 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             ApprovedMigrationExecutionService executionService,
             MusicDestination musicDestination,
             ExecutionFailureClassifier failureClassifier,
+            PlatformTransactionManager transactionManager,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) ProviderFailureClassifier providerFailureClassifier,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) RetryPolicy retryPolicy,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) DurableLeaseHeartbeatService heartbeatService,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) DurableSchedulerProperties schedulerProperties
+    ) {
+        this(
+                executionRepository,
+                trackRecordRepository,
+                rollbackRecordRepository,
+                reconciliationRecordRepository,
+                reviewSessionRepository,
+                executionService,
+                musicDestination,
+                failureClassifier,
+                new TransactionTemplate(Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null")),
+                providerFailureClassifier,
+                retryPolicy,
+                heartbeatService,
+                schedulerProperties
+        );
+    }
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
             PlatformTransactionManager transactionManager
     ) {
         this(
@@ -165,7 +247,11 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 executionService,
                 musicDestination,
                 failureClassifier,
-                new TransactionTemplate(Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null"))
+                transactionManager,
+                null,
+                null,
+                null,
+                null
         );
     }
 
@@ -477,7 +563,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         }
 
         // 1. Verify claimed ownership and fencing generation in a short database transaction
-        String playlistId = transactionTemplate.execute(status -> {
+        ClaimedContext claimedContext = transactionTemplate.execute(status -> {
             MigrationExecution execution = executionRepository.findById(executionId)
                     .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
 
@@ -503,11 +589,352 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 );
             }
 
-            return execution.getDestinationPlaylistId();
+            return new ClaimedContext(execution.getDestinationPlaylistId(), execution.getLeaseOwner());
         });
 
-        // 2. Perform sequential insertion using short per-track transactions
-        return executePendingTracks(executionId, authenticatedUserId, playlistId);
+        // 2. Register active lease with heartbeat service
+        if (heartbeatService != null && claimedContext.workerId() != null) {
+            heartbeatService.registerLease(executionId, claimedContext.workerId(), leaseGeneration);
+        }
+
+        try {
+            return executeClaimedPendingTracks(
+                    executionId,
+                    authenticatedUserId,
+                    claimedContext.playlistId(),
+                    claimedContext.workerId(),
+                    leaseGeneration
+            );
+        } finally {
+            if (heartbeatService != null) {
+                heartbeatService.unregisterLease(executionId);
+            }
+        }
+    }
+
+    private record ClaimedContext(String playlistId, String workerId) {}
+
+    private MigrationExecutionSummary executeClaimedPendingTracks(
+            UUID executionId,
+            UUID authenticatedUserId,
+            String playlistId,
+            String workerId,
+            long leaseGeneration
+    ) {
+        if (heartbeatService != null && heartbeatService.isOwnershipLost(executionId)) {
+            throw new StaleLeaseOwnershipException(
+                    executionId,
+                    workerId,
+                    leaseGeneration,
+                    null,
+                    "Worker lease ownership lost prior to track execution"
+            );
+        }
+
+        // Load all tracks ordered by canonical target position to calculate destination index
+        List<ExecutionTrackRecordDto> allTracks = transactionTemplate.execute(status -> {
+            List<ExecutionTrackRecord> records =
+                    trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+            return records.stream().map(ExecutionTrackRecordDto::from).toList();
+        });
+
+        int currentDestinationIndex = (int) allTracks.stream()
+                .filter(t -> t.status() == ExecutionTrackStatus.ADDED)
+                .count();
+
+        // Query due pending tracks for this execution
+        List<ExecutionTrackRecord> dueTracks = trackRecordRepository.findDuePendingTracks(executionId);
+
+        boolean stopRemaining = false;
+        String stopReason = null;
+        boolean deferredEncountered = false;
+
+        for (ExecutionTrackRecord track : dueTracks) {
+            UUID trackId = track.getId();
+
+            if (heartbeatService != null && heartbeatService.isOwnershipLost(executionId)) {
+                log.warn("Worker '{}' lost lease ownership on execution {} (gen {}) prior to track {}",
+                        workerId, executionId, leaseGeneration, track.getTargetPosition());
+                throw new StaleLeaseOwnershipException(
+                        executionId,
+                        workerId,
+                        leaseGeneration,
+                        null,
+                        "Worker lease ownership lost prior to track execution"
+                );
+            }
+
+            // Fenced claim to ADDING
+            int claimed = trackRecordRepository.claimTrackAddingWithFencing(trackId, executionId, leaseGeneration);
+            if (claimed == 0) {
+                log.warn("Fenced track claim failed for track {} in execution {} (gen {}). Lease expired.",
+                        trackId, executionId, leaseGeneration);
+                if (heartbeatService != null) {
+                    heartbeatService.markOwnershipLost(executionId);
+                }
+                throw new StaleLeaseOwnershipException(
+                        executionId,
+                        workerId,
+                        leaseGeneration,
+                        null,
+                        "Fenced claim rejected: lease expired or generation mismatch"
+                );
+            }
+
+            // External call outside database transaction with in-flight retry support
+            boolean trackSuccess = false;
+            String playlistItemId = null;
+            String trackErrorMessage = null;
+            ExecutionTrackStatus trackFinalStatus = null;
+            int currentAttempt = track.getAttemptCount() + 1;
+            int maxAttempts = track.getMaxAttempts() > 0 ? track.getMaxAttempts() : 3;
+
+            while (!trackSuccess) {
+                try {
+                    AddTrackToDestinationPlaylistRequest addRequest = new AddTrackToDestinationPlaylistRequest(
+                            track.getDestinationTrackId(),
+                            currentDestinationIndex
+                    );
+
+                    DestinationPlaylistItem item = musicDestination.addTrackToPlaylist(
+                            authenticatedUserId,
+                            playlistId,
+                            addRequest
+                    );
+
+                    if (item != null && item.id() != null && !item.id().isBlank()) {
+                        trackSuccess = true;
+                        playlistItemId = item.id().trim();
+                        trackFinalStatus = ExecutionTrackStatus.ADDED;
+                        break;
+                    } else {
+                        trackErrorMessage = "Provider returned null or missing playlist item ID";
+                        trackFinalStatus = ExecutionTrackStatus.FAILED;
+                        break;
+                    }
+                } catch (ResourceAccessException ex) {
+                    String sanitizedMsg = sanitize(ex.getMessage());
+                    log.warn("Insertion timed out for track {} in execution {}. Remote outcome is UNCERTAIN: {}",
+                            track.getDestinationTrackId(), executionId, sanitizedMsg);
+                    trackErrorMessage = "Insertion timed out; remote outcome is uncertain: " + sanitizedMsg;
+                    trackFinalStatus = ExecutionTrackStatus.UNCERTAIN;
+                    break;
+                } catch (ExternalProviderException ex) {
+                    ProviderFailureClassification classification = providerFailureClassifier.classify(ex);
+                    RetryBudget budget = RetryBudget.of(currentAttempt, maxAttempts);
+                    RetryDecision decision = retryPolicy.evaluate(
+                            classification,
+                            RetryOperationType.TRACK_INSERTION,
+                            budget
+                    );
+
+                    String sanitizedMsg = sanitize(ex.getMessage());
+                    log.warn("Track insertion error for track {} in execution {}: category={}, decision={}",
+                            track.getDestinationTrackId(), executionId, classification.category(),
+                            decision.decisionType());
+
+                    if (decision.isInFlight()) {
+                        Duration delay = decision.delayOptional().orElse(Duration.ofMillis(500));
+                        log.info("In-flight retry for track {} in execution {} after {}ms",
+                                track.getDestinationTrackId(), executionId, delay.toMillis());
+                        try {
+                            Thread.sleep(delay.toMillis());
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            trackErrorMessage = "Thread interrupted during in-flight retry";
+                            trackFinalStatus = ExecutionTrackStatus.FAILED;
+                            break;
+                        }
+                        currentAttempt++;
+                        if (heartbeatService != null && heartbeatService.isOwnershipLost(executionId)) {
+                            throw new StaleLeaseOwnershipException(
+                                    executionId,
+                                    workerId,
+                                    leaseGeneration,
+                                    null,
+                                    "Worker lease ownership lost during in-flight retry delay"
+                            );
+                        }
+                        continue;
+                    } else if (decision.isDeferred() || decision.isQuotaDeferred()) {
+                        Duration delay = decision.delayOptional().orElse(Duration.ofSeconds(30));
+                        Instant nextAttempt = Instant.now().plus(delay);
+                        long backoffMs = delay.toMillis();
+                        String catName = classification.category() != null
+                                ? classification.category().name()
+                                : "DEFERRED";
+
+                        int scheduled = trackRecordRepository.scheduleTrackRetryWithFencing(
+                                trackId, executionId, leaseGeneration, nextAttempt, catName, backoffMs
+                        );
+                        if (scheduled == 0) {
+                            log.warn("Fenced retry scheduling failed for track {} in execution {}. Stale token.",
+                                    trackId, executionId);
+                            if (heartbeatService != null) {
+                                heartbeatService.markOwnershipLost(executionId);
+                            }
+                            throw new StaleLeaseOwnershipException(
+                                    executionId,
+                                    workerId,
+                                    leaseGeneration,
+                                    null,
+                                    "Failed to schedule deferred retry: stale fencing token"
+                            );
+                        }
+                        log.info("Scheduled durable deferred retry for track {} in execution {} at {} (backoff {}ms)",
+                                track.getDestinationTrackId(), executionId, nextAttempt, backoffMs);
+                        deferredEncountered = true;
+                        stopRemaining = true;
+                        stopReason = "deferred retry scheduled";
+                        break;
+                    } else if (decision.isReconciliationRequired()) {
+                        trackErrorMessage = "Ambiguous provider outcome: " + sanitizedMsg;
+                        trackFinalStatus = ExecutionTrackStatus.UNCERTAIN;
+                        break;
+                    } else {
+                        trackErrorMessage = sanitizedMsg;
+                        trackFinalStatus = ExecutionTrackStatus.FAILED;
+                        break;
+                    }
+                } catch (Exception ex) {
+                    String sanitizedMsg = sanitize(ex.getMessage());
+                    log.error("Unexpected error inserting track {} in execution {}: {}",
+                            track.getDestinationTrackId(), executionId, sanitizedMsg, ex);
+                    trackErrorMessage = "Unexpected insertion error: " + sanitizedMsg;
+                    trackFinalStatus = ExecutionTrackStatus.FAILED;
+                    break;
+                }
+            }
+
+            if (!deferredEncountered) {
+                if (trackSuccess && trackFinalStatus == ExecutionTrackStatus.ADDED) {
+                    int updated = trackRecordRepository.updateTrackStatusWithFencing(
+                            trackId,
+                            executionId,
+                            leaseGeneration,
+                            ExecutionTrackStatus.ADDED,
+                            playlistItemId,
+                            null,
+                            Instant.now()
+                    );
+                    if (updated == 0) {
+                        log.warn("Fenced status update to ADDED failed for track {}. Stale token.", trackId);
+                        if (heartbeatService != null) {
+                            heartbeatService.markOwnershipLost(executionId);
+                        }
+                        throw new StaleLeaseOwnershipException(
+                                executionId,
+                                workerId,
+                                leaseGeneration,
+                                null,
+                                "Failed to record ADDED status: stale fencing token"
+                        );
+                    }
+                    currentDestinationIndex++;
+                } else {
+                    int updated = trackRecordRepository.updateTrackStatusWithFencing(
+                            trackId,
+                            executionId,
+                            leaseGeneration,
+                            trackFinalStatus,
+                            null,
+                            trackErrorMessage,
+                            Instant.now()
+                    );
+                    if (updated == 0) {
+                        log.warn("Fenced status update to {} failed for track {}. Stale token.",
+                                trackFinalStatus, trackId);
+                        if (heartbeatService != null) {
+                            heartbeatService.markOwnershipLost(executionId);
+                        }
+                        throw new StaleLeaseOwnershipException(
+                                executionId,
+                                workerId,
+                                leaseGeneration,
+                                null,
+                                "Failed to record " + trackFinalStatus + " status: stale fencing token"
+                        );
+                    }
+                    stopRemaining = true;
+                    stopReason = trackFinalStatus == ExecutionTrackStatus.UNCERTAIN
+                            ? "uncertain outcome"
+                            : "failure";
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Post-loop handling
+        Optional<Instant> earliestDeferred = trackRecordRepository.findEarliestDeferredRetry(executionId);
+        if (earliestDeferred.isPresent()) {
+            if (workerId != null) {
+                int released = executionRepository.releaseLease(
+                        executionId,
+                        workerId,
+                        leaseGeneration,
+                        MigrationExecutionStatus.QUEUED,
+                        earliestDeferred.get()
+                );
+                if (released == 0) {
+                    log.warn("Failed to release lease back to QUEUED for execution {} (gen {}). Stale or expired.",
+                            executionId, leaseGeneration);
+                }
+            }
+            return transactionTemplate.execute(status -> {
+                MigrationExecution exec = executionRepository.findById(executionId)
+                        .orElseThrow(() -> new IllegalStateException("Execution missing: " + executionId));
+                return MigrationExecutionSummary.from(exec);
+            });
+        }
+
+        // If stopped on non-deferred failure, mark remaining PENDING tracks as SKIPPED
+        if (stopRemaining) {
+            String skipReason = "Skipped due to prior insertion " + stopReason;
+            transactionTemplate.execute(status -> {
+                List<ExecutionTrackRecord> remaining = trackRecordRepository.findByExecutionIdAndStatus(
+                        executionId,
+                        ExecutionTrackStatus.PENDING
+                );
+                for (ExecutionTrackRecord rec : remaining) {
+                    rec.markSkipped(skipReason);
+                    trackRecordRepository.save(rec);
+                }
+                trackRecordRepository.flush();
+                return null;
+            });
+        }
+
+        // Finalize execution state
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new IllegalStateException("Migration execution missing: " + executionId));
+
+            execution.releaseExecution();
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            if (saved == null) {
+                saved = execution;
+            }
+
+            if (workerId != null) {
+                executionRepository.releaseLease(
+                        executionId,
+                        workerId,
+                        leaseGeneration,
+                        saved.getStatus(),
+                        null
+                );
+            }
+
+            log.info("Execution {} finalized with status {}: {} added, {} failed, {} uncertain, "
+                            + "{} skipped, {} rolled back out of {} total",
+                    saved.getId(), saved.getStatus(), saved.getSuccessfulInsertions(),
+                    saved.getFailedInsertions(), saved.getUncertainInsertions(),
+                    saved.getSkippedInsertions(), saved.getRolledBackInsertions(), saved.getTotalApprovedTracks());
+
+            return MigrationExecutionSummary.from(saved);
+        });
     }
 
     @Override

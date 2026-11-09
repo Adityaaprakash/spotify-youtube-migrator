@@ -182,7 +182,7 @@ Where:
   3. Release the worker thread back to the pool immediately.
   4. Scheduled poller claims the job when `next_attempt_at` arrives.
 - **Provider Quota Exceeded**:
-  YouTube `quotaExceeded` resets at midnight Pacific Time (07:00 / 08:00 UTC). If `quotaExceeded` is encountered, set `next_retry_at = nextPacificMidnight` or transition to `FAILED` with explicit user notification.
+  YouTube `quotaExceeded` resets at midnight Pacific Time (07:00 / 08:00 UTC). If `quotaExceeded` is encountered, set `next_attempt_at = nextPacificMidnight` or transition to `FAILED` with explicit user notification.
 
 ---
 
@@ -223,33 +223,74 @@ A bare `SELECT ... FOR UPDATE SKIP LOCKED` does not prevent race conditions if t
      fencing token                 status = 'QUEUED'
                                    lease_owner = NULL
                                    lease_until = NULL
-                                   next_retry_at = NOW() + INTERVAL '10s'
+                                   next_attempt_at = NOW() + INTERVAL '10s'
                                - COMMIT Transaction
 ```
 
-### 6.2 SQL Implementation (PostgreSQL Dialect)
+### 6.2 Implemented SQL Strategy (PostgreSQL Dialect — Phase 13D-B & 13D-C)
 
 ```sql
+-- Phase 13D-B: Atomic Claim using CTE and FOR UPDATE SKIP LOCKED
 WITH claimable AS (
-    SELECT id FROM migration_executions
-    WHERE status = 'QUEUED'
-      AND (next_retry_at IS NULL OR next_retry_at <= NOW())
-      AND (lease_until IS NULL OR lease_until < NOW())
-    ORDER BY next_retry_at ASC NULLS FIRST, created_at ASC
-    FOR UPDATE SKIP LOCKED
+    SELECT id
+    FROM migration_executions
+    WHERE (
+        (status = 'QUEUED' AND (lease_until IS NULL OR lease_until < clock_timestamp()))
+        OR
+        (status = 'RUNNING' AND lease_until IS NOT NULL AND lease_until < clock_timestamp())
+    )
+    AND (next_attempt_at IS NULL OR next_attempt_at <= clock_timestamp())
+    ORDER BY next_attempt_at ASC NULLS FIRST, created_at ASC
     LIMIT 1
+    FOR UPDATE SKIP LOCKED
 )
 UPDATE migration_executions m
 SET status = 'RUNNING',
-    lease_owner = :instanceId,
+    lease_owner = :workerId,
     lease_generation = m.lease_generation + 1,
-    lease_until = NOW() + INTERVAL '60 seconds',
-    heartbeat_at = NOW(),
-    updated_at = NOW()
+    lease_until = clock_timestamp() + (:leaseDurationSeconds * INTERVAL '1 second'),
+    heartbeat_at = clock_timestamp(),
+    next_attempt_at = NULL,
+    updated_at = clock_timestamp(),
+    version = m.version + 1
 FROM claimable
 WHERE m.id = claimable.id
-RETURNING m.id, m.user_id, m.lease_generation;
+RETURNING m.id, m.user_id, m.lease_generation, m.lease_until, m.lease_owner;
 ```
+
+```sql
+-- Phase 13D-C: Conditional Compensation on TaskRejectedException
+UPDATE migration_executions
+SET status = 'QUEUED',
+    lease_owner = NULL,
+    lease_until = NULL,
+    next_attempt_at = CAST(:nextAttemptAt AS TIMESTAMP WITH TIME ZONE),
+    updated_at = clock_timestamp(),
+    version = version + 1
+WHERE id = :id
+  AND status = 'RUNNING'
+  AND lease_owner = :workerId
+  AND lease_generation = :leaseGeneration
+  AND lease_until IS NOT NULL
+  AND lease_until > clock_timestamp();
+```
+
+### 6.3 Two-Phase Scheduling Protocol Implementation
+1. **Phase 1 (Database Claim Transaction)**:
+   - Executed via `TransactionTemplate` with `Propagation.REQUIRES_NEW` in `DurableMigrationScheduler.claimNextExecution()`.
+   - Atomically locks one eligible row, updates ownership, lease expiry, increments fencing generation, and clears `next_attempt_at`.
+   - Returns immutable `ClaimedExecution` record and commits.
+2. **Phase 2 (Post-Commit Worker Dispatch)**:
+   - Executed strictly after transaction commit outside of any active database transaction.
+   - Dispatches execution to `migrationTaskExecutor` bounded pool (`TaskExecutor.execute(...)`).
+   - Propagates exact acquired fencing generation token to `MigrationBackgroundWorker.processExecution(executionId, userId, leaseGeneration)`.
+   - Worker thread runs with `isActualTransactionActive() == false`.
+3. **Phase 3 (Executor Saturation Compensation)**:
+   - If executor throws `TaskRejectedException` (queue saturated or shutdown in progress), scheduler catches it.
+   - Initiates a discrete `REQUIRES_NEW` compensation transaction: `MigrationExecutionRepository.compensateClaimRejection(...)`.
+   - Conditionally resets status to `QUEUED`, clears `lease_owner` and `lease_until`, sets `next_attempt_at` to backoff timestamp.
+   - Strictly guarded by `(id, workerId, leaseGeneration)` ensuring stale workers cannot overwrite newer leases.
+   - Preserves all track records, track statuses, and count-conservation invariants intact.
 
 ---
 
@@ -306,7 +347,7 @@ YouTube API returns diverse error conditions under HTTP 403 and 400 that require
 
 | Status Code | Error Reason / Domain | Meaning | Retry Policy | Action |
 |---|---|---|:---:|---|
-| **403** | `quotaExceeded` | Daily project quota (10,000 units) exhausted. | **NON-RETRYABLE** (in-window) | Halt execution; set `next_retry_at = nextPacificMidnight`; alert user. |
+| **403** | `quotaExceeded` | Daily project quota (10,000 units) exhausted. | **NON-RETRYABLE** (in-window) | Halt execution; set `next_attempt_at = nextPacificMidnight`; alert user. |
 | **403** | `userRateLimitExceeded` | Per-user short-term QPS limit exceeded. | **RETRYABLE** | Exponential backoff with full jitter; durable release if $> 2\text{ s}$. |
 | **403** | `rateLimitExceeded` | System-wide short-term rate limit exceeded. | **RETRYABLE** | Exponential backoff with full jitter. |
 | **403** | `insufficientPermissions`<br>`forbidden` | OAuth scope revoked or account suspended. | **NON-RETRYABLE** | Fast-fail execution; prompt for re-authorization. |
@@ -412,7 +453,7 @@ ADD COLUMN heartbeat_at TIMESTAMP WITH TIME ZONE,
 ADD COLUMN lease_generation BIGINT NOT NULL DEFAULT 0,
 ADD COLUMN retry_count INT NOT NULL DEFAULT 0,
 ADD COLUMN max_retries INT NOT NULL DEFAULT 3,
-ADD COLUMN next_retry_at TIMESTAMP WITH TIME ZONE,
+ADD COLUMN next_attempt_at TIMESTAMP WITH TIME ZONE,
 ADD COLUMN last_failure_reason TEXT,
 ADD COLUMN playlist_creation_operation_id UUID,
 ADD COLUMN playlist_creation_attempt_count INT NOT NULL DEFAULT 0,
@@ -420,7 +461,7 @@ ADD COLUMN playlist_creation_max_attempts INT NOT NULL DEFAULT 3,
 ADD COLUMN playlist_creation_next_attempt_at TIMESTAMP WITH TIME ZONE;
 
 CREATE INDEX idx_migrationexecutions_poll 
-ON migration_executions(status, next_retry_at, lease_until) 
+ON migration_executions(status, next_attempt_at, lease_until) 
 WHERE status IN ('QUEUED', 'RUNNING');
 
 -- 3. Track Insertion Retry Metadata on execution_track_records

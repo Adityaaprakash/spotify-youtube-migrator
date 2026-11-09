@@ -4,6 +4,7 @@ import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.domain.User;
+import com.spotifyyoutube.migrator.migration.reliability.scheduling.StaleLeaseOwnershipException;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
@@ -1037,6 +1038,120 @@ class DefaultMigrationExecutionStateServiceTest {
                     .hasMessageContaining("not found");
 
             verify(executionRepository, never()).saveAndFlush(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Claimed Track Insertion Tests (Phase 13D-C)")
+    class ClaimedTrackInsertionTests {
+
+        @Test
+        @DisplayName("executeClaimedTrackInsertion rejects null executionId or authenticatedUserId")
+        void executeClaimedTrackInsertionRejectsNullArguments() {
+            UUID execId = UUID.randomUUID();
+            assertThatThrownBy(() -> service.executeClaimedTrackInsertion(null, userId, 1L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Execution ID must not be null");
+
+            assertThatThrownBy(() -> service.executeClaimedTrackInsertion(execId, null, 1L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Authenticated user ID must not be null");
+        }
+
+        @Test
+        @DisplayName("executeClaimedTrackInsertion enforces anti-IDOR user ownership")
+        void executeClaimedTrackInsertionAntiIdor() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            UUID attackerUserId = UUID.randomUUID();
+            assertThatThrownBy(() -> service.executeClaimedTrackInsertion(execId, attackerUserId, 1L))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Migration execution not found");
+        }
+
+        @Test
+        @DisplayName("executeClaimedTrackInsertion rejects when execution is not in RUNNING status")
+        void executeClaimedTrackInsertionRejectsNonRunningStatus() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            assertThatThrownBy(() -> service.executeClaimedTrackInsertion(execId, userId, 1L))
+                    .isInstanceOf(InvalidStateException.class)
+                    .hasMessageContaining("expected status RUNNING")
+                    .hasMessageContaining("QUEUED");
+        }
+
+        @Test
+        @DisplayName("executeClaimedTrackInsertion throws StaleLeaseOwnershipException when token mismatches")
+        void executeClaimedTrackInsertionRejectsStaleGeneration() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+            exec.acquireLease("worker-active", Instant.now().plusSeconds(60), Instant.now());
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+
+            assertThatThrownBy(() -> service.executeClaimedTrackInsertion(execId, userId, 999L))
+                    .isInstanceOf(StaleLeaseOwnershipException.class)
+                    .hasMessageContaining("stale")
+                    .satisfies(ex -> {
+                        StaleLeaseOwnershipException staleEx = (StaleLeaseOwnershipException) ex;
+                        assertThat(staleEx.getAttemptedGeneration()).isEqualTo(999L);
+                        assertThat(staleEx.getActiveGeneration()).isEqualTo(1L);
+                    });
+        }
+
+        @Test
+        @DisplayName("executeClaimedTrackInsertion succeeds and processes tracks when token matches")
+        void executeClaimedTrackInsertionSuccess() {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution exec = new MigrationExecution(
+                    testUser,
+                    reviewSession,
+                    approvedContext,
+                    "PL_dest_123",
+                    null
+            );
+            exec.setId(execId);
+            exec.markQueued();
+            exec.acquireLease("worker-1", Instant.now().plusSeconds(60), Instant.now());
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(execId))
+                    .thenReturn(List.of());
+
+            MigrationExecutionSummary summary = service.executeClaimedTrackInsertion(execId, userId, 1L);
+
+            assertThat(summary).isNotNull();
+            assertThat(summary.executionId()).isEqualTo(execId);
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.RUNNING);
         }
     }
 }

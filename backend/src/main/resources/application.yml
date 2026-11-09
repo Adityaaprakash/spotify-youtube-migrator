@@ -74,6 +74,14 @@ migration:
       max-requests: ${MIGRATION_PROGRESS_RATE_LIMIT_MAX_REQUESTS:60}
       window-seconds: ${MIGRATION_PROGRESS_RATE_LIMIT_WINDOW_SECONDS:60}
       retry-after-seconds: ${MIGRATION_PROGRESS_RATE_LIMIT_RETRY_AFTER_SECONDS:5}
+  scheduler:
+    enabled: ${MIGRATION_SCHEDULER_ENABLED:true}
+    poll-interval-ms: ${MIGRATION_SCHEDULER_POLL_INTERVAL_MS:5000}
+    heartbeat-interval-ms: ${MIGRATION_SCHEDULER_HEARTBEAT_INTERVAL_MS:15000}
+    lease-duration-seconds: ${MIGRATION_SCHEDULER_LEASE_DURATION_SECONDS:60}
+    rejection-backoff-seconds: ${MIGRATION_SCHEDULER_REJECTION_BACKOFF_SECONDS:10}
+    shutdown-grace-period-seconds: ${MIGRATION_SCHEDULER_SHUTDOWN_GRACE_PERIOD_SECONDS:30}
+    max-claims-per-poll: ${MIGRATION_SCHEDULER_MAX_CLAIMS_PER_POLL:4}
 
 
 

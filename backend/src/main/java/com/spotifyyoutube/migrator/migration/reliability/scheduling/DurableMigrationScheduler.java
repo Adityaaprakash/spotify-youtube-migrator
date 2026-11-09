@@ -5,6 +5,7 @@ import com.spotifyyoutube.migrator.migration.async.MigrationBackgroundWorker;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.task.TaskExecutor;
@@ -45,15 +46,22 @@ public class DurableMigrationScheduler implements SmartLifecycle {
     private final TaskExecutor taskExecutor;
     private final PlatformTransactionManager transactionManager;
     private final DurableSchedulerProperties properties;
+    private final DurableLeaseHeartbeatService heartbeatService;
     private final String workerId;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
+    private static final java.util.regex.Pattern TOKEN_PATTERN = java.util.regex.Pattern.compile(
+            "(?i)(bearer\\s+|(?:access_token|refresh_token|token|api_key|apikey|key|client_secret|secret|password)=)[^\\s&\"',;]+"
+    );
+
+    @Autowired
     public DurableMigrationScheduler(
             MigrationExecutionRepository migrationExecutionRepository,
             MigrationBackgroundWorker migrationBackgroundWorker,
             @Qualifier(AsyncMigrationConfig.MIGRATION_TASK_EXECUTOR_BEAN) TaskExecutor taskExecutor,
             PlatformTransactionManager transactionManager,
-            DurableSchedulerProperties properties
+            DurableSchedulerProperties properties,
+            @Autowired(required = false) DurableLeaseHeartbeatService heartbeatService
     ) {
         this.migrationExecutionRepository = Objects.requireNonNull(
                 migrationExecutionRepository, "MigrationExecutionRepository must not be null");
@@ -65,8 +73,26 @@ public class DurableMigrationScheduler implements SmartLifecycle {
                 transactionManager, "PlatformTransactionManager must not be null");
         this.properties = Objects.requireNonNull(
                 properties, "DurableSchedulerProperties must not be null");
+        this.heartbeatService = heartbeatService;
         this.workerId = (properties.getWorkerIdPrefix() != null ? properties.getWorkerIdPrefix() : "scheduler-node-")
                 + UUID.randomUUID();
+    }
+
+    public DurableMigrationScheduler(
+            MigrationExecutionRepository migrationExecutionRepository,
+            MigrationBackgroundWorker migrationBackgroundWorker,
+            @Qualifier(AsyncMigrationConfig.MIGRATION_TASK_EXECUTOR_BEAN) TaskExecutor taskExecutor,
+            PlatformTransactionManager transactionManager,
+            DurableSchedulerProperties properties
+    ) {
+        this(
+                migrationExecutionRepository,
+                migrationBackgroundWorker,
+                taskExecutor,
+                transactionManager,
+                properties,
+                null
+        );
     }
 
     /**
@@ -100,7 +126,15 @@ public class DurableMigrationScheduler implements SmartLifecycle {
                 break;
             }
 
-            Optional<ClaimedExecution> claimedOpt = claimNextExecution();
+            Optional<ClaimedExecution> claimedOpt;
+            try {
+                claimedOpt = claimNextExecution();
+            } catch (Exception ex) {
+                log.error("Transient error during scheduler claim cycle. Aborting remaining poll claims: {}",
+                        sanitize(ex.getMessage()));
+                break;
+            }
+
             if (claimedOpt.isEmpty()) {
                 // No eligible executions waiting; yield poll cycle
                 break;
@@ -113,6 +147,13 @@ public class DurableMigrationScheduler implements SmartLifecycle {
                 break;
             }
         }
+    }
+
+    private String sanitize(String message) {
+        if (message == null) {
+            return "null";
+        }
+        return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
     }
 
     /**
@@ -251,6 +292,35 @@ public class DurableMigrationScheduler implements SmartLifecycle {
     public void stop() {
         if (running.compareAndSet(true, false)) {
             log.info("DurableMigrationScheduler stopped for worker ID '{}'", workerId);
+        }
+    }
+
+    @Override
+    public void stop(Runnable callback) {
+        stop();
+        if (heartbeatService != null && heartbeatService.getActiveLeaseCount() > 0) {
+            long gracePeriodSeconds = properties.getShutdownGracePeriodSeconds();
+            long deadline = System.currentTimeMillis() + (gracePeriodSeconds * 1000L);
+            log.info("Scheduler waiting up to {}s for {} active migration workers to finish...",
+                    gracePeriodSeconds, heartbeatService.getActiveLeaseCount());
+
+            while (heartbeatService.getActiveLeaseCount() > 0 && System.currentTimeMillis() < deadline) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (heartbeatService.getActiveLeaseCount() > 0) {
+                log.warn("Shutdown grace period elapsed with {} active leases still executing; "
+                        + "allowing leases to expire naturally", heartbeatService.getActiveLeaseCount());
+            } else {
+                log.info("All active migration workers completed cleanly before shutdown");
+            }
+        }
+        if (callback != null) {
+            callback.run();
         }
     }
 

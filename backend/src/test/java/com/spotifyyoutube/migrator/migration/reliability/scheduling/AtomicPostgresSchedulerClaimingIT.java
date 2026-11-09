@@ -46,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * PostgreSQL Testcontainers integration tests verifying Phase 13D-B atomic scheduler claiming.
@@ -304,19 +305,17 @@ public class AtomicPostgresSchedulerClaimingIT {
         int oldWorkerMutated = trackRecordRepository.claimTrackAddingWithFencing(
                 trackId,
                 execution.getId(),
-                "worker-A",
                 3L
         );
-        assertThat(oldWorkerMutated).as("Stale worker A with generation 3L must be rejected by fencing").isEqualTo(0);
+        assertThat(oldWorkerMutated).as("Stale worker with generation 3L must be rejected by fencing").isEqualTo(0);
 
         // Verify new generation (4L) can mutate track state
         int newWorkerMutated = trackRecordRepository.claimTrackAddingWithFencing(
                 trackId,
                 execution.getId(),
-                "worker-B",
                 4L
         );
-        assertThat(newWorkerMutated).as("New worker B with generation 4L must succeed").isEqualTo(1);
+        assertThat(newWorkerMutated).as("New worker with generation 4L must succeed").isEqualTo(1);
     }
 
     @Test
@@ -426,7 +425,16 @@ public class AtomicPostgresSchedulerClaimingIT {
             assertThat(claimOpt.get().executionId()).as("Must have skipped locked exec1 and claimed exec2")
                     .isEqualTo(exec2.getId());
 
-            // Prove exec1 is still row-locked by checking pg_locks or attempting a nowait lock
+            // Prove exec1 is genuinely locked: non-skipping NOWAIT query on exec1 fails with lock error
+            assertThatThrownBy(() -> {
+                txTemplate.executeWithoutResult(status -> {
+                    entityManager.createNativeQuery(
+                            "SELECT id FROM migration_executions WHERE id = :id FOR UPDATE NOWAIT"
+                    ).setParameter("id", exec1.getId()).getResultList();
+                });
+            }).as("exec1 must be actively locked and reject concurrent non-skipping lock acquisition");
+
+            // Prove PostgreSQL lock manager records active row locks in pg_locks
             Number locksOnExec1 = (Number) entityManager.createNativeQuery(
                     "SELECT COUNT(*) FROM pg_locks WHERE locktype = 'transactionid' OR locktype = 'relation'"
             ).getSingleResult();

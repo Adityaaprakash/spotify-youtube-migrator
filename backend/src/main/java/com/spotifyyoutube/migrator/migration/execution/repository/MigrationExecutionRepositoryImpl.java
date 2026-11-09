@@ -199,8 +199,11 @@ public class MigrationExecutionRepositoryImpl implements MigrationExecutionRepos
                 "    updated_at = clock_timestamp(), " +
                 "    version = version + 1 " +
                 "WHERE id = :id " +
+                "  AND status = 'RUNNING' " +
                 "  AND lease_owner = :workerId " +
-                "  AND lease_generation = :leaseGeneration";
+                "  AND lease_generation = :leaseGeneration " +
+                "  AND lease_until IS NOT NULL " +
+                "  AND lease_until > clock_timestamp()";
 
         return entityManager.createNativeQuery(sql)
                 .setParameter("id", id)

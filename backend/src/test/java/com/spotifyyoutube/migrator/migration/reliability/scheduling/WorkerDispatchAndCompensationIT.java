@@ -318,6 +318,56 @@ public class WorkerDispatchAndCompensationIT {
     }
 
     @Test
+    @DisplayName("Compensation rejects non-RUNNING status: non-RUNNING status is protected from QUEUED reset")
+    void compensationRejectsNonRunningStatus() {
+        MigrationExecution execution = createQueuedExecution();
+
+        Optional<ClaimedExecution> claimOpt = scheduler.claimNextExecution();
+        assertThat(claimOpt).isPresent();
+        ClaimedExecution claim = claimOpt.get();
+
+        // Simulate external transition to COMPLETED before compensation runs
+        org.springframework.transaction.support.TransactionTemplate txTemplate =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        txTemplate.executeWithoutResult(status -> {
+            entityManager.createNativeQuery(
+                    "UPDATE migration_executions SET status = 'COMPLETED' WHERE id = :id"
+            ).setParameter("id", execution.getId()).executeUpdate();
+        });
+
+        boolean compensated = scheduler.compensateRejection(claim);
+        assertThat(compensated).as("Compensation on non-RUNNING status must return false").isFalse();
+
+        MigrationExecution reloaded = executionRepository.findById(execution.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("Compensation rejects expired lease: wall-clock expired lease cannot be compensated")
+    void compensationRejectsExpiredLease() {
+        MigrationExecution execution = createQueuedExecution();
+
+        Optional<ClaimedExecution> claimOpt = scheduler.claimNextExecution();
+        assertThat(claimOpt).isPresent();
+        ClaimedExecution claim = claimOpt.get();
+
+        // Expire lease in PostgreSQL
+        org.springframework.transaction.support.TransactionTemplate txTemplate =
+                new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        txTemplate.executeWithoutResult(status -> {
+            entityManager.createNativeQuery(
+                    "UPDATE migration_executions SET lease_until = clock_timestamp() - INTERVAL '5 seconds' WHERE id = :id"
+            ).setParameter("id", execution.getId()).executeUpdate();
+        });
+
+        boolean compensated = scheduler.compensateRejection(claim);
+        assertThat(compensated).as("Compensation on expired lease must return false").isFalse();
+
+        MigrationExecution reloaded = executionRepository.findById(execution.getId()).orElseThrow();
+        assertThat(reloaded.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
+    }
+
+    @Test
     @DisplayName("Graceful shutdown: stopped scheduler refuses to claim or dispatch new executions")
     void gracefulShutdownProtection() {
         createQueuedExecution();

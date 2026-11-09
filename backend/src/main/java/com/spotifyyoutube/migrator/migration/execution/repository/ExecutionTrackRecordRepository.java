@@ -176,7 +176,11 @@ public interface ExecutionTrackRecordRepository extends JpaRepository<ExecutionT
            ") " +
            "UPDATE execution_track_records t " +
            "SET status = 'PENDING', " +
-           "    next_attempt_at = CAST(:nextAttemptAt AS TIMESTAMP WITH TIME ZONE), " +
+           "    next_attempt_at = CASE " +
+           "        WHEN :retryBackoffMs IS NOT NULL AND :retryBackoffMs > 0 " +
+           "        THEN clock_timestamp() + (:retryBackoffMs * INTERVAL '1 millisecond') " +
+           "        ELSE CAST(:nextAttemptAt AS TIMESTAMP WITH TIME ZONE) " +
+           "    END, " +
            "    last_failure_classification = :lastFailureClassification, " +
            "    retry_backoff_ms = :retryBackoffMs, " +
            "    started_at = NULL, " +

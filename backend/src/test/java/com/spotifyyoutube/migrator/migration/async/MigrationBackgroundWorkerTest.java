@@ -109,4 +109,38 @@ class MigrationBackgroundWorkerTest {
 
         verify(orchestrator).executeQueuedMigration(executionId, userId);
     }
+
+    @Test
+    @DisplayName("processExecution delegates to ApprovedMigrationOrchestrator.executeClaimedMigration")
+    void processExecutionDelegatesToOrchestrator() {
+        MigrationExecutionSummary summary = new MigrationExecutionSummary(
+                executionId,
+                UUID.randomUUID(),
+                MigrationExecutionStatus.COMPLETED,
+                "PL_dest_123",
+                "https://music.youtube.com/playlist?list=PL_dest_123",
+                10, 10, 0, 0, 0, 0,
+                Instant.now(),
+                Instant.now(),
+                5L
+        );
+        when(orchestrator.executeClaimedMigration(eq(executionId), eq(userId), eq(5L))).thenReturn(summary);
+
+        assertThatCode(() -> worker.processExecution(executionId, userId, 5L))
+                .doesNotThrowAnyException();
+
+        verify(orchestrator).executeClaimedMigration(executionId, userId, 5L);
+    }
+
+    @Test
+    @DisplayName("processExecution rejects null arguments with IllegalArgumentException")
+    void processExecutionRejectsNullArguments() {
+        assertThatThrownBy(() -> worker.processExecution(null, userId, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Execution ID must not be null");
+
+        assertThatThrownBy(() -> worker.processExecution(executionId, null, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Authenticated user ID must not be null");
+    }
 }

@@ -108,6 +108,7 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
            "    heartbeat_at = clock_timestamp(), " +
            "    updated_at = clock_timestamp() " +
            "WHERE id = :id " +
+           "  AND status = 'RUNNING' " +
            "  AND lease_owner = :workerId " +
            "  AND lease_generation = :leaseGeneration " +
            "  AND lease_until > clock_timestamp()",

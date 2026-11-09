@@ -600,5 +600,36 @@ class ApprovedMigrationOrchestratorTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Authenticated user ID must not be null");
         }
+
+        @Test
+        @DisplayName("executeClaimedMigration delegates to executionStateService.executeClaimedTrackInsertion")
+        void executeClaimedMigrationSuccess() {
+            MigrationExecutionSummary completedSummary = new MigrationExecutionSummary(
+                    executionId, sessionId, validContext.planId(), userId,
+                    Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target",
+                    "Source Playlist", MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                    false, false, Instant.now(), Instant.now(), Collections.emptyList()
+            );
+            when(executionStateService.executeClaimedTrackInsertion(executionId, userId, 5L))
+                    .thenReturn(completedSummary);
+
+            MigrationExecutionSummary result = orchestrator.executeClaimedMigration(executionId, userId, 5L);
+
+            assertThat(result).isNotNull();
+            assertThat(result.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            verify(executionStateService).executeClaimedTrackInsertion(executionId, userId, 5L);
+        }
+
+        @Test
+        @DisplayName("executeClaimedMigration rejects null arguments with IllegalArgumentException")
+        void executeClaimedMigrationRejectsNullArguments() {
+            assertThatThrownBy(() -> orchestrator.executeClaimedMigration(null, userId, 1L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Execution ID must not be null");
+
+            assertThatThrownBy(() -> orchestrator.executeClaimedMigration(executionId, null, 1L))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Authenticated user ID must not be null");
+        }
     }
 }
