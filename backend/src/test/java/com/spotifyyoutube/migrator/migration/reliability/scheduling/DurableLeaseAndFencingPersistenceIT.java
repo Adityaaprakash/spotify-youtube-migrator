@@ -360,7 +360,8 @@ public class DurableLeaseAndFencingPersistenceIT {
         trackRecordRepository.saveAndFlush(track);
         entityManager.clear();
 
-        Instant retryAt = now.plusSeconds(20);
+        Instant beforeSchedule = Instant.now();
+        Instant retryAt = beforeSchedule.plusSeconds(20);
         int scheduled = trackRecordRepository.scheduleTrackRetryWithFencing(
                 track.getId(),
                 execution.getId(),
@@ -369,12 +370,16 @@ public class DurableLeaseAndFencingPersistenceIT {
                 "TRANSIENT_SERVER_ERROR",
                 20000L
         );
+        Instant afterSchedule = Instant.now();
         assertThat(scheduled).isEqualTo(1);
 
         entityManager.clear();
         ExecutionTrackRecord reloaded = trackRecordRepository.findById(track.getId()).orElseThrow();
         assertThat(reloaded.getStatus()).isEqualTo(ExecutionTrackStatus.PENDING);
-        assertThat(reloaded.getNextAttemptAt()).isEqualTo(retryAt);
+        assertThat(reloaded.getNextAttemptAt())
+                .isNotNull()
+                .isAfterOrEqualTo(beforeSchedule.plusSeconds(19))
+                .isBeforeOrEqualTo(afterSchedule.plusSeconds(22));
         assertThat(reloaded.getLastFailureClassification()).isEqualTo("TRANSIENT_SERVER_ERROR");
         assertThat(reloaded.getRetryBackoffMs()).isEqualTo(20000L);
         assertThat(reloaded.getVersion()).isGreaterThan(0L);

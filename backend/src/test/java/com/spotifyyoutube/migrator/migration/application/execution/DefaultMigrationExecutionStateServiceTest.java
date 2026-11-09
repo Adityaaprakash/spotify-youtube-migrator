@@ -1143,15 +1143,52 @@ class DefaultMigrationExecutionStateServiceTest {
             exec.markQueued();
             exec.acquireLease("worker-1", Instant.now().plusSeconds(60), Instant.now());
 
+            ExecutionTrackRecord r0 = exec.getTrackRecords().get(0);
+            r0.setId(UUID.randomUUID());
+            ExecutionTrackRecord r1 = exec.getTrackRecords().get(1);
+            r1.setId(UUID.randomUUID());
+
             when(executionRepository.findById(execId)).thenReturn(Optional.of(exec));
+            when(executionRepository.saveAndFlush(any(MigrationExecution.class))).thenReturn(exec);
             when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(execId))
-                    .thenReturn(List.of());
+                    .thenReturn(exec.getTrackRecords());
+            when(trackRecordRepository.findDuePendingTracks(execId))
+                    .thenReturn(exec.getTrackRecords());
+            when(trackRecordRepository.claimTrackAddingWithFencing(any(), eq(execId), eq(1L))).thenReturn(1);
+            when(trackRecordRepository.updateTrackStatusWithFencing(
+                    any(), eq(execId), eq(1L), eq(ExecutionTrackStatus.ADDED), any(), any(), any()
+            )).thenAnswer(inv -> {
+                UUID trackId = inv.getArgument(0);
+                String itemId = inv.getArgument(4);
+                if (r0.getId().equals(trackId)) {
+                    r0.markAdding();
+                    r0.markAdded(itemId != null ? itemId : "item_0");
+                } else if (r1.getId().equals(trackId)) {
+                    r1.markAdding();
+                    r1.markAdded(itemId != null ? itemId : "item_1");
+                }
+                return 1;
+            });
+            when(trackRecordRepository.findEarliestDeferredRetry(execId)).thenReturn(Optional.empty());
+
+            when(musicDestination.addTrackToPlaylist(
+                    eq(userId), eq("PL_dest_123"), any(AddTrackToDestinationPlaylistRequest.class)))
+                    .thenReturn(new DestinationPlaylistItem("item_0", "PL_dest_123", "yt_t0", 0))
+                    .thenReturn(new DestinationPlaylistItem("item_1", "PL_dest_123", "yt_t1", 1));
 
             MigrationExecutionSummary summary = service.executeClaimedTrackInsertion(execId, userId, 1L);
 
             assertThat(summary).isNotNull();
             assertThat(summary.executionId()).isEqualTo(execId);
-            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.RUNNING);
+            assertThat(summary.status()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+            assertThat(summary.fullySuccessful()).isTrue();
+            assertThat(summary.successfulInsertions()).isEqualTo(2);
+
+            verify(trackRecordRepository).claimTrackAddingWithFencing(eq(r0.getId()), eq(execId), eq(1L));
+            verify(trackRecordRepository).claimTrackAddingWithFencing(eq(r1.getId()), eq(execId), eq(1L));
+            verify(executionRepository).releaseLease(
+                    eq(execId), eq("worker-1"), eq(1L), eq(MigrationExecutionStatus.COMPLETED), any()
+            );
         }
     }
 }

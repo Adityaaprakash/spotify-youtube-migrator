@@ -132,8 +132,12 @@ public class AtomicPostgresSchedulerClaimingIT {
         MigrationExecution exec = new MigrationExecution(
                 testUser, session, context,
                 "PL_" + UUID.randomUUID(), "https://music.youtube.com/playlist?list=PL_" + UUID.randomUUID(),
-                status
+                MigrationExecutionStatus.QUEUED
         );
+
+        if (status != null && status != MigrationExecutionStatus.QUEUED) {
+            exec.setStatus(status);
+        }
 
         if (leaseOwner != null) {
             exec.setLeaseOwner(leaseOwner);
@@ -237,8 +241,23 @@ public class AtomicPostgresSchedulerClaimingIT {
             }
         };
 
-        CompletableFuture<Void> worker1 = CompletableFuture.runAsync(() -> claimTask.accept("worker-1"));
-        CompletableFuture<Void> worker2 = CompletableFuture.runAsync(() -> claimTask.accept("worker-2"));
+        CompletableFuture<Void> worker1 = CompletableFuture.runAsync(
+                () -> {
+                    try {
+                        claimTask.accept("worker-1");
+                    } catch (Exception ex) {
+                        throw new RuntimeException(ex);
+                    }
+                });
+
+        CompletableFuture<Void> worker2 = CompletableFuture.runAsync(
+                () -> {
+                    try {
+                        claimTask.accept("worker-2");
+                    } catch (Exception ex) {
+                        throw new RuntimeException(ex);
+                    }
+                });
 
         startLatch.countDown();
         worker1.get(10, TimeUnit.SECONDS);
@@ -321,7 +340,7 @@ public class AtomicPostgresSchedulerClaimingIT {
     @Test
     @DisplayName("Test E: Future retry protection — execution with next_attempt_at in future is not claimable")
     void futureRetryProtection() {
-        Instant futureRetry = Instant.now().plusSeconds(120);
+        Instant futureRetry = Instant.now().plusSeconds(120).truncatedTo(ChronoUnit.MICROS);
         MigrationExecution execution = createExecution(
                 MigrationExecutionStatus.QUEUED,
                 null,

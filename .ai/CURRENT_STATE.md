@@ -63,19 +63,24 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
   - `MigrationExecutionRepository`: Added conditional `renewLeaseHeartbeat`, `releaseLease`, and `updateStatusWithFencing` queries.
   - `ExecutionTrackRecordRepository`: Added `findDuePendingTracks`, `findEarliestDeferredRetry`, and fenced `updateTrackStatusWithFencing` / `scheduleTrackRetryWithFencing` queries.
 - **Comprehensive Unit & Integration Test Suites**:
-  - `DurableWorkerLeaseDomainTest`: 11 unit tests covering default fields, monotonic lease acquisition, expired lease reclamation, competing lease rejection, heartbeat renewal, zombie worker rejection, cooperative lease release, retry scheduling, track retry state, and attempt budget evaluation.
+  - `DurableWorkerLeaseDomainTest`: 17 unit tests across 5 nested classes covering default fields, monotonic lease acquisition, expired lease reclamation, competing lease rejection, heartbeat renewal, zombie worker rejection, cooperative lease release, retry scheduling, track retry state, and attempt budget evaluation.
   - `StaleLeaseOwnershipExceptionTest`: 2 unit tests covering structured and simple constructors and accessors.
-  - `DurableLeaseAndFencingPersistenceIT`: 7 integration tests against PostgreSQL 16 Testcontainers covering V10 migration execution, field persistence, conditional heartbeat renewal, lease release, fenced track status mutation, fenced track retry scheduling, and due/deferred track queries.
+  - `DurableLeaseAndFencingPersistenceIT`: 19 integration tests against PostgreSQL 16 Testcontainers covering V10 migration execution, field persistence, conditional heartbeat renewal, lease release, fenced track status mutation, fenced track retry scheduling, and due/deferred track queries.
+- **Authoritative Eight-State Track Model**:
+  - Exact Persisted Enum: `ExecutionTrackStatus` (`PENDING`, `ADDING`, `ADDED`, `FAILED`, `UNCERTAIN`, `SKIPPED`, `ROLLING_BACK`, `ROLLED_BACK`).
+  - `SKIPPED` is an official persisted track state established in Phase 11E/ADR-027 to preserve canonical destination ordering upon failure or uncertain outcome.
+  - `ROLLBACK_FAILED` is not an enum in `ExecutionTrackStatus`; failed compensating deletions revert the track from `ROLLING_BACK` back to `ADDED` while auditing failure in `execution_rollback_records` (`RollbackRecordStatus.FAILED`).
+  - Mathematical Conservation: `totalApprovedTracks = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack` strictly enforced across `MigrationProgressSnapshot`, `DefaultMigrationProgressService`, and database queries.
 - **Phase 13D Implementation Sequencing**:
   - `Phase 13D-A`: [COMPLETE & VERIFIED] Durable Lease Foundation, Schema & Fencing Primitives.
-  - `Phase 13D-B`: [COMPLETE & VERIFIED] Atomic PostgreSQL Execution Claiming (`FOR UPDATE SKIP LOCKED`).
-  - `Phase 13D-C`: [COMPLETE & VERIFIED] Worker Dispatch & Bounded Executor Saturation Compensation.
-  - `Phase 13D-D`: [COMPLETE & VERIFIED] Worker Lease Renewal & Heartbeat Lifecycle.
-  - `Phase 13D-E`: [COMPLETE & VERIFIED] Durable Retry Scheduling & Deferred Polling Integration.
-  - `Phase 13D-F`: [COMPLETE & VERIFIED] Graceful Shutdown, Saturation & Scheduler Hardening.
-  - `Phase 13D (Overall)`: [COMPLETE, VERIFIED & FROZEN]
+  - `Phase 13D-B`: [IMPLEMENTED & AUDITED] Atomic PostgreSQL Execution Claiming (`FOR UPDATE SKIP LOCKED`).
+  - `Phase 13D-C`: [IMPLEMENTED & AUDITED] Worker Dispatch & Bounded Executor Saturation Compensation.
+  - `Phase 13D-D`: [IMPLEMENTED & AUDITED] Worker Lease Renewal & Heartbeat Lifecycle.
+  - `Phase 13D-E`: [IMPLEMENTED & AUDITED] Durable Retry Scheduling & Deferred Polling Integration.
+  - `Phase 13D-F`: [IMPLEMENTED & AUDITED] Graceful Shutdown, Saturation & Scheduler Hardening.
+  - `Phase 13D (Overall)`: [IMPLEMENTED & AUDITED — FREEZE PENDING LOCAL RUNTIME VERIFICATION]
 
-### Phase 13D-D, 13D-E & 13D-F (Heartbeat Lifecycle, Durable Retry & Scheduler Hardening) [COMPLETE & FROZEN]
+### Phase 13D-D, 13D-E & 13D-F (Heartbeat Lifecycle, Durable Retry & Scheduler Hardening) [IMPLEMENTED & AUDITED]
 - **Implemented Subsystem**: Delivered atomic lease heartbeat renewal service (`DurableLeaseHeartbeatService`), stale worker protection and ownership loss detection, durable retry scheduling integrating Phase 13B failure classifier and Phase 13C retry policy with canonical track-level backoffs, aggregate `next_attempt_at` coordination, graceful application shutdown with active worker grace period, and scheduler saturation hardening.
 - **Components Created & Updated**:
   - `DurableLeaseHeartbeatService`: Managed Spring service tracking active execution leases, performing periodic atomic renewals via `renewLeaseHeartbeat`, and detecting ownership loss when 0 rows are updated.
@@ -83,10 +88,10 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
   - `DefaultMigrationExecutionStateService`: Updated `executeClaimedTrackInsertion` to register leases with `heartbeatService`, perform per-track mutations via `claimTrackAddingWithFencing`, classify failures using `ProviderFailureClassifier`, evaluate retries via `RetryPolicy`, schedule durable deferred retries via `scheduleTrackRetryWithFencing`, mark ambiguous writes as `UNCERTAIN`, and release leases cleanly using `releaseLease`.
   - `DurableMigrationScheduler`: Updated with `heartbeatService` integration, transient database error recovery preventing tight failure loops, structured sanitized logging (no secrets), and `SmartLifecycle.stop(Runnable callback)` waiting up to `shutdownGracePeriodSeconds` for active workers.
   - `DurableSchedulerProperties`: Added `heartbeatIntervalMs` (15000L) and `shutdownGracePeriodSeconds` (30L).
-- **Test Suites Added & Verified**:
-  - `DurableLeaseHeartbeatServiceTest` (8 unit tests): registration, unregistration, atomic renewal, 0-row ownership loss detection, error resilience, and active lease counting.
+- **Test Suites Added & Statically Verified**:
+  - `DurableLeaseHeartbeatServiceTest` (10 unit tests): registration, unregistration, atomic renewal, 0-row ownership loss detection, error resilience, and active lease counting.
   - `DurableRetrySchedulingTest` (4 unit tests): rate limit deferred retry routing, timeout uncertain handling, non-retryable 404 failed routing, and confirmed added fencing.
-  - `DurableSchedulerLifecycleAndHardeningTest` (6 unit tests): graceful shutdown with 0 and >0 active leases, executor saturation polling pause, transient database error recovery, and compensation execution.
+  - `DurableSchedulerLifecycleAndHardeningTest` (7 unit tests): graceful shutdown with 0 and >0 active leases, executor saturation polling pause, transient database error recovery, and compensation execution.
   - `DurableHeartbeatAndRenewalIT` (7 integration tests): PostgreSQL Testcontainers tests verifying heartbeat extension, wall-clock time update, generation preservation, wrong worker rejection, stale generation rejection, expired lease rejection, terminal execution rejection, and old worker takeover invalidation.
   - `DurableRetrySchedulingIT` (4 integration tests): PostgreSQL Testcontainers tests verifying track retry metadata persistence, earliest deferred retry calculation across multiple tracks, due track discovery excluding future retries, and aggregate `releaseLease` to `QUEUED` with `next_attempt_at`.
   - `GracefulShutdownAndSaturationIT` (3 integration tests): PostgreSQL Testcontainers tests verifying rejection compensation resetting to `QUEUED`, stale generation compensation rejection, and wrong worker rejection.

@@ -54,9 +54,6 @@ class WorkerDispatchAndCompensationTest {
 
     @BeforeEach
     void setUp() {
-        TransactionStatus txStatus = mock(TransactionStatus.class);
-        when(transactionManager.getTransaction(any())).thenReturn(txStatus);
-
         properties = new DurableSchedulerProperties();
         properties.setEnabled(true);
         properties.setLeaseDurationSeconds(60L);
@@ -72,6 +69,11 @@ class WorkerDispatchAndCompensationTest {
                 properties
         );
         scheduler.start();
+    }
+
+    private void stubTransactionManager() {
+        TransactionStatus txStatus = mock(TransactionStatus.class);
+        when(transactionManager.getTransaction(any())).thenReturn(txStatus);
     }
 
     @Nested
@@ -116,6 +118,11 @@ class WorkerDispatchAndCompensationTest {
     @Nested
     @DisplayName("Executor Saturation & Compensation")
     class ExecutorSaturationCompensationTests {
+
+        @BeforeEach
+        void setUpCompensation() {
+            stubTransactionManager();
+        }
 
         @Test
         @DisplayName("TaskRejectedException triggers conditional compensation resetting execution to QUEUED")
@@ -237,6 +244,7 @@ class WorkerDispatchAndCompensationTest {
         @Test
         @DisplayName("pollAndDispatch halts claiming loop if dispatch was rejected")
         void pollHaltOnRejection() {
+            stubTransactionManager();
             UUID executionId = UUID.randomUUID();
             UUID userId = UUID.randomUUID();
             ClaimedExecution claim = new ClaimedExecution(
