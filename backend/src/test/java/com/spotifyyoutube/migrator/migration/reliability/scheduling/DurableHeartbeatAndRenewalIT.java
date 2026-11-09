@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
@@ -32,8 +33,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * PostgreSQL database integration tests verifying lease heartbeat renewal, wall-clock extension,
@@ -191,17 +194,53 @@ public class DurableHeartbeatAndRenewalIT {
     void renewLeaseRejectsStaleGeneration() {
         TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
 
+        // 1. Worker-1 acquires initial lease with generation 1
+        AtomicReference<MigrationExecution> staleWorker1Ref = new AtomicReference<>();
         txTemplate.executeWithoutResult(status -> {
             MigrationExecution exec = executionRepository.findById(execution.getId()).orElseThrow();
             exec.acquireLease("worker-1", Instant.now().plusSeconds(60), Instant.now());
+            MigrationExecution saved = executionRepository.saveAndFlush(exec);
+            staleWorker1Ref.set(saved);
+        });
+
+        // 2. Current lease owner with valid generation 1 successfully renews heartbeat
+        int renewed = txTemplate.execute(status ->
+                executionRepository.renewLeaseHeartbeat(execution.getId(), "worker-1", 1L, 60L)
+        );
+        assertThat(renewed).isEqualTo(1);
+
+        // 3. Simulate lease expiration so worker-2 can legitimately claim takeover
+        txTemplate.executeWithoutResult(status -> {
+            MigrationExecution exec = executionRepository.findById(execution.getId()).orElseThrow();
+            exec.setLeaseUntil(Instant.now().minusSeconds(5));
             executionRepository.saveAndFlush(exec);
         });
 
-        int renewed = txTemplate.execute(status ->
-                executionRepository.renewLeaseHeartbeat(execution.getId(), "worker-1", 999L, 60L)
-        );
+        // Worker-2 claims takeover via atomic PostgreSQL FOR UPDATE SKIP LOCKED
+        // This monotonically increments lease_generation (to 2L) and version (version + 1)
+        txTemplate.executeWithoutResult(status -> {
+            executionRepository.claimNextEligibleExecution("worker-2", 60L);
+        });
 
-        assertThat(renewed).isEqualTo(0);
+        // 4. Stale worker-1 attempts heartbeat renewal with its stale generation 1 -> rejected
+        int staleRenewed = txTemplate.execute(status ->
+                executionRepository.renewLeaseHeartbeat(execution.getId(), "worker-1", 1L, 60L)
+        );
+        assertThat(staleRenewed).as("Stale lease generation 1 must be rejected").isEqualTo(0);
+
+        // 5. Stale worker cannot modify newer owner's lease in database
+        MigrationExecution reloaded = executionRepository.findById(execution.getId()).orElseThrow();
+        assertThat(reloaded.getLeaseOwner()).isEqualTo("worker-2");
+        assertThat(reloaded.getLeaseGeneration()).isEqualTo(2L);
+
+        // 6. Optimistic locking remains effective: stale worker holding outdated entity version is rejected
+        MigrationExecution staleWorker1Exec = staleWorker1Ref.get();
+        staleWorker1Exec.setLeaseUntil(Instant.now().plusSeconds(120));
+        assertThatThrownBy(() -> {
+            txTemplate.executeWithoutResult(status -> {
+                executionRepository.saveAndFlush(staleWorker1Exec);
+            });
+        }).isInstanceOf(ObjectOptimisticLockingFailureException.class);
     }
 
     @Test
