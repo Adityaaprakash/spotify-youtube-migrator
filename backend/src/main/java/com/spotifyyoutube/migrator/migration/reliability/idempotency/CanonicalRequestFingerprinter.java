@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -27,8 +28,9 @@ import java.util.UUID;
  * <ul>
  *   <li>Independent of JSON serialization and property ordering</li>
  *   <li>Unambiguous delimiter boundaries using ASCII Unit Separator (\u001F) and Record Separator (\u001E)</li>
+ *   <li>Unicode NFC normalization for textual inputs ensuring NFC and NFD produce identical fingerprints</li>
  *   <li>Preserves duplicate track occurrences during lexicographic track sorting</li>
- *   <li>Deterministic UTF-8 encoding for Unicode inputs</li>
+ *   <li>Deterministic UTF-8 encoding for multilingual inputs</li>
  *   <li>Excludes volatile timestamps, execution IDs, and random request tokens</li>
  * </ul>
  */
@@ -61,6 +63,7 @@ public class CanonicalRequestFingerprinter {
 
     /**
      * Computes the canonical fingerprint for a canonical migration request.
+     * Applies Unicode NFC normalization to textual inputs to guarantee equivalence.
      *
      * @param request validated canonical request representation
      * @return versioned fingerprint string
@@ -70,16 +73,20 @@ public class CanonicalRequestFingerprinter {
 
         List<String> sortedTracks = request.trackHashes().stream()
                 .filter(Objects::nonNull)
+                .map(t -> Normalizer.normalize(t.trim(), Normalizer.Form.NFC))
                 .sorted()
                 .toList();
 
         String joinedTracks = String.join(TRACK_DELIMITER, sortedTracks);
 
+        String normalizedSourceId = Normalizer.normalize(request.sourcePlaylistId().trim(), Normalizer.Form.NFC);
+        String normalizedTargetName = Normalizer.normalize(request.targetPlaylistName().trim(), Normalizer.Form.NFC);
+
         String canonicalString = request.userId().toString().trim()
                 + FIELD_DELIMITER
-                + request.sourcePlaylistId().trim()
+                + normalizedSourceId
                 + FIELD_DELIMITER
-                + request.targetPlaylistName().trim()
+                + normalizedTargetName
                 + FIELD_DELIMITER
                 + joinedTracks;
 

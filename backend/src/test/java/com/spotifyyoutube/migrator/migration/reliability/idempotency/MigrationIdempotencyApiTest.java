@@ -9,12 +9,9 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.MigrationController;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationSubmissionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RunMigrationApiRequest;
-import com.spotifyyoutube.migrator.migration.application.MigrationService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
-import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
-import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,7 +25,6 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -150,13 +146,16 @@ class MigrationIdempotencyApiTest {
     }
 
     @Test
-    @DisplayName("POST /api/migrations/submit first request dispatches migration and records idempotency")
+    @DisplayName("POST /api/migrations/submit first request dispatches migration and completes idempotency claim")
     void typedSubmit_validFirstRequest_dispatchesAndRecords() throws Exception {
         UUID executionId = UUID.randomUUID();
         String key = "req-key-001";
 
-        when(idempotencyService.findExistingRecord(eq(userId), eq(key)))
-                .thenReturn(Optional.empty());
+        MigrationIdempotencyRecord pendingRecord = MigrationIdempotencyRecord.createPending(
+                userId, key, "v1:pendingFingerprint", reviewSessionId, java.time.Instant.now().plusSeconds(60)
+        );
+        when(idempotencyService.acquireClaim(eq(userId), eq(key), any(), eq(reviewSessionId)))
+                .thenReturn(ClaimResult.acquired(pendingRecord));
 
         MigrationExecutionSummary summary = new MigrationExecutionSummary(
                 executionId, reviewSessionId, MigrationExecutionStatus.QUEUED,
@@ -178,8 +177,8 @@ class MigrationIdempotencyApiTest {
                 .andExpect(jsonPath("$.status").value("QUEUED"));
 
         verify(jobDispatcher).dispatchMigration(any(), eq(userId));
-        verify(idempotencyService).recordSubmission(
-                eq(userId), eq(key), any(), eq(executionId), eq(202), any()
+        verify(idempotencyService).completeClaim(
+                eq(userId), eq(key), eq(executionId), eq(202), any(), eq("/api/migrations/" + executionId + "/progress")
         );
     }
 
@@ -205,11 +204,13 @@ class MigrationIdempotencyApiTest {
         String cachedPayload = objectMapper.writeValueAsString(cachedResponse);
 
         MigrationIdempotencyRecord record = new MigrationIdempotencyRecord(
-                userId, key, expectedFingerprint, originalExecId, 202, cachedPayload, null, null
+                userId, key, expectedFingerprint, IdempotencyClaimStatus.COMPLETED,
+                originalExecId, 202, cachedPayload, "/api/migrations/" + originalExecId + "/progress",
+                reviewSessionId, null, null, null
         );
 
-        when(idempotencyService.findExistingRecord(eq(userId), eq(key)))
-                .thenReturn(Optional.of(record));
+        when(idempotencyService.acquireClaim(eq(userId), eq(key), any(), eq(reviewSessionId)))
+                .thenReturn(ClaimResult.replay(record));
 
         RunMigrationApiRequest req = new RunMigrationApiRequest(
                 reviewSessionId, userId, null, "Target Playlist", null, true
@@ -232,15 +233,12 @@ class MigrationIdempotencyApiTest {
     @Test
     @DisplayName("POST /api/migrations/submit with differing payload returns 409 IDEMPOTENCY_FINGERPRINT_MISMATCH")
     void typedSubmit_fingerprintMismatch_returns409Conflict() throws Exception {
-        UUID originalExecId = UUID.randomUUID();
         String key = "req-key-conflict-003";
 
-        MigrationIdempotencyRecord record = new MigrationIdempotencyRecord(
-                userId, key, "v1:initialOriginalFingerprint", originalExecId, 202, "{}", null, null
-        );
-
-        when(idempotencyService.findExistingRecord(eq(userId), eq(key)))
-                .thenReturn(Optional.of(record));
+        when(idempotencyService.acquireClaim(eq(userId), eq(key), any(), eq(reviewSessionId)))
+                .thenReturn(ClaimResult.mismatch(String.format(
+                        "Idempotency key '%s' was previously used with a different request payload", key
+                )));
 
         RunMigrationApiRequest modifiedReq = new RunMigrationApiRequest(
                 reviewSessionId, userId, null, "Completely Different Title", null, true

@@ -1,12 +1,13 @@
 package com.spotifyyoutube.migrator.migration.reliability.idempotency;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Application service coordinating API idempotency records, replay detection,
- * terminal-state lifecycle retention, and safe cleanup (Phase 13E).
+ * Application service coordinating API idempotency records, atomic claim reservations,
+ * monotonic claim fencing, lease renewals, replay detection, crash recovery, and safe cleanup (Phase 13E).
  */
 public interface MigrationIdempotencyService {
 
@@ -20,19 +21,127 @@ public interface MigrationIdempotencyService {
     Optional<MigrationIdempotencyRecord> findExistingRecord(UUID userId, String idempotencyKey);
 
     /**
+     * Atomically acquires an idempotency claim before execution preparation or dispatch.
+     *
+     * @param userId             authenticated user identifier
+     * @param idempotencyKey     client key
+     * @param requestFingerprint canonical request fingerprint
+     * @param reviewSessionId    optional review session ID for crash reconciliation
+     * @return claim result with fencing tokens
+     */
+    ClaimResult acquireClaim(
+            UUID userId,
+            String idempotencyKey,
+            String requestFingerprint,
+            UUID reviewSessionId
+    );
+
+    /**
+     * Completes a previously acquired PENDING claim by associating it with a persisted execution.
+     *
+     * @param userId             authenticated user identifier
+     * @param idempotencyKey     client key
+     * @param executionId        persisted execution ID
+     * @param responseStatus     HTTP status code
+     * @param responsePayload    serialized response payload
+     * @param locationHeader     Location header URL
+     * @return completed idempotency record
+     */
+    MigrationIdempotencyRecord completeClaim(
+            UUID userId,
+            String idempotencyKey,
+            UUID executionId,
+            int responseStatus,
+            String responsePayload,
+            String locationHeader
+    );
+
+    /**
+     * Completes a PENDING claim protected by strict ownership and fencing verification (Phase 13E).
+     *
+     * @param userId             authenticated user identifier
+     * @param idempotencyKey     client key
+     * @param claimOwner         expected claim owner token
+     * @param claimGeneration    expected fencing generation
+     * @param executionId        persisted execution ID
+     * @param responseStatus     HTTP status code
+     * @param responsePayload    serialized response payload
+     * @param locationHeader     Location header URL
+     * @return completed idempotency record
+     * @throws StaleClaimOwnershipException if ownership was lost or taken over
+     */
+    MigrationIdempotencyRecord completeClaim(
+            UUID userId,
+            String idempotencyKey,
+            String claimOwner,
+            long claimGeneration,
+            UUID executionId,
+            int responseStatus,
+            String responsePayload,
+            String locationHeader
+    );
+
+    /**
+     * Releases a PENDING claim if downstream execution preparation failed before creating an execution.
+     *
+     * @param userId         authenticated user identifier
+     * @param idempotencyKey client key
+     */
+    void releaseClaim(UUID userId, String idempotencyKey);
+
+    /**
+     * Releases a PENDING claim protected by strict ownership and fencing verification (Phase 13E).
+     *
+     * @param userId          authenticated user identifier
+     * @param idempotencyKey  client key
+     * @param claimOwner      expected claim owner token
+     * @param claimGeneration expected fencing generation
+     */
+    void releaseClaim(UUID userId, String idempotencyKey, String claimOwner, long claimGeneration);
+
+    /**
+     * Renews an active PENDING claim lease using PostgreSQL database wall-clock time (Phase 13E).
+     *
+     * @param userId          authenticated user identifier
+     * @param idempotencyKey  client key
+     * @param claimOwner      expected claim owner token
+     * @param claimGeneration expected fencing generation
+     * @param extension       lease duration extension
+     * @return true if successfully renewed, false if ownership was lost or expired
+     */
+    boolean renewClaim(
+            UUID userId,
+            String idempotencyKey,
+            String claimOwner,
+            long claimGeneration,
+            Duration extension
+    );
+
+    /**
+     * Signals that an external mutation (e.g. YouTube playlist creation) has commenced for the session.
+     *
+     * @param reviewSessionId review session identifier
+     * @return number of updated pending claims
+     */
+    int markExternalOperationStartedForSession(UUID reviewSessionId);
+
+    /**
+     * Persists the allocated destination playlist ID to the pending claim record before execution creation.
+     *
+     * @param reviewSessionId       review session identifier
+     * @param destinationPlaylistId remote playlist ID
+     * @return number of updated pending claims
+     */
+    int recordDestinationPlaylistForSession(UUID reviewSessionId, String destinationPlaylistId);
+
+    /**
      * Atomically records a migration submission outcome associated with an idempotency key.
-     * <p>
-     * If a concurrent duplicate submission previously committed for the same {@code (userId, idempotencyKey)}:
-     * <ul>
-     *   <li>If the request fingerprint matches: returns the existing record for replay</li>
-     *   <li>If the request fingerprint differs: throws {@link IdempotencyFingerprintMismatchException} (HTTP 409)</li>
-     * </ul>
      *
      * @param userId             authenticated user identifier
      * @param idempotencyKey     validated client key
      * @param requestFingerprint canonical request fingerprint
      * @param executionId        persisted execution identifier
-     * @param responseStatus     HTTP status code of the submission response (e.g. 200, 202)
+     * @param responseStatus     HTTP status code of the submission response
      * @param responsePayload    serialized response body
      * @return persisted or existing idempotency record
      */
@@ -48,8 +157,6 @@ public interface MigrationIdempotencyService {
     /**
      * Updates retention for all idempotency records associated with the specified execution ID
      * upon transition to a terminal state (COMPLETED, FAILED, ROLLED_BACK).
-     * Sets {@code expires_at = terminalTransitionTime + 72 hours}.
-     * Idempotent: repeated transitions will not extend the retention period.
      *
      * @param executionId            execution aggregate identifier
      * @param terminalTransitionTime timestamp when terminal state was reached
@@ -59,7 +166,6 @@ public interface MigrationIdempotencyService {
 
     /**
      * Performs scheduled cleanup of expired terminal idempotency records using database clock time.
-     * Preserves all active and recoverable records where {@code expires_at IS NULL}.
      *
      * @return count of deleted records
      */

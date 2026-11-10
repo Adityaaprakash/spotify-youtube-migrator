@@ -136,6 +136,35 @@ class CanonicalRequestFingerprinterTest {
         }
 
         @Test
+        @DisplayName("NFC and NFD representations of equivalent Unicode text produce identical fingerprints")
+        void nfcAndNfd_produceIdenticalFingerprint() {
+            String nfcTitle = "Caf\u00e9 del Mar"; // precomposed e with acute
+            String nfdTitle = "Cafe\u0301 del Mar"; // decomposed e + combining acute accent
+
+            String fpNfc = fingerprinter.calculateFingerprint(
+                    userId, "src-1", nfcTitle, List.of("t1")
+            );
+            String fpNfd = fingerprinter.calculateFingerprint(
+                    userId, "src-1", nfdTitle, List.of("t1")
+            );
+
+            assertThat(fpNfc).isEqualTo(fpNfd);
+        }
+
+        @Test
+        @DisplayName("Genuinely different textual inputs produce different fingerprints")
+        void genuinelyDifferentPayloads_produceDifferentFingerprints() {
+            String fp1 = fingerprinter.calculateFingerprint(
+                    userId, "src-1", "Café del Mar", List.of("t1")
+            );
+            String fp2 = fingerprinter.calculateFingerprint(
+                    userId, "src-1", "Cafe del Mar", List.of("t1")
+            );
+
+            assertThat(fp1).isNotEqualTo(fp2);
+        }
+
+        @Test
         @DisplayName("Version prefix is correct and SHA-256 output is 64 hex characters (total length 67)")
         void versionPrefix_isCorrect() {
             String fp = fingerprinter.calculateFingerprint(

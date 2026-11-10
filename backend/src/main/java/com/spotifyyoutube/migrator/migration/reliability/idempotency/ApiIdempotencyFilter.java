@@ -35,14 +35,15 @@ import java.util.UUID;
 /**
  * Servlet filter providing transparent, distributed HTTP API idempotency for migration submission (Phase 13E).
  * <p>
- * Responsibilities:
+ * Implements a database-backed atomic claim protocol:
  * <ul>
  *   <li>Intercepts legacy {@code POST /api/migrations} (key optional) and typed
  *       {@code POST /api/migrations/submit} (key mandatory)</li>
  *   <li>Enforces key syntax (max 255 chars, non-blank, printable ASCII)</li>
  *   <li>Scopes key ownership to the authenticated user {@code (user_id, idempotency_key)}</li>
- *   <li>Computes canonical request fingerprint {@code v1:SHA-256(...)} using unambiguous delimiters</li>
- *   <li>Detects and replays matching submissions without duplicate aggregate creation or worker dispatch</li>
+ *   <li>Computes canonical request fingerprint {@code v1:SHA-256(...)} using Unicode NFC normalization</li>
+ *   <li>Atomically acquires leader claim reservation before execution creation or background dispatch</li>
+ *   <li>Only the winning leader thread executes downstream; concurrent matching requests wait/poll safely</li>
  *   <li>Rejects conflicting payload reuse on the same key with HTTP 409 Conflict</li>
  *   <li>Preserves the request stream for downstream Spring MVC controllers via {@link CachedBodyHttpServletRequest}</li>
  * </ul>
@@ -152,6 +153,7 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
 
         // 5. Compute Canonical Fingerprint from Cached Body
         String fingerprint;
+        UUID reviewSessionId = null;
         try {
             JsonNode payloadNode = objectMapper.readTree(wrappedRequest.getCachedBody());
             if (payloadNode == null || payloadNode.isNull() || payloadNode.isEmpty()) {
@@ -159,127 +161,182 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
                 filterChain.doFilter(wrappedRequest, response);
                 return;
             }
+            reviewSessionId = extractReviewSessionId(payloadNode);
             CanonicalMigrationRequest canonicalReq = fingerprinter.resolveFromPayload(
                     userId, payloadNode, reviewSessionRepository
             );
             fingerprint = fingerprinter.calculateFingerprint(canonicalReq);
         } catch (Exception ex) {
-            // If body is malformed JSON, pass to downstream controller/validator
+            // Malformed JSON; pass to downstream controller/validator
             filterChain.doFilter(wrappedRequest, response);
             return;
         }
 
-        // 6. Fast-Path: Replay Matching Record if Already Persisted
-        Optional<MigrationIdempotencyRecord> existingOpt =
-                idempotencyService.findExistingRecord(userId, idempotencyKey);
+        // 6. Database-Backed Atomic Claim Reservation (BEFORE execution creation / dispatch)
+        ClaimResult claimResult = idempotencyService.acquireClaim(
+                userId, idempotencyKey, fingerprint, reviewSessionId
+        );
 
-        if (existingOpt.isPresent()) {
-            MigrationIdempotencyRecord existing = existingOpt.get();
-            if (existing.getRequestFingerprint().equals(fingerprint)) {
-                writeReplayResponse(response, existing);
-                return;
-            } else {
-                writeErrorResponse(
-                        response,
-                        request.getRequestURI(),
-                        HttpStatus.CONFLICT,
-                        ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
-                        String.format("Idempotency key '%s' was previously used with a different request payload",
-                                maskKey(idempotencyKey))
-                );
-                return;
-            }
+        if (claimResult.isMismatch()) {
+            writeErrorResponse(
+                    response,
+                    request.getRequestURI(),
+                    HttpStatus.CONFLICT,
+                    ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
+                    claimResult.message() != null ? claimResult.message() :
+                            String.format("Idempotency key '%s' was previously used with a different request payload",
+                                    maskKey(idempotencyKey))
+            );
+            return;
         }
 
-        // 7. Initial Execution Path with Response Caching Wrapper
+        if (claimResult.isReconciliationRequired()) {
+            log.warn("Migration submission for key {} rejected: reconciliation required due to unconfirmed external operation before crash",
+                    maskKey(idempotencyKey));
+            writeErrorResponse(
+                    response,
+                    request.getRequestURI(),
+                    HttpStatus.CONFLICT,
+                    ErrorCode.CONFLICT,
+                    claimResult.message() != null ? claimResult.message() :
+                            "Migration execution requires reconciliation before retry to prevent duplicate destination playlist creation."
+            );
+            return;
+        }
+
+        if (claimResult.isReplay()) {
+            MigrationIdempotencyRecord completedRecord = claimResult.getRecord()
+                    .orElseThrow(() -> new IllegalStateException("Replay record missing"));
+            writeReplayResponse(response, completedRecord);
+            return;
+        }
+
+        if (claimResult.isPending()) {
+            // Concurrent follower request: wait/poll safely for winning leader to complete
+            boolean replayed = pollAndReplay(
+                    userId, idempotencyKey, fingerprint, request.getRequestURI(), response
+            );
+            if (!replayed) {
+                writeErrorResponse(
+                    response,
+                    request.getRequestURI(),
+                    HttpStatus.CONFLICT,
+                    ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
+                    "Concurrent migration request is still in progress. Please retry shortly."
+                );
+            }
+            return;
+        }
+
+        // 7. Winning Leader Execution: Proceed Downstream with Fencing Tokens
+        String claimOwner = claimResult.claimOwner();
+        long claimGeneration = claimResult.claimGeneration();
         ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
+        boolean completed = false;
 
         try {
             filterChain.doFilter(wrappedRequest, wrappedResponse);
-        } catch (Exception ex) {
-            // Concurrency race: check if another concurrent thread with identical key committed
-            Optional<MigrationIdempotencyRecord> winner = pollForWinner(userId, idempotencyKey, 10, 100);
-            if (winner.isPresent()) {
-                MigrationIdempotencyRecord winningRecord = winner.get();
-                if (winningRecord.getRequestFingerprint().equals(fingerprint)) {
-                    writeReplayResponse(response, winningRecord);
-                    return;
-                } else {
-                    writeErrorResponse(
-                            response,
-                            request.getRequestURI(),
-                            HttpStatus.CONFLICT,
-                            ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
-                            String.format("Idempotency key '%s' was previously used with a different request payload",
-                                    maskKey(idempotencyKey))
-                    );
-                    return;
-                }
-            }
-            throw ex;
-        }
 
-        // 8. Capture Downstream Successful Response and Persist Idempotency Record
-        int responseStatus = wrappedResponse.getStatus();
-
-        // Concurrency race resolution: if downstream returned 409 Conflict, check if another thread won and committed
-        if (responseStatus == HttpStatus.CONFLICT.value()) {
-            Optional<MigrationIdempotencyRecord> winner = pollForWinner(userId, idempotencyKey, 10, 50);
-            if (winner.isPresent()) {
-                MigrationIdempotencyRecord winningRecord = winner.get();
-                if (winningRecord.getRequestFingerprint().equals(fingerprint)) {
-                    writeReplayResponse(response, winningRecord);
-                    return;
-                } else {
-                    writeErrorResponse(
-                            response,
-                            request.getRequestURI(),
-                            HttpStatus.CONFLICT,
-                            ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
-                            String.format("Idempotency key '%s' was previously used with a different request payload",
-                                    maskKey(idempotencyKey))
-                    );
-                    return;
-                }
-            }
-        }
-
-        if (responseStatus == HttpStatus.OK.value()
-                || responseStatus == HttpStatus.ACCEPTED.value()
-                || responseStatus == HttpStatus.CREATED.value()) {
-
+            int responseStatus = wrappedResponse.getStatus();
             byte[] responseBytes = wrappedResponse.getContentAsByteArray();
             String responsePayload = new String(responseBytes, StandardCharsets.UTF_8);
 
             UUID executionId = extractExecutionId(responsePayload);
-            if (executionId != null) {
+            String locationHeader = wrappedResponse.getHeader(HttpHeaders.LOCATION);
+            if (locationHeader == null && executionId != null) {
+                locationHeader = "/api/migrations/" + executionId + "/progress";
+            }
+
+            if (responseStatus >= 200 && responseStatus < 300 && executionId != null) {
                 try {
-                    MigrationIdempotencyRecord savedRecord = idempotencyService.recordSubmission(
+                    idempotencyService.completeClaim(
                             userId,
                             idempotencyKey,
-                            fingerprint,
+                            claimOwner,
+                            claimGeneration,
                             executionId,
                             responseStatus,
-                            responsePayload
+                            responsePayload,
+                            locationHeader
                     );
-                    if (!savedRecord.getExecutionId().equals(executionId)) {
-                        writeReplayResponse(response, savedRecord);
-                        return;
-                    }
-                } catch (IdempotencyFingerprintMismatchException ex) {
-                    writeErrorResponse(
-                            response,
-                            request.getRequestURI(),
-                            HttpStatus.CONFLICT,
-                            ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
-                            ex.getMessage()
-                    );
-                    return;
+                    completed = true;
+                } catch (StaleClaimOwnershipException ex) {
+                    log.warn("Stale leader fenced out during completion for key {}: attempted owner {}, gen {}",
+                            idempotencyKey, claimOwner, claimGeneration);
+                }
+            } else {
+                // Non-2xx response or execution not created: release pending claim so client can retry
+                if (executionId == null) {
+                    idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
                 }
             }
-        }
 
-        wrappedResponse.copyBodyToResponse();
+            wrappedResponse.copyBodyToResponse();
+        } catch (Throwable ex) {
+            if (!completed) {
+                idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
+            }
+            throw ex;
+        }
+    }
+
+    private boolean pollAndReplay(
+            UUID userId,
+            String idempotencyKey,
+            String fingerprint,
+            String requestUri,
+            HttpServletResponse response
+    ) throws IOException {
+        int maxAttempts = 100; // 100 * 50ms = 5 seconds
+        for (int i = 0; i < maxAttempts; i++) {
+            Optional<MigrationIdempotencyRecord> opt =
+                    idempotencyService.findExistingRecord(userId, idempotencyKey);
+            if (opt.isPresent()) {
+                MigrationIdempotencyRecord record = opt.get();
+                if (!record.getRequestFingerprint().equals(fingerprint)) {
+                    writeErrorResponse(
+                            response,
+                            requestUri,
+                            HttpStatus.CONFLICT,
+                            ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
+                            String.format("Idempotency key '%s' was previously used with a different request payload",
+                                    maskKey(idempotencyKey))
+                    );
+                    return true;
+                }
+                if (record.getStatus() == IdempotencyClaimStatus.COMPLETED) {
+                    writeReplayResponse(response, record);
+                    return true;
+                }
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return false;
+    }
+
+    private UUID extractReviewSessionId(JsonNode payload) {
+        if (payload == null) {
+            return null;
+        }
+        String sessionStr = null;
+        if (payload.hasNonNull("reviewSessionId")) {
+            sessionStr = payload.get("reviewSessionId").asText();
+        } else if (payload.hasNonNull("sessionId")) {
+            sessionStr = payload.get("sessionId").asText();
+        }
+        if (sessionStr != null && !sessionStr.isBlank()) {
+            try {
+                return UUID.fromString(sessionStr);
+            } catch (Exception ignored) {
+                // Ignore unparseable UUID
+            }
+        }
+        return null;
     }
 
     private boolean isTypedSubmitEndpoint(String uri) {
@@ -325,31 +382,9 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
                 return UUID.fromString(root.get("id").asText());
             }
         } catch (Exception ignored) {
-            // Unparseable response body; cannot extract executionId
+            // Unparseable response body
         }
         return null;
-    }
-
-    private Optional<MigrationIdempotencyRecord> pollForWinner(
-            UUID userId,
-            String idempotencyKey,
-            int maxAttempts,
-            long delayMs
-    ) {
-        for (int i = 0; i < maxAttempts; i++) {
-            Optional<MigrationIdempotencyRecord> opt =
-                    idempotencyService.findExistingRecord(userId, idempotencyKey);
-            if (opt.isPresent()) {
-                return opt;
-            }
-            try {
-                Thread.sleep(delayMs);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-        return Optional.empty();
     }
 
     private void writeReplayResponse(
@@ -360,14 +395,17 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
 
-        // Extract progressUrl for Location header if present in payload
-        try {
-            JsonNode root = objectMapper.readTree(record.getResponsePayload());
-            if (root.hasNonNull("progressUrl")) {
-                response.setHeader(HttpHeaders.LOCATION, root.get("progressUrl").asText());
+        if (record.getLocationHeader() != null && !record.getLocationHeader().isBlank()) {
+            response.setHeader(HttpHeaders.LOCATION, record.getLocationHeader());
+        } else {
+            try {
+                JsonNode root = objectMapper.readTree(record.getResponsePayload());
+                if (root.hasNonNull("progressUrl")) {
+                    response.setHeader(HttpHeaders.LOCATION, root.get("progressUrl").asText());
+                }
+            } catch (Exception ignored) {
+                // Location extraction optional
             }
-        } catch (Exception ignored) {
-            // Location extraction optional
         }
 
         response.getWriter().write(record.getResponsePayload());

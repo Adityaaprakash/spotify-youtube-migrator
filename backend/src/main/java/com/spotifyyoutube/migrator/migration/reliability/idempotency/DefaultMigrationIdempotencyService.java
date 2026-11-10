@@ -1,5 +1,10 @@
 package com.spotifyyoutube.migrator.migration.reliability.idempotency;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.spotifyyoutube.migrator.migration.api.dto.MigrationSubmissionResponse;
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,8 +26,8 @@ import java.util.UUID;
 /**
  * Production implementation of {@link MigrationIdempotencyService} (Phase 13E).
  * <p>
- * Manages atomic persistence of idempotency records, safe replay detection,
- * terminal-only retention updates, and bounded sweeper cleanup.
+ * Manages database-backed atomic claim reservations, monotonic claim fencing, conditional ownership verification,
+ * lease renewals, crash recovery, terminal-only retention updates, and bounded sweeper cleanup.
  */
 @Service
 public class DefaultMigrationIdempotencyService implements MigrationIdempotencyService {
@@ -30,23 +35,30 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
     private static final Logger log = LoggerFactory.getLogger(DefaultMigrationIdempotencyService.class);
 
     public static final Duration DEFAULT_RETENTION = Duration.ofHours(72);
+    public static final Duration DEFAULT_CLAIM_TIMEOUT = Duration.ofSeconds(60);
     public static final int DEFAULT_CLEANUP_BATCH_SIZE = 500;
 
     private final MigrationIdempotencyRepository repository;
+    private final MigrationExecutionRepository executionRepository;
     private final TransactionTemplate requiresNewTemplate;
     private final Clock clock;
+    private final ObjectMapper objectMapper;
 
     @Autowired
     public DefaultMigrationIdempotencyService(
             MigrationIdempotencyRepository repository,
+            @Autowired(required = false) MigrationExecutionRepository executionRepository,
             PlatformTransactionManager transactionManager,
-            @Autowired(required = false) Clock clock
+            @Autowired(required = false) Clock clock,
+            @Autowired(required = false) ObjectMapper objectMapper
     ) {
         this.repository = Objects.requireNonNull(repository, "MigrationIdempotencyRepository must not be null");
+        this.executionRepository = executionRepository;
         Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null");
         this.requiresNewTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.clock = clock != null ? clock : Clock.systemUTC();
+        this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
     }
 
     @Override
@@ -55,6 +67,349 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
             return Optional.empty();
         }
         return repository.findByUserIdAndIdempotencyKey(userId, idempotencyKey.trim());
+    }
+
+    @Override
+    public ClaimResult acquireClaim(
+            UUID userId,
+            String idempotencyKey,
+            String requestFingerprint,
+            UUID reviewSessionId
+    ) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(idempotencyKey, "idempotencyKey must not be null");
+        Objects.requireNonNull(requestFingerprint, "requestFingerprint must not be null");
+
+        String cleanKey = idempotencyKey.trim();
+
+        // 1. Fast check for already completed or pending record
+        Optional<MigrationIdempotencyRecord> existingOpt = repository.findByUserIdAndIdempotencyKey(userId, cleanKey);
+        if (existingOpt.isPresent()) {
+            return evaluateExistingClaim(existingOpt.get(), cleanKey, requestFingerprint, reviewSessionId);
+        }
+
+        // 2. Insert new PENDING claim atomically in REQUIRES_NEW transaction with fencing tokens
+        try {
+            MigrationIdempotencyRecord pending = requiresNewTemplate.execute(status -> {
+                Instant now = clock.instant();
+                Instant claimExpiry = now.plus(DEFAULT_CLAIM_TIMEOUT);
+                String claimOwner = UUID.randomUUID().toString();
+                MigrationIdempotencyRecord record = MigrationIdempotencyRecord.createPending(
+                        userId, cleanKey, requestFingerprint, reviewSessionId, claimOwner, 1L, claimExpiry
+                );
+                return repository.saveAndFlush(record);
+            });
+            if (pending != null) {
+                return ClaimResult.acquired(pending, pending.getClaimOwner(), pending.getClaimGeneration());
+            }
+            return ClaimResult.pending(null);
+        } catch (DataIntegrityViolationException ex) {
+            log.info("Concurrent key collision during claim for user {} on key {}. Evaluating existing.",
+                    userId, cleanKey);
+            MigrationIdempotencyRecord winner = repository.findByUserIdAndIdempotencyKey(userId, cleanKey)
+                    .orElseThrow(() -> ex);
+            return evaluateExistingClaim(winner, cleanKey, requestFingerprint, reviewSessionId);
+        }
+    }
+
+    private ClaimResult evaluateExistingClaim(
+            MigrationIdempotencyRecord existing,
+            String idempotencyKey,
+            String requestFingerprint,
+            UUID reviewSessionId
+    ) {
+        // Fingerprint check: Mismatch must fail immediately with conflict
+        if (!existing.getRequestFingerprint().equals(requestFingerprint)) {
+            log.warn("Idempotency fingerprint mismatch for key {}: existing={}, incoming={}",
+                    idempotencyKey, existing.getRequestFingerprint(), requestFingerprint);
+            return ClaimResult.mismatch(String.format(
+                    "Idempotency key '%s' was previously used with a different request payload",
+                    idempotencyKey
+            ));
+        }
+
+        // If COMPLETED, return replay immediately
+        if (existing.getStatus() == IdempotencyClaimStatus.COMPLETED) {
+            return ClaimResult.replay(existing);
+        }
+
+        // Status is PENDING
+        Instant now = clock.instant();
+        if (existing.getClaimExpiresAt() != null && existing.getClaimExpiresAt().isAfter(now)) {
+            // Claim is active and held by concurrent leader
+            return ClaimResult.pending(existing);
+        }
+
+        // Claim has expired. Process crash recovery needed.
+        return recoverExpiredClaim(existing, idempotencyKey, requestFingerprint, reviewSessionId);
+    }
+
+    private ClaimResult recoverExpiredClaim(
+            MigrationIdempotencyRecord existing,
+            String idempotencyKey,
+            String requestFingerprint,
+            UUID reviewSessionId
+    ) {
+        log.warn("Detected expired idempotency claim {} for user {}. Attempting crash recovery.",
+                idempotencyKey, existing.getUserId());
+
+        // State C: Check if an execution aggregate was already created before crash
+        UUID execId = existing.getExecutionId();
+        if (execId == null && reviewSessionId != null && executionRepository != null) {
+            Optional<MigrationExecution> bySession = executionRepository.findByReviewSessionId(reviewSessionId);
+            if (bySession.isPresent()) {
+                execId = bySession.get().getId();
+            }
+        }
+
+        if (execId != null && executionRepository != null) {
+            Optional<MigrationExecution> execOpt = executionRepository.findById(execId);
+            if (execOpt.isPresent()) {
+                MigrationExecution execution = execOpt.get();
+                log.info("State C: Recovering existing execution {} for expired claim {}", execution.getId(), idempotencyKey);
+                MigrationSubmissionResponse responseDto = new MigrationSubmissionResponse(
+                        execution.getId(),
+                        execution.getReviewSession().getId(),
+                        execution.getStatus(),
+                        "/api/migrations/" + execution.getId() + "/progress",
+                        "Migration request accepted and queued for background processing",
+                        execution.getTotalApprovedTracks(),
+                        execution.getCreatedAt()
+                );
+                String payload;
+                try {
+                    payload = objectMapper.writeValueAsString(responseDto);
+                } catch (Exception e) {
+                    payload = "{\"executionId\":\"" + execution.getId() + "\",\"status\":\""
+                            + execution.getStatus() + "\"}";
+                }
+                String location = "/api/migrations/" + execution.getId() + "/progress";
+                int status = execution.getStatus() == MigrationExecutionStatus.COMPLETED ? 200 : 202;
+                completeClaimInternal(existing.getId(), execution.getId(), status, payload, location);
+                MigrationIdempotencyRecord completed = repository.findByUserIdAndIdempotencyKey(
+                        existing.getUserId(), idempotencyKey
+                ).orElse(existing);
+                return ClaimResult.replay(completed);
+            }
+        }
+
+        // State B: Claim expired after an external mutation may have started
+        // (YouTube playlist creation was initiated or confirmed, but no MigrationExecution was persisted)
+        if (existing.getDestinationPlaylistId() != null
+                || MigrationIdempotencyRecord.STAGE_EXTERNAL_OPERATION_STARTED.equals(existing.getClaimStage())
+                || MigrationIdempotencyRecord.STAGE_PLAYLIST_CREATED.equals(existing.getClaimStage())) {
+            log.warn("State B: Claim {} expired after external operation may have started (stage: {}, playlistId: {}). "
+                            + "Failing closed into reconciliation required condition.",
+                    idempotencyKey, existing.getClaimStage(), existing.getDestinationPlaylistId());
+            return ClaimResult.reconciliationRequired(
+                    "Migration execution requires reconciliation: external operation may have completed before process failure. "
+                            + "Takeover aborted to prevent duplicate destination playlist creation.",
+                    existing
+            );
+        }
+
+        // State A: Claim expired before any external operation was initiated
+        // Safe automatic takeover with monotonic generation increment and new owner identity
+        String newOwner = UUID.randomUUID().toString();
+        long expectedGen = existing.getClaimGeneration();
+        Instant newExpiry = clock.instant().plus(DEFAULT_CLAIM_TIMEOUT);
+
+        Integer updated = requiresNewTemplate.execute(status ->
+                repository.takeOverClaimWithFencingDatabaseTime(
+                        existing.getId(),
+                        newOwner,
+                        expectedGen,
+                        DEFAULT_CLAIM_TIMEOUT.toSeconds()
+                )
+        );
+
+        if (updated != null && updated > 0) {
+            log.info("State A: Successfully took over expired claim {} with new generation {} and owner {}",
+                    idempotencyKey, expectedGen + 1, newOwner);
+            existing.setClaimOwner(newOwner);
+            existing.setClaimGeneration(expectedGen + 1);
+            existing.setClaimExpiresAt(newExpiry);
+            return ClaimResult.acquired(existing, newOwner, expectedGen + 1);
+        } else {
+            // Another concurrent thread won takeover race; wait/poll
+            return ClaimResult.pending(existing);
+        }
+    }
+
+    private void completeClaimInternal(
+            UUID recordId,
+            UUID executionId,
+            int responseStatus,
+            String responsePayload,
+            String locationHeader
+    ) {
+        requiresNewTemplate.executeWithoutResult(status -> {
+            repository.completeClaim(recordId, executionId, responseStatus, responsePayload, locationHeader);
+        });
+    }
+
+    @Override
+    public MigrationIdempotencyRecord completeClaim(
+            UUID userId,
+            String idempotencyKey,
+            String claimOwner,
+            long claimGeneration,
+            UUID executionId,
+            int responseStatus,
+            String responsePayload,
+            String locationHeader
+    ) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(idempotencyKey, "idempotencyKey must not be null");
+        Objects.requireNonNull(claimOwner, "claimOwner must not be null");
+        Objects.requireNonNull(executionId, "executionId must not be null");
+        Objects.requireNonNull(responsePayload, "responsePayload must not be null");
+
+        String cleanKey = idempotencyKey.trim();
+
+        return requiresNewTemplate.execute(status -> {
+            Optional<MigrationIdempotencyRecord> opt = repository.findByUserIdAndIdempotencyKey(userId, cleanKey);
+            if (opt.isPresent()) {
+                MigrationIdempotencyRecord record = opt.get();
+                if (record.getStatus() == IdempotencyClaimStatus.PENDING) {
+                    int updated = repository.completeClaimWithFencing(
+                            record.getId(), claimOwner, claimGeneration,
+                            executionId, responseStatus, responsePayload, locationHeader
+                    );
+                    if (updated == 0) {
+                        log.warn("Stale claim completion rejected for key {}: attempted owner {}, gen {}",
+                                cleanKey, claimOwner, claimGeneration);
+                        throw new StaleClaimOwnershipException(cleanKey, claimOwner, claimGeneration);
+                    }
+                    record.markCompleted(executionId, responseStatus, responsePayload, locationHeader);
+                    return record;
+                }
+                return record;
+            } else {
+                MigrationIdempotencyRecord record = new MigrationIdempotencyRecord(
+                        userId, cleanKey, "unknown", IdempotencyClaimStatus.COMPLETED,
+                        executionId, responseStatus, responsePayload, locationHeader,
+                        null, claimOwner, claimGeneration, clock.instant(), null,
+                        MigrationIdempotencyRecord.STAGE_ACQUIRED, clock.instant(), null, null
+                );
+                return repository.saveAndFlush(record);
+            }
+        });
+    }
+
+    @Override
+    public MigrationIdempotencyRecord completeClaim(
+            UUID userId,
+            String idempotencyKey,
+            UUID executionId,
+            int responseStatus,
+            String responsePayload,
+            String locationHeader
+    ) {
+        Objects.requireNonNull(userId, "userId must not be null");
+        Objects.requireNonNull(idempotencyKey, "idempotencyKey must not be null");
+        Objects.requireNonNull(executionId, "executionId must not be null");
+        Objects.requireNonNull(responsePayload, "responsePayload must not be null");
+
+        String cleanKey = idempotencyKey.trim();
+
+        return requiresNewTemplate.execute(status -> {
+            Optional<MigrationIdempotencyRecord> opt = repository.findByUserIdAndIdempotencyKey(userId, cleanKey);
+            if (opt.isPresent()) {
+                MigrationIdempotencyRecord record = opt.get();
+                if (record.getStatus() == IdempotencyClaimStatus.PENDING) {
+                    repository.completeClaim(
+                            record.getId(), executionId, responseStatus, responsePayload, locationHeader
+                    );
+                    record.markCompleted(executionId, responseStatus, responsePayload, locationHeader);
+                    return record;
+                }
+                return record;
+            } else {
+                MigrationIdempotencyRecord record = new MigrationIdempotencyRecord(
+                        userId, cleanKey, "unknown", IdempotencyClaimStatus.COMPLETED,
+                        executionId, responseStatus, responsePayload, locationHeader,
+                        null, clock.instant(), null, null
+                );
+                return repository.saveAndFlush(record);
+            }
+        });
+    }
+
+    @Override
+    public void releaseClaim(UUID userId, String idempotencyKey, String claimOwner, long claimGeneration) {
+        if (userId == null || idempotencyKey == null) {
+            return;
+        }
+        try {
+            requiresNewTemplate.executeWithoutResult(status -> {
+                if (claimOwner != null) {
+                    repository.deletePendingClaimWithFencing(
+                            userId, idempotencyKey.trim(), IdempotencyClaimStatus.PENDING,
+                            claimOwner, claimGeneration
+                    );
+                } else {
+                    repository.deletePendingClaim(
+                            userId, idempotencyKey.trim(), IdempotencyClaimStatus.PENDING
+                    );
+                }
+            });
+        } catch (Exception ex) {
+            log.warn("Failed to release pending idempotency claim {} for user {}: {}",
+                    idempotencyKey, userId, ex.getMessage());
+        }
+    }
+
+    @Override
+    public void releaseClaim(UUID userId, String idempotencyKey) {
+        releaseClaim(userId, idempotencyKey, null, 0L);
+    }
+
+    @Override
+    public boolean renewClaim(
+            UUID userId,
+            String idempotencyKey,
+            String claimOwner,
+            long claimGeneration,
+            Duration extension
+    ) {
+        if (userId == null || idempotencyKey == null || claimOwner == null) {
+            return false;
+        }
+        Duration ext = extension != null ? extension : DEFAULT_CLAIM_TIMEOUT;
+        try {
+            Integer updated = requiresNewTemplate.execute(status -> {
+                Optional<MigrationIdempotencyRecord> opt = repository.findByUserIdAndIdempotencyKey(userId, idempotencyKey.trim());
+                if (opt.isEmpty() || opt.get().getStatus() != IdempotencyClaimStatus.PENDING) {
+                    return 0;
+                }
+                return repository.renewClaimDatabaseTime(
+                        opt.get().getId(), claimOwner, claimGeneration, ext.toSeconds()
+                );
+            });
+            return updated != null && updated > 0;
+        } catch (Exception ex) {
+            log.warn("Error renewing idempotency claim for key {}: {}", idempotencyKey, ex.getMessage());
+            return false;
+        }
+    }
+
+    @Override
+    @Transactional
+    public int markExternalOperationStartedForSession(UUID reviewSessionId) {
+        if (reviewSessionId == null) {
+            return 0;
+        }
+        return repository.markExternalOperationStartedForSession(reviewSessionId);
+    }
+
+    @Override
+    @Transactional
+    public int recordDestinationPlaylistForSession(UUID reviewSessionId, String destinationPlaylistId) {
+        if (reviewSessionId == null || destinationPlaylistId == null) {
+            return 0;
+        }
+        return repository.recordDestinationPlaylistForSession(reviewSessionId, destinationPlaylistId);
     }
 
     @Override
@@ -74,50 +429,39 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
 
         String cleanKey = idempotencyKey.trim();
 
-        // 1. Check if record already exists before attempting insert
-        Optional<MigrationIdempotencyRecord> existingOpt = repository.findByUserIdAndIdempotencyKey(userId, cleanKey);
-        if (existingOpt.isPresent()) {
-            return handleExistingRecord(existingOpt.get(), requestFingerprint, cleanKey);
+        ClaimResult claim = acquireClaim(userId, cleanKey, requestFingerprint, null);
+        if (claim.isMismatch()) {
+            throw new IdempotencyFingerprintMismatchException(claim.message());
+        }
+        if (claim.isReplay()) {
+            return claim.record();
+        }
+        if (claim.isAcquired()) {
+            return completeClaim(
+                    userId, cleanKey, claim.claimOwner(), claim.claimGeneration(),
+                    executionId, responseStatus, responsePayload, null
+            );
         }
 
-        // 2. Attempt atomic insertion in an isolated transaction to handle race conditions
-        try {
-            return requiresNewTemplate.execute(status -> {
-                MigrationIdempotencyRecord record = MigrationIdempotencyRecord.createActive(
-                        userId,
-                        cleanKey,
-                        requestFingerprint,
-                        executionId,
-                        responseStatus,
-                        responsePayload
-                );
-                return repository.saveAndFlush(record);
-            });
-        } catch (DataIntegrityViolationException ex) {
-            log.info("Concurrent key collision detected for user {} on idempotency key. Retrieving winner.", userId);
-            // Race condition: concurrent submission committed between find and save
-            MigrationIdempotencyRecord winner = repository.findByUserIdAndIdempotencyKey(userId, cleanKey)
-                    .orElseThrow(() -> ex);
-            return handleExistingRecord(winner, requestFingerprint, cleanKey);
+        // If pending, poll for winner
+        for (int i = 0; i < 20; i++) {
+            Optional<MigrationIdempotencyRecord> opt = repository.findByUserIdAndIdempotencyKey(userId, cleanKey);
+            if (opt.isPresent() && opt.get().getStatus() == IdempotencyClaimStatus.COMPLETED) {
+                MigrationIdempotencyRecord rec = opt.get();
+                if (!rec.getRequestFingerprint().equals(requestFingerprint)) {
+                    throw new IdempotencyFingerprintMismatchException("Idempotency key previously used with different payload");
+                }
+                return rec;
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
-    }
-
-    private MigrationIdempotencyRecord handleExistingRecord(
-            MigrationIdempotencyRecord existing,
-            String requestFingerprint,
-            String idempotencyKey
-    ) {
-        if (!existing.getRequestFingerprint().equals(requestFingerprint)) {
-            log.warn("Idempotency fingerprint mismatch for key {}: existing={}, incoming={}",
-                    idempotencyKey, existing.getRequestFingerprint(), requestFingerprint);
-            throw new IdempotencyFingerprintMismatchException(String.format(
-                    "Idempotency key '%s' was previously used with a different request payload",
-                    idempotencyKey
-            ));
-        }
-        log.info("Matching idempotency replay found for key {} -> replaying execution {}",
-                idempotencyKey, existing.getExecutionId());
-        return existing;
+        return repository.findByUserIdAndIdempotencyKey(userId, cleanKey)
+                .orElseGet(() -> completeClaim(userId, cleanKey, executionId, responseStatus, responsePayload, null));
     }
 
     @Override

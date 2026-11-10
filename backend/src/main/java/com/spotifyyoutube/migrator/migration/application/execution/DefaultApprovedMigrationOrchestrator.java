@@ -15,6 +15,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Reco
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.reliability.idempotency.MigrationIdempotencyService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,16 +39,27 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
     private final ApprovedMigrationExecutionService executionService;
     private final DestinationPlaylistCreationService playlistCreationService;
     private final MigrationExecutionStateService executionStateService;
+    private final MigrationIdempotencyService idempotencyService;
 
-    @Autowired
     public DefaultApprovedMigrationOrchestrator(
             ApprovedMigrationExecutionService executionService,
             DestinationPlaylistCreationService playlistCreationService,
             MigrationExecutionStateService executionStateService
     ) {
+        this(executionService, playlistCreationService, executionStateService, null);
+    }
+
+    @Autowired
+    public DefaultApprovedMigrationOrchestrator(
+            ApprovedMigrationExecutionService executionService,
+            DestinationPlaylistCreationService playlistCreationService,
+            MigrationExecutionStateService executionStateService,
+            @Autowired(required = false) MigrationIdempotencyService idempotencyService
+    ) {
         this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
         this.playlistCreationService = Objects.requireNonNull(playlistCreationService, "DestinationPlaylistCreationService must not be null");
         this.executionStateService = Objects.requireNonNull(executionStateService, "MigrationExecutionStateService must not be null");
+        this.idempotencyService = idempotencyService;
     }
 
     @Override
@@ -197,11 +209,20 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
             destinationPlaylistId = existing.destinationPlaylistId();
             destinationPlaylistUrl = existing.destinationPlaylistUrl();
         } else {
+            // Signal that external operation is starting to prevent blind retries across process crashes
+            if (idempotencyService != null) {
+                idempotencyService.markExternalOperationStartedForSession(sessionId);
+            }
             log.info("Creating destination playlist on YouTube for review session {}", sessionId);
             DestinationPlaylistCreationResult playlistResult = playlistCreationService.createDestinationPlaylist(request, authenticatedUserId);
             destinationPlaylistId = playlistResult.destinationPlaylistId();
             destinationPlaylistUrl = playlistResult.destinationPlaylistUrl();
             log.info("Destination playlist created successfully: {}", destinationPlaylistId);
+
+            // Record allocated playlist ID durably on the pending claim before execution persistence
+            if (idempotencyService != null) {
+                idempotencyService.recordDestinationPlaylistForSession(sessionId, destinationPlaylistId);
+            }
         }
 
         // Step 4: Durable Execution Initialization in QUEUED status (Phase 12B)

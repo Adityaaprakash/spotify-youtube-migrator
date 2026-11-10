@@ -3,13 +3,10 @@ package com.spotifyyoutube.migrator.migration.reliability.idempotency;
 import com.spotifyyoutube.migrator.common.config.JpaConfig;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.identity.repository.UserRepository;
-import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
-import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
-import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import jakarta.persistence.EntityManager;
@@ -26,15 +23,13 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -346,5 +341,275 @@ public class MigrationIdempotencyPostgresIT {
         assertThat(remaining).hasSize(2);
         assertThat(remaining).extracting(MigrationIdempotencyRecord::getIdempotencyKey)
                 .containsExactlyInAnyOrder("active-key", "unexpired-key");
+    }
+
+    @Test
+    @DisplayName("PostgreSQL concurrency: 8 simultaneous acquireClaim calls result in exactly 1 ACQUIRED and 7 PENDING")
+    void acquireClaim_concurrentContenders_singleWinnerAcquiresPendingClaim() throws Exception {
+        String key = "claim-postgres-race-001";
+        String fp = "v1:claimRaceFingerprint";
+        int threadCount = 8;
+
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startGate = new CountDownLatch(1);
+        CountDownLatch endGate = new CountDownLatch(threadCount);
+
+        List<Future<ClaimResult>> futures = new ArrayList<>();
+
+        for (int i = 0; i < threadCount; i++) {
+            futures.add(executor.submit(() -> {
+                startGate.await();
+                try {
+                    return idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+                } finally {
+                    endGate.countDown();
+                }
+            }));
+        }
+
+        startGate.countDown();
+        assertThat(endGate.await(10, TimeUnit.SECONDS)).isTrue();
+        executor.shutdown();
+
+        int acquiredCount = 0;
+        int pendingCount = 0;
+
+        for (Future<ClaimResult> future : futures) {
+            ClaimResult result = future.get();
+            if (result.isAcquired()) {
+                acquiredCount++;
+            } else if (result.isPending()) {
+                pendingCount++;
+            }
+        }
+
+        // Exactly one contender acquired the leader claim
+        assertThat(acquiredCount).isEqualTo(1);
+        assertThat(pendingCount).isEqualTo(7);
+
+        // Database holds exactly one PENDING record
+        List<MigrationIdempotencyRecord> all = idempotencyRepository.findAll();
+        assertThat(all).hasSize(1);
+        assertThat(all.get(0).getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
+        assertThat(all.get(0).getClaimExpiresAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("PostgreSQL atomic takeover: expired PENDING claim without execution is safely taken over")
+    void acquireClaim_expiredPendingClaim_takesOverClaimInPostgres() {
+        String key = "claim-takeover-pg-002";
+        String fp = "v1:takeoverFingerprint";
+
+        // Pre-insert an expired PENDING claim
+        MigrationIdempotencyRecord expired = new MigrationIdempotencyRecord(
+                testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
+                null, null, null, null, null,
+                Instant.now().minusSeconds(120),
+                Instant.now().minusSeconds(30),
+                null
+        );
+        idempotencyRepository.saveAndFlush(expired);
+
+        ClaimResult result = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+
+        assertThat(result.isAcquired()).isTrue();
+        MigrationIdempotencyRecord recordInDb =
+                idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
+        assertThat(recordInDb.getClaimExpiresAt()).isAfter(Instant.now());
+    }
+
+    @Test
+    @DisplayName("Test A — Expired lease while original leader is alive: takeover increments generation; stale leader cannot continue")
+    void testA_expiredLeaseWhileOriginalLeaderAlive_staleLeaderFencedOut() {
+        String key = "test-a-fencing-001";
+        String fp = "v1:testAFingerprint";
+
+        // 1. Leader A acquires claim generation 1
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        assertThat(claimA.isAcquired()).isTrue();
+        String ownerA = claimA.claimOwner();
+        long genA = claimA.claimGeneration();
+        assertThat(ownerA).isNotNull();
+        assertThat(genA).isEqualTo(1L);
+
+        // 2. Simulate lease expiry in DB (claim_expires_at expired in the past)
+        MigrationIdempotencyRecord record = idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        record.setClaimExpiresAt(Instant.now().minusSeconds(10));
+        idempotencyRepository.saveAndFlush(record);
+
+        // 3. Leader B attempts takeover
+        ClaimResult claimB = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        assertThat(claimB.isAcquired()).isTrue();
+        String ownerB = claimB.claimOwner();
+        long genB = claimB.claimGeneration();
+        assertThat(ownerB).isNotEqualTo(ownerA);
+        assertThat(genB).isEqualTo(2L);
+
+        // 4. Stale Leader A tries to renew lease or complete
+        boolean renewedByA = idempotencyService.renewClaim(testUser1.getId(), key, ownerA, genA, Duration.ofSeconds(60));
+        assertThat(renewedByA).isFalse();
+
+        // 5. Stale Leader A attempts to complete claim with generation 1
+        assertThatThrownBy(() -> idempotencyService.completeClaim(
+                testUser1.getId(), key, ownerA, genA, execution1.getId(), 202, "{}", "/api/migrations/" + execution1.getId()
+        )).isInstanceOf(StaleClaimOwnershipException.class);
+
+        // Verify Leader B's claim remains intact and PENDING with generation 2
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
+        assertThat(recordInDb.getClaimOwner()).isEqualTo(ownerB);
+        assertThat(recordInDb.getClaimGeneration()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("Test B — Heartbeat prevents takeover: leader renewals extend lease and block concurrent takeover")
+    void testB_heartbeatPreventsTakeover_activeLeaderProtected() {
+        String key = "test-b-heartbeat-002";
+        String fp = "v1:testBFingerprint";
+
+        // 1. Leader A acquires claim
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        assertThat(claimA.isAcquired()).isTrue();
+        String ownerA = claimA.claimOwner();
+        long genA = claimA.claimGeneration();
+
+        // 2. Leader A renews its lease
+        boolean renewed = idempotencyService.renewClaim(testUser1.getId(), key, ownerA, genA, Duration.ofSeconds(120));
+        assertThat(renewed).isTrue();
+
+        // 3. Contender B attempts takeover
+        ClaimResult claimB = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        // Because A's lease is valid and active, B receives PENDING (must wait/poll)
+        assertThat(claimB.isPending()).isTrue();
+
+        // Verify claim is still held by A with generation 1
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        assertThat(recordInDb.getClaimOwner()).isEqualTo(ownerA);
+        assertThat(recordInDb.getClaimGeneration()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("Test C — Stale leader cannot complete: completing with outdated generation affects 0 rows and throws")
+    void testC_staleLeaderCannotComplete_newOwnerUncorrupted() {
+        String key = "test-c-stale-complete-003";
+        String fp = "v1:testCFingerprint";
+
+        // 1. Leader A acquires generation 1
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        String ownerA = claimA.claimOwner();
+        long genA = claimA.claimGeneration();
+
+        // 2. Expire lease
+        MigrationIdempotencyRecord record = idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        record.setClaimExpiresAt(Instant.now().minusSeconds(5));
+        idempotencyRepository.saveAndFlush(record);
+
+        // 3. Leader B legitimately takes over generation 2
+        ClaimResult claimB = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        assertThat(claimB.isAcquired()).isTrue();
+        String ownerB = claimB.claimOwner();
+        long genB = claimB.claimGeneration();
+        assertThat(genB).isEqualTo(2L);
+
+        // 4. Stale leader A attempts completeClaim with gen 1
+        assertThatThrownBy(() -> idempotencyService.completeClaim(
+                testUser1.getId(), key, ownerA, genA, execution1.getId(), 202, "{\"stale\":true}", "/progress"
+        )).isInstanceOf(StaleClaimOwnershipException.class);
+
+        // 5. Verify B's claim remains intact and PENDING
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
+        assertThat(recordInDb.getClaimOwner()).isEqualTo(ownerB);
+        assertThat(recordInDb.getClaimGeneration()).isEqualTo(genB);
+        assertThat(recordInDb.getExecutionId()).isNull();
+
+        // 6. Leader B completes successfully with gen 2
+        MigrationIdempotencyRecord completedB = idempotencyService.completeClaim(
+                testUser1.getId(), key, ownerB, genB, execution2.getId(), 202, "{\"leader\":\"B\"}", "/progress/b"
+        );
+        assertThat(completedB.getStatus()).isEqualTo(IdempotencyClaimStatus.COMPLETED);
+        assertThat(completedB.getExecutionId()).isEqualTo(execution2.getId());
+    }
+
+    @Test
+    @DisplayName("Test D — External operation ambiguity: playlist creation crash fails closed into reconciliation")
+    void testD_externalOperationAmbiguity_failsClosedWithoutDuplicatePlaylist() {
+        String key = "test-d-ambiguity-004";
+        String fp = "v1:testDFingerprint";
+        UUID sessionId = UUID.randomUUID();
+
+        // 1. Leader A acquires claim
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, sessionId);
+        assertThat(claimA.isAcquired()).isTrue();
+
+        // 2. Leader A simulates creating YouTube destination playlist, but crashes before creating MigrationExecution
+        idempotencyService.markExternalOperationStartedForSession(sessionId);
+        idempotencyService.recordDestinationPlaylistForSession(sessionId, "PL_youtube_dest_123");
+
+        // 3. Lease expires
+        MigrationIdempotencyRecord record = idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        record.setClaimExpiresAt(Instant.now().minusSeconds(10));
+        idempotencyRepository.saveAndFlush(record);
+
+        // 4. Request B arrives on expired claim
+        ClaimResult claimB = idempotencyService.acquireClaim(testUser1.getId(), key, fp, sessionId);
+
+        // Must fail closed into RECONCILIATION_REQUIRED to prevent blindly creating another playlist!
+        assertThat(claimB.isReconciliationRequired()).isTrue();
+        assertThat(claimB.isAcquired()).isFalse();
+
+        // Verify destination playlist ID is preserved for Phase 13F reconciliation
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findByUserIdAndIdempotencyKey(testUser1.getId(), key).orElseThrow();
+        assertThat(recordInDb.getDestinationPlaylistId()).isEqualTo("PL_youtube_dest_123");
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("Test E — Queued execution recovery: recovered QUEUED execution delegates to Phase 13D scheduler safely")
+    void testE_queuedExecutionRecovery_delegatesToSchedulerSafely() {
+        String key = "test-e-recovery-005";
+        String fp = "v1:testEFingerprint";
+        ReviewSession session = reviewSessionRepository.save(
+                new ReviewSession(testUser1, "src-playlist-e", "Source E", null)
+        );
+
+        // 1. Create a QUEUED execution representing execution persisted before dispatcher crash
+        MigrationExecution queuedExec = createExecution(testUser1, MigrationExecutionStatus.QUEUED);
+        queuedExec.setReviewSession(session);
+        executionRepository.saveAndFlush(queuedExec);
+
+        // 2. Pre-insert an expired PENDING claim pointing to this session
+        MigrationIdempotencyRecord expiredClaim = new MigrationIdempotencyRecord(
+                testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
+                null, null, null, null, session.getId(),
+                "stale-owner", 1L, Instant.now().minusSeconds(100), null,
+                MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                Instant.now().minusSeconds(100),
+                Instant.now().minusSeconds(10),
+                null
+        );
+        idempotencyRepository.saveAndFlush(expiredClaim);
+
+        // 3. New request arrives for recovery
+        ClaimResult result = idempotencyService.acquireClaim(testUser1.getId(), key, fp, session.getId());
+
+        // Recovers existing execution aggregate as REPLAY without creating a duplicate execution
+        assertThat(result.isReplay()).isTrue();
+        assertThat(result.getRecord()).isPresent();
+        assertThat(result.getRecord().get().getExecutionId()).isEqualTo(queuedExec.getId());
+
+        // 4. Verify no second execution was created
+        List<MigrationExecution> allExecs = executionRepository.findAll();
+        long sessionExecCount = allExecs.stream()
+                .filter(e -> e.getReviewSession() != null && e.getReviewSession().getId().equals(session.getId()))
+                .count();
+        assertThat(sessionExecCount).isEqualTo(1);
+
+        // 5. Verify the Phase 13D scheduler can claim this queued execution atomically
+        Optional<com.spotifyyoutube.migrator.migration.reliability.scheduling.ClaimedExecution> schedulerClaim =
+                executionRepository.claimNextEligibleExecution("scheduler-worker-1", 60);
+        assertThat(schedulerClaim).isPresent();
+        assertThat(schedulerClaim.get().executionId()).isEqualTo(queuedExec.getId());
     }
 }
