@@ -415,6 +415,17 @@ Where fields are separated by the ASCII Unit Separator (`\u001F`):
    Ensures an active migration can never have its idempotency protection stripped while executing or awaiting recovery.
 4. **Header Requirement**: `Idempotency-Key` remains **optional** for backward compatibility on `POST /api/migrations`, but **mandatory** on the typed endpoint `POST /api/migrations/submit`.
 
+### 9.3 Implemented Phase 13E API Idempotency Subsystem
+In Phase 13E, the complete API idempotency contract and lifecycle was implemented in package `com.spotifyyoutube.migrator.migration.reliability.idempotency`:
+1. **`V11__phase13e_api_idempotency_keys.sql`**: Dedicated table `migration_idempotency_keys` with composite uniqueness `(user_id, idempotency_key)`, foreign key to `migration_executions(id)`, partial index on `(expires_at) WHERE expires_at IS NOT NULL`, and index on `(execution_id)`.
+2. **`CanonicalMigrationRequest` & `CanonicalRequestFingerprinter`**: Computes `v1:` + SHA-256 over `user_id \u001F source_playlist_id \u001F target_playlist_name \u001F sorted_track_hashes` (joined with `\u001E`). Preserves duplicate track occurrences, ignores volatile timestamps/IDs, and handles Unicode NFC normalization.
+3. **`IdempotencyKeyValidator`**: Validates `Idempotency-Key` header (max 255 chars, non-blank, no control characters).
+4. **`MigrationIdempotencyRecord` & `MigrationIdempotencyRepository`**: Spring Data JPA entity and repository supporting atomic terminal expiry (`WHERE expires_at IS NULL`) and bounded batch deletion using PostgreSQL database clock (`clock_timestamp()`).
+5. **`MigrationIdempotencyService` & `DefaultMigrationIdempotencyService`**: Coordinates recording of new executions, replay retrieval, 409 conflict detection, concurrent duplicate race handling via PostgreSQL uniqueness, terminal state transition hooks, and scheduled cleanup with injectable `Clock`.
+6. **`CachedBodyHttpServletRequest` & `ApiIdempotencyFilter`**: `OncePerRequestFilter` caching request bytes to preserve stream for downstream Spring MVC controllers, verifying header requirements, replaying cached responses on matching key/fingerprint, rejecting mismatches with HTTP 409 `IDEMPOTENCY_FINGERPRINT_MISMATCH`, and capturing response payloads on first execution.
+7. **`IdempotencyFingerprintMismatchException`**: Specialized exception mapped to HTTP 409 Conflict in `GlobalExceptionHandler`.
+8. **Test Coverage**: 53 tests across 6 classes: `CanonicalRequestFingerprinterTest` (12 tests), `IdempotencyKeyValidatorTest` (7 tests), `DefaultMigrationIdempotencyServiceTest` (11 tests), `ApiIdempotencyFilterTest` (10 tests), `MigrationIdempotencyApiTest` (6 tests), and `MigrationIdempotencyPostgresIT` (7 tests).
+
 ---
 
 ## 10. Database Schema Evolution Proposals (Flyway V10)
@@ -498,7 +509,7 @@ graph TD
 | **13B** | [COMPLETE & TESTED] Provider Failure Classifier: parses YouTube `error.errors[].reason` (separating `quotaExceeded` vs `userRateLimitExceeded`), HTTP 429 `Retry-After` parsing (delta-seconds and HTTP-date). Implemented in `com.spotifyyoutube.migrator.migration.reliability.classification`. | 13A |
 | **13C** | [COMPLETE & TESTED] Retry Policy & Backoff Engine: AWS Full Jitter algorithm with overflow protection, thread-release threshold ($> 2\text{ s}$), bounded in-flight micro-retry context, RFC 9110 Retry-After precedence, ambiguous write protection, quota deferral. Implemented in `com.spotifyyoutube.migrator.migration.reliability.policy`. | 13B |
 | **13D** | Durable Lease & Atomic Scheduler: Flyway V10, `lease_owner`, `fencing_token`, 60s lease with 15s heartbeat, atomic claim query with `SKIP LOCKED`. | 13C |
-| **13E** | API Idempotency: `migration_idempotency_keys` table, canonical `v1:SHA-256` fingerprinting, replay filters, terminal-only 72h TTL. | 13A |
+| **13E** | [COMPLETE & TESTED] API Idempotency: Flyway V11 `migration_idempotency_keys` table, canonical `v1:SHA-256` fingerprinting with ASCII unit/record separators, `IdempotencyKeyValidator`, `ApiIdempotencyFilter` with stream preservation, `MigrationIdempotencyService`, terminal-only 72h TTL, bounded sweeper. 48 tests implemented. | 13A |
 | **13F** | External Operation Safety: Destination playlist creation with `[ref: migrator-op:<id>]` marker and pre-allocation intent; track insertion multi-stage reconciliation. | 13D, 13E |
 | **13G** | Recovery & Resume Integration: Orchestrator integration, automatic background resumption, zero manual clicks required for transient faults. | 13F |
 | **13H** | Fault-Injection Testing: WireMock simulated 429s with `Retry-After`, 503 cascades, simulated network timeouts during writes, JVM termination mid-batch. | 13G |

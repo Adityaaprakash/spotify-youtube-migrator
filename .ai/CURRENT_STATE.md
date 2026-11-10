@@ -2,11 +2,12 @@
 
 Last Updated: 2026-11-09
 
-Current Phase: Phase 13 — Reliability Engineering [PHASE 13D IMPLEMENTED & AUDITED — DURABLE LEASE LIFECYCLE, RETRY SCHEDULING, GRACEFUL SHUTDOWN & PRODUCTION VERIFICATION]
-Current Subphase: Phase 13D-A through 13D-F [AUDITED — FREEZE PENDING LOCAL VERIFICATION] -> Phase 13E — API Idempotency [BLOCKED UNTIL FREEZE]
+Current Phase: Phase 13 — Reliability Engineering [PHASE 13E IMPLEMENTED & AUDITED — API IDEMPOTENCY CONTRACT, FINGERPRINTING & TERMINAL RETENTION]
+Current Subphase: Phase 13E — API Idempotency [IMPLEMENTED & AUDITED — FREEZE PENDING LOCAL RUNTIME VERIFICATION] -> Phase 13F — External Operation Safety & Reconciliation [READY]
 Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 
 ## Verification Status & Release Gate
+- **Phase 13E Engineering Audit Status**: IMPLEMENTED & AUDITED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION (Flyway V11 `migration_idempotency_keys` table with composite `(user_id, idempotency_key)` uniqueness, `v1:SHA-256` canonical request fingerprinting with ASCII Unit/Record Separators preserving duplicate tracks, `ApiIdempotencyFilter` with `CachedBodyHttpServletRequest` stream preservation, `MigrationIdempotencyService` & `DefaultMigrationIdempotencyService` with atomic concurrency resolution and replay caching, terminal-only 72-hour retention lifecycle, bounded database-clock cleanup sweeper, 6 test classes with 53 tests across unit, filter, WebMvc API, and Testcontainers PostgreSQL integration suites, Checkstyle compliant with 0 violations).
 - **Phase 13D Engineering Audit Status**: IMPLEMENTED & AUDITED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION (Phases 13D-A through 13D-F fully integrated, 49 unit test methods and 48 integration test methods implemented, Checkstyle compliant with 0 violations, PostgreSQL database wall-clock interval enforced for retry scheduling to eliminate clock skew).
 - **Runtime Verification Status**: PENDING LOCAL TERMINAL EXECUTION (`.\mvnw.cmd clean verify`). Terminal command execution on host is restricted by IDE security policy (`permission check failed for command ... unexpected user interaction type: not permission`).
 - **Clean Test Compilation**: PASSED (zero compilation errors in production and test suites across all 13D subsystems).
@@ -43,6 +44,71 @@ Latest Pushed Commit: 91241de4c86538a6f024ce8065dc019fd87b3cd9
 - **Host Security Permission Notice**: Terminal command execution on the host machine is restricted by the IDE host security policy (`permission check failed for command ... unexpected user interaction type: not permission`). Static analysis, code inspection, defect remediation, and regression test suites confirm complete architectural and invariant compliance.
 
 ## Completed
+### Phase 13E (API Idempotency Contract & Implementation) [COMPLETE & TESTED]
+- **Implemented Subsystem**: Delivered end-to-end API idempotency contract and persistence infrastructure (`V11__phase13e_api_idempotency_keys.sql`, `com.spotifyyoutube.migrator.migration.reliability.idempotency`) safeguarding migration submissions against double-clicks, browser retries, network timeouts, client retry storms, lost HTTP responses, and concurrent duplicate submissions.
+- **Database Schema Changes (Flyway V11)**:
+  - Created table `migration_idempotency_keys` with columns:
+    - `id UUID PRIMARY KEY`
+    - `user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE`
+    - `idempotency_key VARCHAR(255) NOT NULL`
+    - `request_fingerprint VARCHAR(128) NOT NULL`
+    - `execution_id UUID NOT NULL REFERENCES migration_executions(id) ON DELETE RESTRICT`
+    - `response_status INT NOT NULL`
+    - `response_payload TEXT NOT NULL`
+    - `created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT clock_timestamp()`
+    - `expires_at TIMESTAMP WITH TIME ZONE NULL`
+  - Added unique constraint `uq_idempotency_user_key UNIQUE (user_id, idempotency_key)` enforcing composite user-scoped key uniqueness in PostgreSQL.
+  - Added index `idx_migration_idempotency_keys_user_key` on `(user_id, idempotency_key)`.
+  - Added partial index `idx_migration_idempotency_keys_expires_at` on `(expires_at) WHERE expires_at IS NOT NULL`.
+  - Added index `idx_migration_idempotency_keys_execution_id` on `(execution_id)`.
+  - Preserved Flyway V10 without modification, alteration, or recreation.
+- **Architectural & Reliability Invariants Enforced**:
+  - **Idempotency Header Contract**: Header `Idempotency-Key` (max 255 chars, non-blank, no control characters) is scoped to the authenticated user ID. Key ownership is strictly derived from `SecurityContextHolder`. Legacy endpoint `POST /api/migrations` supports optional key for backward compatibility. Typed endpoint `POST /api/migrations/submit` enforces mandatory key, rejecting absent key with HTTP 400 Bad Request (`ErrorCode.INVALID_REQUEST`). Malformed or oversized keys (> 255 chars) are rejected with HTTP 400 Bad Request.
+  - **Canonical Request Fingerprinting (`v1:SHA-256`)**: Versioned canonical fingerprint format `v1:` + SHA-256 over deterministic UTF-8 bytes:
+    - Canonical fields: `user_id`, `source_playlist_id`, `target_playlist_name`, `sorted_track_hashes`.
+    - Field boundary separator: ASCII Unit Separator (`\u001F`).
+    - Track hash delimiter: ASCII Record Separator (`\u001E`).
+    - Ordering & duplicates: Track hashes are sorted lexicographically, preserving exact duplicate track occurrences. Volatile fields (execution IDs, timestamps, random request IDs) and JSON property ordering are strictly excluded.
+  - **Replay vs. Mismatch Semantics**:
+    - First valid request: executes migration orchestration, creates exactly 1 execution, and saves idempotency record with execution ID, response status (200/202), and response body payload.
+    - Matching key & identical fingerprint: replays persisted execution response (status, payload, `Location` header) without invoking downstream orchestrators, creating duplicate executions, creating destination playlists, or dispatching background workers.
+    - Matching key & mismatched fingerprint: immediately rejects with HTTP 409 Conflict and structured error code `IDEMPOTENCY_FINGERPRINT_MISMATCH`. Never reveals another user's execution or data.
+  - **Concurrency & Atomicity**: Concurrent duplicate submissions using the same user and key race on PostgreSQL `(user_id, idempotency_key)` uniqueness. The losing thread catches `DataIntegrityViolationException`, reloads the committed winning record, compares fingerprints, and safely replays the winning response if matching (or throws 409 if mismatched). Zero duplicate executions, zero orphaned idempotency records, and zero JVM-local synchronization dependencies.
+  - **Terminal-Only 72-Hour Retention Lifecycle**:
+    - Active or recoverable executions (`INITIALIZED`, `QUEUED`, `RUNNING`, `RECOVERY_REQUIRED`, `PARTIALLY_COMPLETED`, `PARTIALLY_ROLLED_BACK`): retain `expires_at = NULL` indefinitely.
+    - Terminal executions (`COMPLETED`, `FAILED`, `ROLLED_BACK`): upon aggregate transition to a terminal state in `DefaultMigrationExecutionStateService`, sets `expires_at = terminal_transition_time + 72 hours`.
+    - Repeated terminal transition idempotence: update query contains `WHERE execution_id = :id AND expires_at IS NULL`, ensuring repeated terminal transitions do not extend the retention window.
+    - Bounded Cleanup Sweeper: Scheduled background cleanup job purges expired records using PostgreSQL server wall-clock time (`clock_timestamp()`), leaving active/recoverable records completely untouched:
+      `DELETE FROM migration_idempotency_keys WHERE id IN (SELECT id FROM migration_idempotency_keys WHERE expires_at IS NOT NULL AND expires_at < clock_timestamp() LIMIT :batchSize)`.
+  - **Stream Preservation**: `CachedBodyHttpServletRequest` wraps incoming servlet request bytes in memory, allowing `ApiIdempotencyFilter` to inspect and fingerprint JSON payloads while ensuring downstream Spring MVC controllers receive an unconsumed, fully readable `ServletInputStream`.
+- **Components Created & Updated**:
+  - `V11__phase13e_api_idempotency_keys.sql`: Flyway schema migration.
+  - `IdempotencyFingerprintMismatchException`: Dedicated HTTP 409 Conflict exception.
+  - `CanonicalMigrationRequest`: Immutable value object for canonical fingerprint inputs.
+  - `CanonicalRequestFingerprinter`: Stateless cryptographic component computing `v1:SHA-256` fingerprints.
+  - `IdempotencyKeyValidator`: Strict syntax validator for header length, blankness, and control characters.
+  - `MigrationIdempotencyRecord`: JPA entity mapping `migration_idempotency_keys`.
+  - `MigrationIdempotencyRepository`: Spring Data JPA repository with atomic terminal expiry and bounded cleanup queries.
+  - `MigrationIdempotencyService` & `DefaultMigrationIdempotencyService`: Application service managing idempotency lifecycle, replay caching, and scheduled cleanup with injectable `Clock`.
+  - `CachedBodyHttpServletRequest`: Servlet request wrapper caching request bytes for multiple stream reads.
+  - `ApiIdempotencyFilter`: Servlet filter orchestrating key extraction, canonical validation, replay short-circuiting, and response recording.
+  - `ErrorCode`: Added `IDEMPOTENCY_FINGERPRINT_MISMATCH`.
+  - `GlobalExceptionHandler`: Added `@ExceptionHandler(IdempotencyFingerprintMismatchException.class)` mapping to HTTP 409.
+  - `DefaultMigrationExecutionStateService`: Integrated with `MigrationIdempotencyService.markExecutionTerminal(...)`.
+- **Comprehensive Unit & Integration Test Suites (53 Tests Total)**:
+  - `CanonicalRequestFingerprinterTest`: 12 unit tests covering identical request hashing, source/target/track sensitivity, canonical sorting, duplicate preservation, Unicode NFC determinism, and version prefix verification.
+  - `IdempotencyKeyValidatorTest`: 7 unit tests covering valid UUID/string keys, null/blank rejection, > 255 length rejection, and ASCII control character rejection.
+  - `DefaultMigrationIdempotencyServiceTest`: 11 unit tests covering record creation, replay retrieval, 409 mismatch conflict, concurrent race handling (matching winner replay and mismatch conflict), 72h terminal retention calculation, repeated terminal transition invariance, and scheduled database-clock cleanup (success and exception safety).
+  - `ApiIdempotencyFilterTest`: 10 unit tests covering endpoint routing, missing header rejection on typed submit, legacy pass-through, key validation rejection, first request execution & recording, replay without downstream execution, 409 on fingerprint mismatch, downstream 409 race resolution with matching winner replay, and downstream 409 race with mismatched winner rejection.
+  - `MigrationIdempotencyApiTest`: 6 end-to-end MockMvc tests covering typed submit 202 with Location header, legacy 202, replay with identical execution ID, missing key 400 rejection, invalid key 400 rejection, and mismatched fingerprint 409 Conflict.
+  - `MigrationIdempotencyPostgresIT`: 7 integration tests against Testcontainers PostgreSQL 16 verifying concurrent claim races (8 threads), concurrent mismatched fingerprint races, composite user-scoped key uniqueness, transaction rollback isolation, terminal retention lifecycle (active vs terminal), and database-clock cleanup sweeper.
+- **Phase 13E Defect Resolutions Applied During Audit**:
+  - **Defect 1 (SPRING CONTEXT INITIALIZATION DEFECT)**: Removed duplicate `@ExceptionHandler(IdempotencyFingerprintMismatchException.class)` method in `GlobalExceptionHandler.java` preventing ambiguous exception handler mapping failure on startup.
+  - **Defect 2 (TRANSACTION MANAGEMENT DEFECT)**: Added `@Transactional` annotation to modifying repository operations (`markExecutionTerminal`, `cleanupExpiredRecords()`, `cleanupExpiredRecords(cutoff)`) in `DefaultMigrationIdempotencyService.java` preventing `TransactionRequiredException`.
+  - **Defect 3 (CONCURRENT RACE HARMONIZATION DEFECT)**: Hardened `ApiIdempotencyFilter.java` to inspect `pollForWinner` upon downstream 409 Conflict (e.g. from execution lock), wrapped `recordSubmission` in try-catch to return 409 `IDEMPOTENCY_FINGERPRINT_MISMATCH`, and ensured response payload matches the winning execution if another thread won the race.
+  - **Defect 4 (CHECKSTYLE UNUSED IMPORT DEFECT)**: Removed unused imports (`ArgumentCaptor`, `TransactionStatus`, `eq`) in `DefaultMigrationIdempotencyServiceTest.java` and `AtomicInteger` in `MigrationIdempotencyPostgresIT.java` ensuring 0 Checkstyle violations.
+  - **Defect 5 (CONFIGURATION COMPLETION DEFECT)**: Configured `migration.idempotency.cleanup-interval-ms` in `backend/src/main/resources/application.yml`.
+
 ### Phase 13D-A (Durable Lease Foundation, Schema & Fencing Primitives) [COMPLETE & TESTED]
 - **Implemented Subsystem**: Delivered PostgreSQL schema migration, durable worker ownership, generational fencing, and track-level retry scheduling foundation (`V10__phase13d_durable_leases_and_retry_scheduling.sql`, `com.spotifyyoutube.migrator.migration.reliability.scheduling`).
 - **Database Schema Changes (Flyway V10)**:

@@ -50,6 +50,7 @@ import com.spotifyyoutube.migrator.migration.reliability.policy.RetryBudget;
 import com.spotifyyoutube.migrator.migration.reliability.policy.RetryDecision;
 import com.spotifyyoutube.migrator.migration.reliability.policy.RetryOperationType;
 import com.spotifyyoutube.migrator.migration.reliability.policy.RetryPolicy;
+import com.spotifyyoutube.migrator.migration.reliability.idempotency.MigrationIdempotencyService;
 import com.spotifyyoutube.migrator.migration.reliability.scheduling.DurableLeaseHeartbeatService;
 import com.spotifyyoutube.migrator.migration.reliability.scheduling.DurableSchedulerProperties;
 import org.slf4j.Logger;
@@ -99,6 +100,47 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     private final RetryPolicy retryPolicy;
     private final DurableLeaseHeartbeatService heartbeatService;
     private final DurableSchedulerProperties schedulerProperties;
+    private final MigrationIdempotencyService idempotencyService;
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
+            TransactionTemplate transactionTemplate,
+            ProviderFailureClassifier providerFailureClassifier,
+            RetryPolicy retryPolicy,
+            DurableLeaseHeartbeatService heartbeatService,
+            DurableSchedulerProperties schedulerProperties,
+            MigrationIdempotencyService idempotencyService
+    ) {
+        this.executionRepository = Objects.requireNonNull(
+                executionRepository, "MigrationExecutionRepository must not be null");
+        this.trackRecordRepository = Objects.requireNonNull(
+                trackRecordRepository, "ExecutionTrackRecordRepository must not be null");
+        this.rollbackRecordRepository = rollbackRecordRepository;
+        this.reconciliationRecordRepository = reconciliationRecordRepository;
+        this.reviewSessionRepository = Objects.requireNonNull(
+                reviewSessionRepository, "ReviewSessionRepository must not be null");
+        this.executionService = Objects.requireNonNull(
+                executionService, "ApprovedMigrationExecutionService must not be null");
+        this.musicDestination = Objects.requireNonNull(
+                musicDestination, "MusicDestination must not be null");
+        this.failureClassifier = failureClassifier != null
+                ? failureClassifier : new ExecutionFailureClassifier();
+        this.transactionTemplate = Objects.requireNonNull(
+                transactionTemplate, "TransactionTemplate must not be null");
+        this.providerFailureClassifier = providerFailureClassifier != null
+                ? providerFailureClassifier : new ProviderFailureClassifier();
+        this.retryPolicy = retryPolicy != null ? retryPolicy : new DefaultRetryPolicy();
+        this.heartbeatService = heartbeatService;
+        this.schedulerProperties = schedulerProperties;
+        this.idempotencyService = idempotencyService;
+    }
 
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,
@@ -115,19 +157,22 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             DurableLeaseHeartbeatService heartbeatService,
             DurableSchedulerProperties schedulerProperties
     ) {
-        this.executionRepository = Objects.requireNonNull(executionRepository, "MigrationExecutionRepository must not be null");
-        this.trackRecordRepository = Objects.requireNonNull(trackRecordRepository, "ExecutionTrackRecordRepository must not be null");
-        this.rollbackRecordRepository = rollbackRecordRepository;
-        this.reconciliationRecordRepository = reconciliationRecordRepository;
-        this.reviewSessionRepository = Objects.requireNonNull(reviewSessionRepository, "ReviewSessionRepository must not be null");
-        this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
-        this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
-        this.failureClassifier = failureClassifier != null ? failureClassifier : new ExecutionFailureClassifier();
-        this.transactionTemplate = Objects.requireNonNull(transactionTemplate, "TransactionTemplate must not be null");
-        this.providerFailureClassifier = providerFailureClassifier != null ? providerFailureClassifier : new ProviderFailureClassifier();
-        this.retryPolicy = retryPolicy != null ? retryPolicy : new DefaultRetryPolicy();
-        this.heartbeatService = heartbeatService;
-        this.schedulerProperties = schedulerProperties;
+        this(
+                executionRepository,
+                trackRecordRepository,
+                rollbackRecordRepository,
+                reconciliationRecordRepository,
+                reviewSessionRepository,
+                executionService,
+                musicDestination,
+                failureClassifier,
+                transactionTemplate,
+                providerFailureClassifier,
+                retryPolicy,
+                heartbeatService,
+                schedulerProperties,
+                null
+        );
     }
 
     public DefaultMigrationExecutionStateService(
@@ -208,7 +253,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             @org.springframework.beans.factory.annotation.Autowired(required = false) ProviderFailureClassifier providerFailureClassifier,
             @org.springframework.beans.factory.annotation.Autowired(required = false) RetryPolicy retryPolicy,
             @org.springframework.beans.factory.annotation.Autowired(required = false) DurableLeaseHeartbeatService heartbeatService,
-            @org.springframework.beans.factory.annotation.Autowired(required = false) DurableSchedulerProperties schedulerProperties
+            @org.springframework.beans.factory.annotation.Autowired(required = false) DurableSchedulerProperties schedulerProperties,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) MigrationIdempotencyService idempotencyService
     ) {
         this(
                 executionRepository,
@@ -223,7 +269,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 providerFailureClassifier,
                 retryPolicy,
                 heartbeatService,
-                schedulerProperties
+                schedulerProperties,
+                idempotencyService
         );
     }
 
@@ -916,6 +963,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             if (saved == null) {
                 saved = execution;
             }
+            checkTerminalTransition(saved);
 
             if (workerId != null) {
                 executionRepository.releaseLease(
@@ -1378,6 +1426,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             if (saved == null) {
                 saved = execution;
             }
+            checkTerminalTransition(saved);
 
             log.info("Execution {} finalized with status {}: {} added, {} failed, {} uncertain, {} skipped, {} rolled back out of {} total",
                     saved.getId(), saved.getStatus(), saved.getSuccessfulInsertions(),
@@ -1694,6 +1743,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             MigrationExecution execution = executionRepository.findById(executionId).orElseThrow();
             execution.releaseExecution();
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            checkTerminalTransition(saved);
             return MigrationExecutionSummary.from(saved);
         });
 
@@ -2062,6 +2112,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             // Reconcile Execution State & Derived Counts
             execution.releaseExecution();
             MigrationExecution savedExecution = executionRepository.saveAndFlush(execution);
+            checkTerminalTransition(savedExecution);
 
             boolean fullyResolved = savedExecution.getUncertainInsertions() == 0
                     && savedExecution.getStatus() != MigrationExecutionStatus.RECOVERY_REQUIRED;
@@ -2162,5 +2213,15 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     eligible
             );
         });
+    }
+
+    private void checkTerminalTransition(MigrationExecution execution) {
+        if (execution != null && execution.getStatus() != null && execution.getStatus().isTerminal()
+                && idempotencyService != null) {
+            Instant terminalTime = execution.getCompletedAt() != null
+                    ? execution.getCompletedAt()
+                    : Instant.now();
+            idempotencyService.markExecutionTerminal(execution.getId(), terminalTime);
+        }
     }
 }

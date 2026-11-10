@@ -3,6 +3,7 @@ package com.spotifyyoutube.migrator.common.exception;
 import com.spotifyyoutube.migrator.migration.progress.domain.ProgressConsistencyException;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
+import com.spotifyyoutube.migrator.migration.reliability.idempotency.IdempotencyFingerprintMismatchException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -26,6 +27,20 @@ import java.time.Instant;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(IdempotencyFingerprintMismatchException.class)
+    public ResponseEntity<ApiError> handleIdempotencyFingerprintMismatch(
+            IdempotencyFingerprintMismatchException ex,
+            HttpServletRequest request
+    ) {
+        ApiError apiError = new ApiError(
+                ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH,
+                ex.getMessage(),
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.CONFLICT);
+    }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> handleHttpMessageNotReadableException(

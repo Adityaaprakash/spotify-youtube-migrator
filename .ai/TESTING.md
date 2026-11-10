@@ -863,16 +863,70 @@ Implemented and verified:
     - Rejects compensation if fencing generation does not match.
     - Rejects compensation if claiming worker ID does not match.
 
+### Phase 13E API Idempotency Test Suites
+- `CanonicalRequestFingerprinterTest` (12 unit tests):
+  - SHA-256 fingerprint determinism and version prefix (`v1:`) verification.
+  - Sensitivity to user ID, source playlist ID, target playlist title, and individual track items.
+  - Lexicographical track sorting ensuring permutation-invariant fingerprints.
+  - Duplicate track preservation: distinct occurrences of identical track IDs are retained and ordered.
+  - Unicode NFC normalization consistency across decomposed and precomposed representations.
+  - Canonical Unit Separator (`\u001F`) and Record Separator (`\u001E`) boundary integrity.
+- `IdempotencyKeyValidatorTest` (7 unit tests):
+  - Valid UUID and arbitrary alphanumeric string keys accepted.
+  - Null and blank key rejection.
+  - Oversized keys (> 255 characters) rejected with `ValidationException`.
+  - Control characters (newlines, carriage returns, tabs, null bytes) rejected.
+- `DefaultMigrationIdempotencyServiceTest` (11 unit tests):
+  - Idempotency record creation in active status with `expires_at = null`.
+  - Replay retrieval returning saved execution ID, status, and payload.
+  - Fingerprint mismatch throwing `IdempotencyFingerprintMismatchException` (HTTP 409).
+  - Concurrent duplicate race handling: catching `DataIntegrityViolationException` and loading winning record.
+  - Concurrent duplicate race with mismatched winner: throwing `IdempotencyFingerprintMismatchException` (HTTP 409).
+  - Terminal transition setting `expires_at = transitionTime + 72 hours`.
+  - Repeated terminal transition invariance (`WHERE expires_at IS NULL` preserves initial expiry).
+  - Bounded database-clock cleanup sweeper deleting expired records while keeping active/recoverable records intact.
+  - Scheduled database-clock cleanup execution and exception safety handling.
+- `ApiIdempotencyFilterTest` (10 unit tests):
+  - Endpoint path filtering: bypasses non-migration endpoints.
+  - Mandatory header enforcement on `POST /api/migrations/submit` (rejects missing key with HTTP 400).
+  - Optional header support on legacy `POST /api/migrations` (passes through without idempotency record).
+  - Invalid/oversized key rejection (HTTP 400).
+  - First request execution: delegates to controller and records response.
+  - Replay execution: returns cached response without invoking controller.
+  - Fingerprint mismatch rejection: returns HTTP 409 Conflict without invoking controller.
+  - Concurrent race resolution: downstream 409 Conflict resolves winning record and replays.
+  - Concurrent race resolution: downstream 409 Conflict with mismatched winner returns HTTP 409.
+  - Request body stream preservation via `CachedBodyHttpServletRequest`.
+- `MigrationIdempotencyApiTest` (6 API WebMvc tests):
+  - Typed submit `POST /api/migrations/submit` with `Idempotency-Key` returns 202 Accepted and Location header.
+  - Legacy `POST /api/migrations` with `Idempotency-Key` returns 202 Accepted.
+  - Replay request returns cached 202 Accepted with identical execution ID and Location header.
+  - Missing key on typed submit returns HTTP 400 with `INVALID_REQUEST`.
+  - Invalid key (oversized/control chars) returns HTTP 400.
+  - Replay with different fingerprint returns HTTP 409 with `IDEMPOTENCY_FINGERPRINT_MISMATCH`.
+- `MigrationIdempotencyPostgresIT` (7 integration tests):
+  - Real Testcontainers PostgreSQL 16 tests verifying Phase 13E idempotency persistence:
+    - Concurrent claim race (8 threads): exactly 1 thread inserts, 7 threads catch uniqueness violation and replay.
+    - Concurrent mismatch race: winning thread succeeds, losing thread with different fingerprint receives 409 Conflict.
+    - User-scoped key uniqueness: User A and User B can use identical `Idempotency-Key` values without collision.
+    - Transaction rollback safety: uncommitted/rolled back migration leaves no orphaned idempotency record.
+    - Terminal retention lifecycle: active execution retains `expires_at = null`; terminal transition sets 72h expiry.
+    - Repeated terminal transition idempotence: second terminal update does not modify `expires_at`.
+    - Bounded cleanup sweeper: deletes expired records using PostgreSQL `clock_timestamp()` without touching active records.
+
 ## Current Blockers & Status
 
-- **Phase 13 (Reliability Engineering)**: IN PROGRESS (Phases 13A, 13B, 13C Complete & Verified; Phase 13D Implemented & Audited).
-  - Implementation & Architecture: Phase 13A architecture audited and approved (ADR-031). Phase 13B provider failure classification engine (`ProviderFailureClassifier`, `RetryAfterParser`, and classification models) implemented and verified across 50 unit tests. Phase 13C retry policy and backoff engine implemented and verified across 43 tests. Phase 13D (13D-A through 13D-F) durable lease lifecycle, atomic scheduler claiming, post-commit worker dispatch, lease heartbeat service, durable retry scheduling, and graceful shutdown hardening implemented across 49 dedicated unit tests (in 6 classes) and 48 PostgreSQL Testcontainers integration tests (in 6 IT classes).
+- **Phase 13 (Reliability Engineering)**: IN PROGRESS (Phases 13A, 13B, 13C Complete & Verified; Phases 13D and 13E Implemented & Audited).
+  - Implementation & Architecture: Phase 13A architecture audited and approved (ADR-031). Phase 13B provider failure classification engine (`ProviderFailureClassifier`, `RetryAfterParser`, and classification models) implemented and verified across 50 unit tests. Phase 13C retry policy and backoff engine implemented and verified across 43 tests. Phase 13D (13D-A through 13D-F) durable lease lifecycle, atomic scheduler claiming, post-commit worker dispatch, lease heartbeat service, durable retry scheduling, and graceful shutdown hardening implemented across 49 dedicated unit tests (in 6 classes) and 48 PostgreSQL Testcontainers integration tests (in 6 IT classes). Phase 13E API idempotency contract, Flyway V11 `migration_idempotency_keys`, `v1:SHA-256` canonical request fingerprinter, validator, filter, idempotency service, terminal retention, and bounded cleanup sweeper implemented across 46 unit/WebMvc tests (in 5 classes) and 7 PostgreSQL Testcontainers integration tests (in 1 IT class).
   - Test Reconciliation Evidence:
-    - Unit Tests (49 total): `DurableWorkerLeaseDomainTest` (17), `StaleLeaseOwnershipExceptionTest` (2), `WorkerDispatchAndCompensationTest` (9), `DurableLeaseHeartbeatServiceTest` (10), `DurableRetrySchedulingTest` (4), `DurableSchedulerLifecycleAndHardeningTest` (7).
-    - Integration Tests (48 total): `DurableLeaseAndFencingPersistenceIT` (19), `AtomicPostgresSchedulerClaimingIT` (8), `WorkerDispatchAndCompensationIT` (7), `DurableHeartbeatAndRenewalIT` (7), `DurableRetrySchedulingIT` (4), `GracefulShutdownAndSaturationIT` (3).
-    - Execution Evidence: 19 unit tests and 19 integration tests (Phase 13D-A) were executed by Maven Surefire/Failsafe (0 errors, 0 failures). The remaining 30 unit tests and 29 integration tests (Phases 13D-B through 13D-F) are compiled and statically verified; runtime execution remains pending local terminal execution due to IDE host security policy restrictions on terminal commands.
+    - Phase 13D Unit Tests (49 total): `DurableWorkerLeaseDomainTest` (17), `StaleLeaseOwnershipExceptionTest` (2), `WorkerDispatchAndCompensationTest` (9), `DurableLeaseHeartbeatServiceTest` (10), `DurableRetrySchedulingTest` (4), `DurableSchedulerLifecycleAndHardeningTest` (7).
+    - Phase 13D Integration Tests (48 total): `DurableLeaseAndFencingPersistenceIT` (19), `AtomicPostgresSchedulerClaimingIT` (8), `WorkerDispatchAndCompensationIT` (7), `DurableHeartbeatAndRenewalIT` (7), `DurableRetrySchedulingIT` (4), `GracefulShutdownAndSaturationIT` (3).
+    - Phase 13E Unit & WebMvc Tests (46 total): `CanonicalRequestFingerprinterTest` (12), `IdempotencyKeyValidatorTest` (7), `DefaultMigrationIdempotencyServiceTest` (11), `ApiIdempotencyFilterTest` (10), `MigrationIdempotencyApiTest` (6).
+    - Phase 13E Integration Tests (7 total): `MigrationIdempotencyPostgresIT` (7).
+    - Execution Evidence: 19 unit tests and 19 integration tests (Phase 13D-A) were executed by Maven Surefire/Failsafe (0 errors, 0 failures). The remaining Phase 13D and Phase 13E tests are compiled and statically verified; runtime execution remains pending local terminal execution due to IDE host security policy restrictions on terminal commands.
   - Phase 13D Status: IMPLEMENTED & AUDITED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION.
-  - Next Subphase: Phase 13E (API Idempotency) — BLOCKED UNTIL PHASE 13D LOCAL VERIFICATION & FREEZE.
+  - Phase 13E Status: IMPLEMENTED & AUDITED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION.
+  - Next Subphase: Phase 13F (External Operation Idempotency & Reconciliation) — READY TO BEGIN AFTER VERIFICATION.
 
 - **Phase 12 (Async Migration & Progress)**: COMPLETE & FROZEN (ADR-022).
   - Implementation & Architecture: All 8 subphases (12A–12H) fully implemented and statically verified.

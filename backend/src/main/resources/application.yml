@@ -82,6 +82,8 @@ migration:
     rejection-backoff-seconds: ${MIGRATION_SCHEDULER_REJECTION_BACKOFF_SECONDS:10}
     shutdown-grace-period-seconds: ${MIGRATION_SCHEDULER_SHUTDOWN_GRACE_PERIOD_SECONDS:30}
     max-claims-per-poll: ${MIGRATION_SCHEDULER_MAX_CLAIMS_PER_POLL:4}
+  idempotency:
+    cleanup-interval-ms: ${MIGRATION_IDEMPOTENCY_CLEANUP_INTERVAL_MS:3600000}
 
 
 
