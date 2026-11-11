@@ -781,5 +781,65 @@ public class MigrationIdempotencyPostgresIT {
         assertThat(recordInDb.getClaimGeneration()).isEqualTo(genA);
         assertThat(recordInDb.getClaimStage()).isEqualTo(MigrationIdempotencyRecord.STAGE_EXTERNAL_OPERATION_STARTED);
     }
+
+    @Test
+    @DisplayName("Test J — Competing State C recovery attempts preserve generation fencing and reject stale generation")
+    void testJ_competingRecoveryAttempts_preserveFencingAndRejectStaleGeneration() {
+        cleanDatabase();
+        testUser1 = userRepository.save(new User("idempotency-user-j@example.com"));
+
+        String key = "test-j-fenced-recovery-010";
+        String fp = "v1:testJFingerprint";
+        ReviewSession session = reviewSessionRepository.save(
+                new ReviewSession(testUser1, "src-playlist-j", "Source J", null)
+        );
+
+        MigrationExecution queuedExec = createExecution(testUser1, session, MigrationExecutionStatus.QUEUED);
+        executionRepository.saveAndFlush(queuedExec);
+
+        // Pre-insert an expired PENDING claim at generation 1
+        MigrationIdempotencyRecord expiredClaim = new MigrationIdempotencyRecord(
+                testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
+                null, null, null, null, session.getId(),
+                "stale-owner-j", 1L, Instant.now().minusSeconds(100), null,
+                MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                Instant.now().minusSeconds(100),
+                Instant.now().minusSeconds(10),
+                null
+        );
+        idempotencyRepository.saveAndFlush(expiredClaim);
+        UUID claimId = expiredClaim.getId();
+
+        // 1. Contender A executes fenced recovery with expectedGeneration = 1
+        int updatedA = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, 1L, queuedExec.getId(), 202, "{\"recovered\":true}", "/api/migrations/progress"
+                )
+        );
+        assertThat(updatedA).isEqualTo(1);
+
+        // 2. Competing Contender B executes recovery with the same expectedGeneration = 1
+        // Since status is now COMPLETED, the atomic CAS condition (status = 'PENDING') rejects it with 0 rows
+        int updatedB = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, 1L, queuedExec.getId(), 202, "{\"recovered\":true}", "/api/migrations/progress"
+                )
+        );
+        assertThat(updatedB).isEqualTo(0);
+
+        // 3. Contender C with mismatched/stale generation (e.g. 0L or 2L) is also rejected with 0 rows
+        int updatedC = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, 2L, queuedExec.getId(), 202, "{\"recovered\":true}", "/api/migrations/progress"
+                )
+        );
+        assertThat(updatedC).isEqualTo(0);
+
+        // 4. Verify the database record remains completed by Contender A
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.COMPLETED);
+        assertThat(recordInDb.getExecutionId()).isEqualTo(queuedExec.getId());
+        assertThat(recordInDb.getClaimGeneration()).isEqualTo(1L);
+    }
 }
 

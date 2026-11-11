@@ -16,15 +16,39 @@ public record ClaimOwnershipContext(
         UUID userId,
         String idempotencyKey,
         String claimOwner,
-        long claimGeneration
+        long claimGeneration,
+        IdempotencyClaimHeartbeatService heartbeatService
 ) {
     private static final ThreadLocal<ClaimOwnershipContext> CURRENT = new ThreadLocal<>();
+
+    public ClaimOwnershipContext(
+            UUID claimId,
+            UUID userId,
+            String idempotencyKey,
+            String claimOwner,
+            long claimGeneration
+    ) {
+        this(claimId, userId, idempotencyKey, claimOwner, claimGeneration, null);
+    }
 
     public ClaimOwnershipContext {
         Objects.requireNonNull(claimId, "claimId must not be null");
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(idempotencyKey, "idempotencyKey must not be null");
         Objects.requireNonNull(claimOwner, "claimOwner must not be null");
+    }
+
+    /**
+     * Checks whether the active claim ownership has been lost (e.g. expired lease, taken over,
+     * or consecutive heartbeat renewal failures).
+     *
+     * @return true if claim was marked as ownership lost, false otherwise
+     */
+    public boolean isOwnershipLost() {
+        if (heartbeatService != null && claimId != null) {
+            return heartbeatService.isOwnershipLost(claimId);
+        }
+        return false;
     }
 
     /**

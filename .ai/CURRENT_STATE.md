@@ -45,76 +45,57 @@ Latest Pushed Commit: af88f3aa0df0230a5dfe14d9840c39391ea5a05c
 - **Host Security Permission Notice**: Terminal command execution on the host machine is restricted by the IDE host security policy (`permission check failed for command ... unexpected user interaction type: not permission`). Static analysis, code inspection, defect remediation, and regression test suites confirm complete architectural and invariant compliance.
 
 ## Completed
-### Phase 13E (API Idempotency Contract, Concurrency Hardening & Verification) [IMPLEMENTED & AUDITED]
+### Phase 13E (API Idempotency Contract, Concurrency Hardening & Verification) [IMPLEMENTED & REMEDIATED — READY FOR LOCAL RUNTIME VERIFICATION]
 - **Implemented Subsystem**: Delivered end-to-end API idempotency contract, database-backed atomic claim protocol, and persistence infrastructure (`V11__phase13e_api_idempotency_keys.sql`, `V12__phase13e_idempotency_claim_protocol.sql`, `com.spotifyyoutube.migrator.migration.reliability.idempotency`) safeguarding migration submissions against double-clicks, browser retries, network timeouts, client retry storms, lost HTTP responses, and concurrent duplicate submissions.
-- **Root Cause Analysis of TOCTOU Concurrency Race (Pre-Resumption Defect)**:
-  - **Discovered Sequence**: In the initial implementation, `ApiIdempotencyFilter` checked `findExistingRecord()`, invoked `filterChain.doFilter()`, controller invoked `MigrationJobDispatcher.dispatchMigration()`, which created YouTube destination playlists and dispatched workers, and only then recorded the idempotency key in `recordSubmission()`.
-  - **Vulnerability**: Two concurrent requests with the same user and key both passed the initial lookup, both created destination playlists on YouTube, both initialized `MigrationExecution` aggregates, and both dispatched background workers before racing on `migration_idempotency_keys` insert.
-  - **Repaired Architecture**: Designed and implemented a database-backed atomic claim reservation acquired **before execution creation or dispatch**. The first thread atomically inserts a `PENDING` claim with a 60-second timeout. Only the winning leader thread invokes downstream orchestration. Concurrent matching requests detect the `PENDING` claim, wait/poll safely, and replay the leader's completed response upon finish. Mismatched fingerprints immediately return HTTP 409 Conflict.
-- **Database Schema Changes**:
-  - **Flyway V11 (`V11__phase13e_api_idempotency_keys.sql`)**: Initial table `migration_idempotency_keys` with composite unique constraint `uq_idempotency_user_key UNIQUE (user_id, idempotency_key)`, partial index on `expires_at`, and foreign keys to `users` and `migration_executions`.
-  - **Flyway V12 (`V12__phase13e_idempotency_claim_protocol.sql`)**: Forward-only migration altering `execution_id`, `response_status`, and `response_payload` to nullable for `PENDING` claims, adding `status VARCHAR(32) NOT NULL DEFAULT 'COMPLETED'`, `claim_expires_at TIMESTAMP WITH TIME ZONE`, `location_header VARCHAR(2048)`, `review_session_id UUID`, and partial index `idx_idempotency_pending_claims ON migration_idempotency_keys (status, claim_expires_at) WHERE status = 'PENDING'`.
-  - Preserved Flyway V10 and V11 without modification or recreation.
-- **Architectural & Reliability Invariants Enforced**:
-  - **Atomic Claim Protocol**: `MigrationIdempotencyService.acquireClaim(...)` uses an isolated `REQUIRES_NEW` transaction to insert `MigrationIdempotencyRecord` in `PENDING` status. On `DataIntegrityViolationException`, evaluates existing record: returns `REPLAY` if `COMPLETED` with matching fingerprint; returns `MISMATCH` (409) if different fingerprint; returns `PENDING` if active leader is processing; triggers crash recovery if claim expired.
-  - **Crash Recovery & Leader Takeover**:
-    - Winner crashes before execution persistence: subsequent matching request detects expired `PENDING` claim with `execution_id == null`, atomically takes over claim via `takeOverClaim(...)`, and becomes the new leader without duplicate execution.
-    - Winner crashes after execution persistence: subsequent request detects existing execution in `migration_executions`, reconciles execution state into `MigrationSubmissionResponse`, completes the claim, and replays without creating duplicate executions or dispatching duplicate workers.
-  - **Idempotency Header Contract**: Header `Idempotency-Key` (max 255 chars, non-blank, no control characters) is scoped to authenticated `user_id`. Key ownership derived strictly from `SecurityContextHolder`. Legacy endpoint `POST /api/migrations` supports optional key. Typed endpoint `POST /api/migrations/submit` enforces mandatory key, rejecting absent key with HTTP 400 Bad Request (`ErrorCode.INVALID_REQUEST`). Malformed or oversized keys (> 255 chars) rejected with HTTP 400.
-  - **Canonical Request Fingerprinting (`v1:SHA-256`)**: Versioned canonical fingerprint format `v1:` + SHA-256 over deterministic UTF-8 bytes:
-    - Canonical fields: `user_id`, `source_playlist_id`, `target_playlist_name`, `sorted_track_hashes`.
-    - Delimiters: ASCII Unit Separator (`\u001F`) between fields, Record Separator (`\u001E`) between tracks.
-    - Unicode NFC Normalization: `java.text.Normalizer.normalize(..., Normalizer.Form.NFC)` applied to all textual inputs (`targetPlaylistName`, `sourcePlaylistId`, track hashes), guaranteeing precomposed (NFC) and decomposed (NFD) representations produce identical fingerprints.
-    - Duplicate Preservation: Lexicographically sorts tracks while preserving duplicate track occurrences. Volatile fields strictly excluded.
-  - **Response Preservation**: Replayed responses preserve original HTTP status (200/202), response JSON, exact `Location` header (persisted in `location_header`), and `Content-Type: application/json;charset=UTF-8`.
-  - **Terminal-Only 72-Hour Retention Lifecycle**:
-    - Active or recoverable executions retain `expires_at = NULL` indefinitely.
-    - Terminal executions (`COMPLETED`, `FAILED`, `ROLLED_BACK`): sets `expires_at = terminal_transition_time + 72 hours`.
-    - Repeated terminal transition idempotence: `WHERE execution_id = :id AND expires_at IS NULL` prevents extending retention window.
-    - Bounded Cleanup Sweeper: Scheduled background cleanup job purges expired records using PostgreSQL server wall-clock time (`clock_timestamp()`), leaving active/recoverable records completely untouched.
-  - **Stream Preservation**: `CachedBodyHttpServletRequest` wraps incoming servlet request bytes in memory, allowing `ApiIdempotencyFilter` to inspect and fingerprint JSON payloads while ensuring downstream Spring MVC controllers receive an unconsumed, fully readable `ServletInputStream`.
+- **SecurityFilterChain Integration & Authentication Resolution**:
+  - Wired `ApiIdempotencyFilter` directly into Spring Security's `SecurityFilterChain` after `AuthorizationFilter.class` (`http.addFilterAfter(apiIdempotencyFilter, AuthorizationFilter.class)`).
+  - Disabled standalone servlet registration via `registration.setEnabled(false)` in `IdempotencyConfig.java` to prevent duplicate filter execution in embedded Tomcat.
+  - Injected `@Autowired(required = false) ApiIdempotencyFilter` into `SecurityConfig.java`, allowing MVC slices that omit `IdempotencyConfig` to initialize cleanly while ensuring production loads the idempotency filter after authentication and authorization.
+  - Configured `HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)` in `SecurityConfig.java` to ensure anonymous requests to protected endpoints return HTTP 401 instead of default 403 Forbidden.
+- **Database Time Authority for Idempotency Leases**:
+  - Eliminated application Java clock comparison for authoritative lease decisions. PostgreSQL database wall-clock time (`clock_timestamp()`) is the authoritative source for claim creation, lease evaluation, takeover, and renewals.
+  - `insertPendingClaimDatabaseTime`: Sets `created_at = clock_timestamp()`, `heartbeat_at = clock_timestamp()`, and `claim_expires_at = clock_timestamp() + (:timeoutSeconds * INTERVAL '1 second')`.
+  - `isClaimActiveDatabaseTime`: Evaluates `(claim_expires_at > clock_timestamp())` directly in PostgreSQL, falling back to local clock only in detached mock unit tests.
+  - `takeOverClaimWithFencingDatabaseTime`: Enforces `claim_expires_at <= clock_timestamp()` and sets new expiry via `clock_timestamp() + (:timeoutSeconds * INTERVAL '1 second')`.
+  - `renewClaimDatabaseTime`: Checks `claim_expires_at > clock_timestamp()` and extends expiry relative to `clock_timestamp()`.
+- **Heartbeat Bounded Failure Policy & Fail-Closed Resolution**:
+  - `IdempotencyClaimHeartbeatService`: Implements bounded failure policy with `DEFAULT_MAX_CONSECUTIVE_FAILURES = 3`.
+  - A zero-row renewal (lease expired, taken over, or completed) immediately marks ownership as lost and cancels future renewals.
+  - Transient database renewal exceptions increment consecutive failure counter. If failures reach `maxConsecutiveFailures` (45s window of 60s lease), service fails closed: marks ownership lost and cancels future renewals.
+  - `ClaimOwnershipContext`: Propagates thread-local ownership and heartbeat service reference across downstream execution.
+  - `DefaultApprovedMigrationOrchestrator`: Request thread checks `ClaimOwnershipContext.isOwnershipLost()` before external YouTube playlist creation and before queued execution initialization, throwing `StaleClaimOwnershipException` to prevent external side effects or duplicate worker dispatch.
+  - `ApiIdempotencyFilter`: Checks `claimHeartbeatService.isOwnershipLost(...)` before completion and before release, guaranteeing a stale leader whose lease expired never completes or releases a claim owned by a newer leader.
+  - Scheduler shutdown in `@PreDestroy` cancels all active scheduled futures and invokes `shutdownNow()`.
+- **Fenced Crash Recovery (State C)**:
+  - `MigrationIdempotencyRepository.recoverClaimWithFencing`: Atomic CAS update setting `status = 'COMPLETED'` conditioned on `status = 'PENDING' AND claim_generation = :expectedGeneration`.
+  - If a concurrent takeover or newer generation took over the claim during crash recovery, the recovery CAS updates 0 rows and the contending thread reloads without corrupting the newer owner's claim.
+  - Reuses existing `MigrationExecution` without creating duplicate execution aggregates or dispatching duplicate background workers. Phase 13D `DurableMigrationScheduler` remains the recovery authority for queued executions.
 - **Components Created & Updated**:
-  - `V11__phase13e_api_idempotency_keys.sql`: Flyway schema baseline.
-  - `V12__phase13e_idempotency_claim_protocol.sql`: Flyway schema evolution for atomic claim reservations.
-  - `IdempotencyClaimStatus`: Enum (`PENDING`, `COMPLETED`).
-  - `ClaimResult`: Value object representing claim acquisition outcome (`ACQUIRED`, `REPLAY`, `PENDING`, `MISMATCH`).
-  - `IdempotencyFingerprintMismatchException`: Dedicated HTTP 409 Conflict exception.
-  - `CanonicalMigrationRequest`: Immutable record for canonical fingerprint inputs.
-  - `CanonicalRequestFingerprinter`: Stateless component computing `v1:SHA-256` fingerprints with Unicode NFC normalization.
-  - `IdempotencyKeyValidator`: Strict syntax validator for header length, blankness, and control characters.
-  - `MigrationIdempotencyRecord`: JPA entity with claim lifecycle columns (`status`, `claimExpiresAt`, `locationHeader`, `reviewSessionId`).
-  - `MigrationIdempotencyRepository`: Spring Data JPA repository with `takeOverClaim`, `completeClaim`, `deletePendingClaim`, atomic terminal expiry, and bounded cleanup queries.
-  - `MigrationIdempotencyService` & `DefaultMigrationIdempotencyService`: Application service managing atomic claim reservations, replay caching, crash recovery, terminal retention, and scheduled cleanup.
-  - `CachedBodyHttpServletRequest`: Servlet request wrapper caching request bytes for multiple stream reads.
-  - `ApiIdempotencyFilter`: Servlet filter orchestrating key extraction, claim reservation, follower polling, and replay short-circuiting.
-  - `ErrorCode`: Contains `IDEMPOTENCY_FINGERPRINT_MISMATCH`.
-  - `GlobalExceptionHandler`: Maps `IdempotencyFingerprintMismatchException` to HTTP 409 Conflict.
-  - `DefaultMigrationExecutionStateService`: Integrated with `MigrationIdempotencyService.markExecutionTerminal(...)`.
-- **Comprehensive Unit & Integration Test Suites (79 Tests Total)**:
-  - `CanonicalRequestFingerprinterTest`: 14 unit tests covering identical request hashing, source/target/track sensitivity, canonical sorting, duplicate preservation, Unicode NFC determinism, NFC vs. NFD equivalence, genuinely different payload distinction, and version prefix verification.
-  - `IdempotencyKeyValidatorTest`: 7 unit tests covering valid UUID/string keys, null/blank rejection, > 255 length rejection, and ASCII control character rejection.
-  - `ApiIdempotencyFilterTest`: 13 unit tests covering endpoint routing, missing header rejection on typed submit, legacy pass-through, key validation rejection, leader claim acquisition and completion, replay without downstream execution, 409 on claim mismatch, follower polling with winner replay, follower polling with mismatch rejection, downstream exception handling with claim release, reconciliation required 409 Conflict, and stale leader completion fencing.
-  - `DefaultMigrationIdempotencyServiceTest`: 20 unit tests covering new key claim acquisition, completed matching replay, fingerprint mismatch conflict, active pending claim detection, expired claim takeover with monotonic generation increment, expired claim execution reconciliation, claim completion with fencing, claim release with fencing, direct recordSubmission fallback, same key under different users, 72h terminal retention calculation, repeated terminal transition invariance, scheduled database-clock cleanup, State B external mutation reconciliation-required response, State B destination playlist ID fail-closed response, and lease heartbeat renewal.
-  - `MigrationIdempotencyApiTest`: 6 end-to-end MockMvc tests covering typed submit 202 with Location header, legacy 202, replay with identical execution ID without dispatcher invocation, missing key 400 rejection, invalid key 400 rejection, and mismatched fingerprint 409 Conflict.
-  - `MigrationIdempotencyPostgresIT`: 13 integration tests against Testcontainers PostgreSQL 16 verifying concurrent claim races (8 threads), concurrent mismatched fingerprint races, composite user-scoped key uniqueness, transaction rollback isolation, terminal retention lifecycle (active vs terminal), database-clock cleanup sweeper, 8-thread simultaneous acquireClaim contention, atomic claim takeover, Test A (expired lease while leader alive fences out stale leader), Test B (heartbeat renewal prevents takeover), Test C (stale leader cannot complete), Test D (external operation ambiguity fails closed without duplicate playlist creation), and Test E (queued execution recovery delegates to Phase 13D scheduler safely).
-  - `MigrationIdempotencyConcurrencyIT`: 6 full API-level concurrency tests with MockMvc and Testcontainers PostgreSQL:
-    1. Eight concurrent identical submissions converge on exactly 1 execution, 1 playlist creation, 1 worker dispatch.
-    2. Concurrent submissions with same key but different fingerprints: 1 wins (202), 1 receives 409 Conflict (`IDEMPOTENCY_FINGERPRINT_MISMATCH`).
-    3. Same key used by two different users: completely isolated executions with zero collision.
-    4. Winner crashes after acquiring claim before execution persistence: subsequent matching request safely takes over claim and executes.
-    5. Winner crashes after execution persistence before response persistence: reconciles existing execution without duplicate dispatch.
-    6. Replay after successful completion: returns cached status, body, and Location header without dispatcher invocation.
-- **Phase 13E Defect & Fencing Resolutions Applied During Final Audit**:
-  - **Defect 1 (TOCTOU RACE CONDITION DEFECT)**: Fixed critical race where idempotency record was previously inserted after execution dispatch. Replaced with database-backed atomic claim reservation acquired before execution creation or worker dispatch via Flyway V12 migration.
-  - **Defect 2 (SPRING CONTEXT INITIALIZATION DEFECT)**: Removed duplicate `@ExceptionHandler(IdempotencyFingerprintMismatchException.class)` method in `GlobalExceptionHandler.java` preventing ambiguous exception handler mapping failure on startup.
-  - **Defect 3 (TRANSACTION MANAGEMENT DEFECT)**: Added `@Transactional` annotation to modifying repository operations (`markExecutionTerminal`, `cleanupExpiredRecords()`, `cleanupExpiredRecords(cutoff)`) in `DefaultMigrationIdempotencyService.java` preventing `TransactionRequiredException`.
-  - **Defect 4 (UNICODE NFC NORMALIZATION DEFECT)**: Implemented explicit `Normalizer.normalize(..., Normalizer.Form.NFC)` in `CanonicalRequestFingerprinter.java` ensuring NFC and NFD strings produce identical fingerprints.
-  - **Defect 5 (REPLAY LOCATION HEADER FIDELITY DEFECT)**: Added `location_header` persistence in `migration_idempotency_keys` to ensure exact replay fidelity across typed and legacy submission endpoints.
-  - **Defect 6 (CHECKSTYLE UNUSED IMPORT DEFECT)**: Removed unused imports across all test suites (`MigrationIdempotencyPostgresIT`, `MigrationIdempotencyConcurrencyIT`, `MigrationIdempotencyApiTest`, `DefaultMigrationIdempotencyServiceTest`) ensuring 0 Checkstyle violations.
-  - **Defect 7 (CONFIGURATION COMPLETION DEFECT)**: Configured `migration.idempotency.cleanup-interval-ms` in `backend/src/main/resources/application.yml`.
-  - **Defect 8 (60-SECOND EXPIRY SPLIT-BRAIN & CLAIM FENCING)**: Eliminated split-brain vulnerability where slow external YouTube operations caused expired claim takeover. Implemented `claim_owner`, monotonic `claim_generation`, conditional completion/release throwing `StaleClaimOwnershipException`, and `renewClaim(...)` heartbeat lease extensions using PostgreSQL `clock_timestamp()`.
-  - **Defect 9 (CRASH AFTER PLAYLIST CREATION AMBIGUITY)**: Addressed crash between external YouTube playlist creation and `MigrationExecution` persistence. Categorized claim recovery into State A (pre-mutation: safe takeover), State B (external mutation started/playlist created: fails closed into reconciliation required condition preserving `destination_playlist_id`), and State C (execution persisted: recovers existing aggregate and delegates to Phase 13D scheduler).
-  - **Defect 10 (PHASE 13D SCHEDULER INTEGRATION)**: Verified recovered `QUEUED` executions are picked up canonically by `DurableMigrationScheduler.claimNextExecution()` without duplicate execution creation or bypassing durable scheduler leases/fencing.
+  - `SecurityConfig.java`: Injected `ApiIdempotencyFilter` after `AuthorizationFilter`, added `HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)`.
+  - `IdempotencyConfig.java`: Disabled servlet `FilterRegistrationBean` duplicate registration (`setEnabled(false)`).
+  - `MigrationIdempotencyRepository.java`: Added `insertPendingClaimDatabaseTime`, `isClaimActiveDatabaseTime`, `getDatabaseTime`, and `recoverClaimWithFencing`.
+  - `DefaultMigrationIdempotencyService.java`: Integrated database-time queries and fenced recovery.
+  - `IdempotencyClaimHeartbeatService.java`: Added bounded failure policy, failure counters, and fail-closed detection.
+  - `ClaimOwnershipContext.java`: Added `isOwnershipLost()` helper wired to `IdempotencyClaimHeartbeatService`.
+  - `ApiIdempotencyFilter.java`: Guarded `releaseClaim` and `completeClaim` against stale leaders with lost ownership.
+  - `DefaultApprovedMigrationOrchestrator.java`: Added pre-mutation and pre-initialization ownership loss checks.
+- **Comprehensive Unit & Integration Test Suites (95 Tests Total across 9 Suites)**:
+  - `CanonicalRequestFingerprinterTest` (14 unit tests): Canonical hashing, Unicode NFC determinism, sorting, duplicate preservation.
+  - `IdempotencyKeyValidatorTest` (7 unit tests): Length, blankness, printable ASCII validation.
+  - `IdempotencyClaimHeartbeatServiceTest` (7 unit tests): Zero-row renewal, transient exception, repeated failures fail-closed, failure counter reset on success, ownership loss propagation, scheduler shutdown.
+  - `ApiIdempotencyFilterTest` (14 unit tests): Header enforcement, user resolution, leader claim acquisition, replay caching, 409 mismatch, follower polling, lost ownership completion/release fencing.
+  - `DefaultMigrationIdempotencyServiceTest` (20 unit tests): Atomic claims, replay, mismatch, database-time evaluation, takeover, State B reconciliation-required, State C fenced recovery.
+  - `MigrationIdempotencyApiTest` (6 WebMvc tests): Typed submit 202, legacy submit, missing key 400, invalid key 400, mismatch 409.
+  - `MigrationIdempotencyAutoConfiguredMockMvcIT` (2 integration tests): Normal Spring Boot `@AutoConfigureMockMvc` filter ordering, claim precedes playlist creation, replay, 409 mismatch, anonymous 401 rejection.
+  - `MigrationIdempotencyConcurrencyIT` (6 integration tests): Pure auto-configured `MockMvc` concurrency: 8 concurrent identical submissions converge on 1 execution, 409 on different fingerprints, multi-user isolation, crash takeover, replay.
+  - `MigrationIdempotencyPostgresIT` (19 integration tests): Testcontainers PostgreSQL persistence, claim contention, terminal retention, cleanup sweeper, Tests A–J (including Test J for State C recovery fencing and stale generation rejection).
+- **Required Local Maven Verification Commands**:
+  1. Clean compile and Checkstyle: `.\mvnw.cmd clean test-compile`
+  2. Auto-configured MockMvc integration test: `.\mvnw.cmd test-compile failsafe:integration-test failsafe:verify "-Dit.test=MigrationIdempotencyAutoConfiguredMockMvcIT"`
+  3. Concurrency integration tests: `.\mvnw.cmd test-compile failsafe:integration-test failsafe:verify "-Dit.test=MigrationIdempotencyConcurrencyIT"`
+  4. PostgreSQL persistence and fencing integration tests: `.\mvnw.cmd test-compile failsafe:integration-test failsafe:verify "-Dit.test=MigrationIdempotencyPostgresIT"`
+  5. Focused unit tests: `.\mvnw.cmd "-Dtest=ApiIdempotencyFilterTest,MigrationIdempotencyApiTest,DefaultMigrationIdempotencyServiceTest,IdempotencyClaimHeartbeatServiceTest" test`
+  6. Full clean verification: `.\mvnw.cmd clean verify`
 
 ### Phase 13D-A (Durable Lease Foundation, Schema & Fencing Primitives) [COMPLETE & TESTED]
 - **Implemented Subsystem**: Delivered PostgreSQL schema migration, durable worker ownership, generational fencing, and track-level retry scheduling foundation (`V10__phase13d_durable_leases_and_retry_scheduling.sql`, `com.spotifyyoutube.migrator.migration.reliability.scheduling`).

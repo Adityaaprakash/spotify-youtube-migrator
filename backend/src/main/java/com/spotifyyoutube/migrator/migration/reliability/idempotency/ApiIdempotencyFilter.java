@@ -265,7 +265,8 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
                     userId,
                     idempotencyKey,
                     claimOwner,
-                    claimGeneration
+                    claimGeneration,
+                    claimHeartbeatService
             ));
             if (claimHeartbeatService != null) {
                 claimHeartbeatService.registerClaim(
@@ -316,10 +317,14 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
             } else {
                 // Non-2xx response or execution not created: release pending claim so client can retry
                 if (executionId == null) {
-                    try {
-                        idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
-                    } catch (StaleClaimOwnershipException ex) {
-                        log.warn("Stale leader unable to release claim for key {}: {}", idempotencyKey, ex.getMessage());
+                    if (claimHeartbeatService != null && claimRecordId != null && claimHeartbeatService.isOwnershipLost(claimRecordId)) {
+                        log.warn("Leader lost claim ownership; skipping release for key {}", idempotencyKey);
+                    } else {
+                        try {
+                            idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
+                        } catch (StaleClaimOwnershipException ex) {
+                            log.warn("Stale leader unable to release claim for key {}: {}", idempotencyKey, ex.getMessage());
+                        }
                     }
                 }
             }
@@ -327,10 +332,14 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
             wrappedResponse.copyBodyToResponse();
         } catch (Throwable ex) {
             if (!completed) {
-                try {
-                    idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
-                } catch (StaleClaimOwnershipException staleEx) {
-                    log.warn("Stale leader failed to release claim on error: {}", staleEx.getMessage());
+                if (claimHeartbeatService != null && claimRecordId != null && claimHeartbeatService.isOwnershipLost(claimRecordId)) {
+                    log.warn("Leader lost claim ownership; skipping release on error for key {}", idempotencyKey);
+                } else {
+                    try {
+                        idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
+                    } catch (StaleClaimOwnershipException staleEx) {
+                        log.warn("Stale leader failed to release claim on error: {}", staleEx.getMessage());
+                    }
                 }
             }
             throw ex;

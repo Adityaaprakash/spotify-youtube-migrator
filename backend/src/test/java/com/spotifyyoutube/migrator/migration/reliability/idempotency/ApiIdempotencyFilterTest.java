@@ -483,5 +483,61 @@ class ApiIdempotencyFilterTest {
         // Verify claim heartbeat was unregistered in finally block
         verify(claimHeartbeatService).unregisterClaim(recordId);
     }
+
+    @Test
+    @DisplayName("Leader that lost claim ownership during preparation does not complete or release claim")
+    void leaderClaimWithLostOwnership_doesNotCompleteOrReleaseClaim() throws ServletException, IOException {
+        ApiIdempotencyFilter filterWithHeartbeat = new ApiIdempotencyFilter(
+                idempotencyService,
+                fingerprinter,
+                reviewSessionRepository,
+                userService,
+                objectMapper,
+                claimHeartbeatService
+        );
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/migrations/submit");
+        request.addHeader("Idempotency-Key", idempotencyKey);
+        request.setContent("{\"reviewSessionId\":\"12345678-1234-1234-1234-123456789abc\"}".getBytes(StandardCharsets.UTF_8));
+        request.setContentType("application/json");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        when(userService.getUserByEmail(testUser.getEmail())).thenReturn(testUser);
+        when(fingerprinter.resolveFromPayload(any(), any(), any()))
+                .thenReturn(new CanonicalMigrationRequest(userId, "src", "target", List.of()));
+        when(fingerprinter.calculateFingerprint(any(CanonicalMigrationRequest.class)))
+                .thenReturn("v1:lostHash");
+
+        UUID recordId = UUID.randomUUID();
+        MigrationIdempotencyRecord pendingRecord = MigrationIdempotencyRecord.createPending(
+                userId, idempotencyKey, "v1:lostHash", null, null
+        );
+        ReflectionTestUtils.setField(pendingRecord, "id", recordId);
+        when(idempotencyService.acquireClaim(eq(userId), eq(idempotencyKey), eq("v1:lostHash"), any()))
+                .thenReturn(ClaimResult.acquired(pendingRecord, "lost-owner", 1L));
+
+        // Ownership lost detected during execution
+        when(claimHeartbeatService.isOwnershipLost(recordId)).thenReturn(true);
+
+        UUID executionId = UUID.randomUUID();
+        FilterChain chain = (req, res) -> {
+            if (res instanceof HttpServletResponse httpRes) {
+                httpRes.setStatus(HttpStatus.ACCEPTED.value());
+            }
+            res.setContentType("application/json");
+            res.getWriter().write("{\"executionId\":\"" + executionId + "\",\"status\":\"QUEUED\"}");
+        };
+
+        filterWithHeartbeat.doFilterInternal(request, response, chain);
+
+        // Fenced out: completeClaim must NEVER be called
+        verify(idempotencyService, never()).completeClaim(any(), any(), any(), anyLong(), any(), any(Integer.class), any(), any());
+        // releaseClaim must NEVER be called (cannot delete newer owner's claim)
+        verify(idempotencyService, never()).releaseClaim(any(), any(), any(), anyLong());
+
+        // Heartbeat unregistered cleanly
+        verify(claimHeartbeatService).unregisterClaim(recordId);
+    }
 }
 

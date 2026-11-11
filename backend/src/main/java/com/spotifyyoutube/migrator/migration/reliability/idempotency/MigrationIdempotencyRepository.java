@@ -144,6 +144,99 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
     );
 
     /**
+     * Atomically creates a new PENDING claim with lease expiration and heartbeat timestamps
+     * computed directly using PostgreSQL database wall-clock time (Phase 13E).
+     *
+     * @param id                 claim record ID
+     * @param userId             authenticated user ID
+     * @param idempotencyKey     client-provided idempotency key
+     * @param requestFingerprint canonical request fingerprint
+     * @param reviewSessionId    review session identifier (optional)
+     * @param claimOwner         winning leader ownership identity
+     * @param timeoutSeconds     lease duration in seconds
+     * @return 1 if successfully inserted, 0 otherwise
+     */
+    @Modifying
+    @Query(value = """
+            INSERT INTO migration_idempotency_keys (
+                id, user_id, idempotency_key, request_fingerprint,
+                review_session_id, status, claim_stage,
+                claim_owner, claim_generation,
+                created_at, heartbeat_at, claim_expires_at
+            ) VALUES (
+                :id, :userId, :idempotencyKey, :requestFingerprint,
+                :reviewSessionId, 'PENDING', 'ACQUIRED',
+                :claimOwner, 1,
+                clock_timestamp(), clock_timestamp(),
+                clock_timestamp() + (:timeoutSeconds * INTERVAL '1 second')
+            )
+            """, nativeQuery = true)
+    int insertPendingClaimDatabaseTime(
+            @Param("id") UUID id,
+            @Param("userId") UUID userId,
+            @Param("idempotencyKey") String idempotencyKey,
+            @Param("requestFingerprint") String requestFingerprint,
+            @Param("reviewSessionId") UUID reviewSessionId,
+            @Param("claimOwner") String claimOwner,
+            @Param("timeoutSeconds") long timeoutSeconds
+    );
+
+    /**
+     * Evaluates whether a PENDING claim's lease is currently active against PostgreSQL database time.
+     *
+     * @param id claim record ID
+     * @return true if claim_expires_at > clock_timestamp(), false otherwise
+     */
+    @Query(value = """
+            SELECT (claim_expires_at > clock_timestamp())
+            FROM migration_idempotency_keys
+            WHERE id = :id AND status = 'PENDING'
+            """, nativeQuery = true)
+    Boolean isClaimActiveDatabaseTime(@Param("id") UUID id);
+
+    /**
+     * Retrieves the authoritative current wall-clock timestamp from PostgreSQL.
+     *
+     * @return database timestamp
+     */
+    @Query(value = "SELECT clock_timestamp()", nativeQuery = true)
+    Instant getDatabaseTime();
+
+    /**
+     * Atomically recovers an expired PENDING claim in State C by linking it to an existing execution aggregate,
+     * protected by strict generation and status fencing (Phase 13E).
+     *
+     * @param id                 claim record ID
+     * @param expectedGeneration expected claim generation to fence against
+     * @param executionId        existing execution aggregate identifier
+     * @param responseStatus     HTTP response status
+     * @param responsePayload    serialized response payload
+     * @param locationHeader     Location header URL
+     * @return 1 if successfully recovered, 0 if fenced out by concurrent takeover
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE migration_idempotency_keys
+            SET status = 'COMPLETED',
+                execution_id = :executionId,
+                response_status = :responseStatus,
+                response_payload = :responsePayload,
+                location_header = :locationHeader,
+                claim_expires_at = NULL
+            WHERE id = :id
+              AND status = 'PENDING'
+              AND claim_generation = :expectedGeneration
+            """, nativeQuery = true)
+    int recoverClaimWithFencing(
+            @Param("id") UUID id,
+            @Param("expectedGeneration") long expectedGeneration,
+            @Param("executionId") UUID executionId,
+            @Param("responseStatus") int responseStatus,
+            @Param("responsePayload") String responsePayload,
+            @Param("locationHeader") String locationHeader
+    );
+
+    /**
      * Conditionally renews an active PENDING claim lease using PostgreSQL database wall-clock time (Phase 13E).
      * Requires exact match on {@code claim_owner} and {@code claim_generation}, and verifies that the lease
      * has not already expired or been taken over.

@@ -232,6 +232,12 @@ class DefaultMigrationIdempotencyServiceTest {
             when(repository.findByUserIdAndIdempotencyKey(userId, idempotencyKey))
                     .thenReturn(Optional.of(expired));
 
+            when(repository.recoverClaimWithFencing(eq(expired.getId()), eq(1L), eq(executionId), eq(202), any(), any()))
+                    .thenAnswer(inv -> {
+                        expired.markCompleted(executionId, 202, (String) inv.getArgument(4), (String) inv.getArgument(5));
+                        return 1;
+                    });
+
             ReviewSession mockSession = org.mockito.Mockito.mock(ReviewSession.class);
             when(mockSession.getId()).thenReturn(reviewSessionId);
 
@@ -250,8 +256,8 @@ class DefaultMigrationIdempotencyServiceTest {
             ClaimResult result = service.acquireClaim(userId, idempotencyKey, fingerprint, reviewSessionId);
 
             assertThat(result.isReplay()).isTrue();
-            verify(repository).completeClaim(
-                    eq(expired.getId()), eq(executionId), eq(202), any(), eq("/api/migrations/" + executionId + "/progress")
+            verify(repository).recoverClaimWithFencing(
+                    eq(expired.getId()), eq(1L), eq(executionId), eq(202), any(), eq("/api/migrations/" + executionId + "/progress")
             );
         }
 

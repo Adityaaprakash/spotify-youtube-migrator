@@ -15,7 +15,9 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Reco
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.reliability.idempotency.ClaimOwnershipContext;
 import com.spotifyyoutube.migrator.migration.reliability.idempotency.MigrationIdempotencyService;
+import com.spotifyyoutube.migrator.migration.reliability.idempotency.StaleClaimOwnershipException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -125,6 +127,15 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
         if (existing != null) {
             destinationPlaylistId = existing.destinationPlaylistId();
         } else {
+            ClaimOwnershipContext claimContext = ClaimOwnershipContext.get();
+            if (claimContext != null && claimContext.isOwnershipLost()) {
+                log.warn("Claim ownership lost prior to external mutation for key {}", claimContext.idempotencyKey());
+                throw new StaleClaimOwnershipException(
+                        claimContext.idempotencyKey(),
+                        claimContext.claimOwner(),
+                        claimContext.claimGeneration()
+                );
+            }
             log.info("Creating destination playlist on YouTube for review session {}", sessionId);
             DestinationPlaylistCreationResult playlistResult = playlistCreationService.createDestinationPlaylist(request, authenticatedUserId);
             destinationPlaylistId = playlistResult.destinationPlaylistId();
@@ -132,6 +143,15 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
         }
 
         // Step 4: Durable Execution Initialization (Phase 11E)
+        ClaimOwnershipContext claimContext = ClaimOwnershipContext.get();
+        if (claimContext != null && claimContext.isOwnershipLost()) {
+            log.warn("Claim ownership lost prior to execution initialization for key {}", claimContext.idempotencyKey());
+            throw new StaleClaimOwnershipException(
+                    claimContext.idempotencyKey(),
+                    claimContext.claimOwner(),
+                    claimContext.claimGeneration()
+            );
+        }
         InitializeExecutionRequest initReq = InitializeExecutionRequest.of(
                 sessionId,
                 destinationPlaylistId,
@@ -209,6 +229,16 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
             destinationPlaylistId = existing.destinationPlaylistId();
             destinationPlaylistUrl = existing.destinationPlaylistUrl();
         } else {
+            ClaimOwnershipContext queuedClaimContext = ClaimOwnershipContext.get();
+            if (queuedClaimContext != null && queuedClaimContext.isOwnershipLost()) {
+                log.warn("Claim ownership lost prior to external playlist creation for key {}", queuedClaimContext.idempotencyKey());
+                throw new StaleClaimOwnershipException(
+                        queuedClaimContext.idempotencyKey(),
+                        queuedClaimContext.claimOwner(),
+                        queuedClaimContext.claimGeneration()
+                );
+            }
+
             // Signal that external operation is starting to prevent blind retries across process crashes
             if (idempotencyService != null) {
                 idempotencyService.markExternalOperationStartedForSession(sessionId);
@@ -226,6 +256,15 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
         }
 
         // Step 4: Durable Execution Initialization in QUEUED status (Phase 12B)
+        ClaimOwnershipContext preInitContext = ClaimOwnershipContext.get();
+        if (preInitContext != null && preInitContext.isOwnershipLost()) {
+            log.warn("Claim ownership lost prior to execution initialization for key {}", preInitContext.idempotencyKey());
+            throw new StaleClaimOwnershipException(
+                    preInitContext.idempotencyKey(),
+                    preInitContext.claimOwner(),
+                    preInitContext.claimGeneration()
+            );
+        }
         InitializeExecutionRequest initReq = new InitializeExecutionRequest(
                 sessionId,
                 destinationPlaylistId,

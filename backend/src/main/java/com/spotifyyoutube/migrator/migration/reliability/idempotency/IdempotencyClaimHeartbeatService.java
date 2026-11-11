@@ -18,6 +18,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Service managing periodic, bounded claim lease heartbeats for active idempotency leader executions (Phase 13E).
@@ -31,11 +32,13 @@ public class IdempotencyClaimHeartbeatService {
 
     private static final Logger log = LoggerFactory.getLogger(IdempotencyClaimHeartbeatService.class);
     private static final long DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000L;
+    public static final int DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
 
     private final MigrationIdempotencyRepository repository;
     private final TransactionTemplate requiresNewTemplate;
     private final ScheduledExecutorService scheduler;
     private final long heartbeatIntervalMs;
+    private final int maxConsecutiveFailures;
     private final ConcurrentHashMap<UUID, ActiveClaimHeartbeatContext> activeClaims = new ConcurrentHashMap<>();
 
     @Autowired
@@ -43,7 +46,7 @@ public class IdempotencyClaimHeartbeatService {
             MigrationIdempotencyRepository repository,
             PlatformTransactionManager transactionManager
     ) {
-        this(repository, transactionManager, null, DEFAULT_HEARTBEAT_INTERVAL_MS);
+        this(repository, transactionManager, null, DEFAULT_HEARTBEAT_INTERVAL_MS, DEFAULT_MAX_CONSECUTIVE_FAILURES);
     }
 
     public IdempotencyClaimHeartbeatService(
@@ -52,12 +55,23 @@ public class IdempotencyClaimHeartbeatService {
             ScheduledExecutorService scheduler,
             long heartbeatIntervalMs
     ) {
+        this(repository, transactionManager, scheduler, heartbeatIntervalMs, DEFAULT_MAX_CONSECUTIVE_FAILURES);
+    }
+
+    public IdempotencyClaimHeartbeatService(
+            MigrationIdempotencyRepository repository,
+            PlatformTransactionManager transactionManager,
+            ScheduledExecutorService scheduler,
+            long heartbeatIntervalMs,
+            int maxConsecutiveFailures
+    ) {
         this.repository = Objects.requireNonNull(repository, "MigrationIdempotencyRepository must not be null");
         Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null");
         this.requiresNewTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
         this.heartbeatIntervalMs = heartbeatIntervalMs > 0 ? heartbeatIntervalMs : DEFAULT_HEARTBEAT_INTERVAL_MS;
+        this.maxConsecutiveFailures = maxConsecutiveFailures > 0 ? maxConsecutiveFailures : DEFAULT_MAX_CONSECUTIVE_FAILURES;
         if (scheduler != null) {
             this.scheduler = scheduler;
         } else {
@@ -170,6 +184,29 @@ public class IdempotencyClaimHeartbeatService {
         return activeClaims.size();
     }
 
+    /**
+     * Returns the count of consecutive renewal failures for a given claim.
+     *
+     * @param claimId claim record UUID
+     * @return consecutive failures count, or 0 if claim is not registered
+     */
+    public int getConsecutiveFailures(UUID claimId) {
+        if (claimId == null) {
+            return 0;
+        }
+        ActiveClaimHeartbeatContext context = activeClaims.get(claimId);
+        return context != null ? context.getConsecutiveFailures() : 0;
+    }
+
+    /**
+     * Returns the configured maximum consecutive renewal failures before failing closed.
+     *
+     * @return maximum consecutive failures threshold
+     */
+    public int getMaxConsecutiveFailures() {
+        return maxConsecutiveFailures;
+    }
+
     private boolean renewClaimHeartbeat(UUID claimId) {
         ActiveClaimHeartbeatContext context = activeClaims.get(claimId);
         if (context == null) {
@@ -192,6 +229,7 @@ public class IdempotencyClaimHeartbeatService {
             );
 
             if (rows != null && rows == 1) {
+                context.resetConsecutiveFailures();
                 log.debug("Heartbeat successfully renewed claim {} (gen {}) for owner {}",
                         claimId, context.claimGeneration(), context.claimOwner());
                 return true;
@@ -204,7 +242,17 @@ public class IdempotencyClaimHeartbeatService {
                 return false;
             }
         } catch (Exception ex) {
-            log.warn("Heartbeat renewal failed for claim {} due to exception: {}", claimId, ex.getMessage());
+            int failures = context.incrementConsecutiveFailures();
+            if (failures >= maxConsecutiveFailures) {
+                log.error("Heartbeat renewal failed {} consecutive times for claim {} (gen {}). "
+                                + "Failing closed: marking ownership lost.",
+                        failures, claimId, context.claimGeneration());
+                context.markOwnershipLost();
+                context.cancelFuture();
+            } else {
+                log.warn("Heartbeat renewal failed (attempt {}/{}) for claim {} due to exception: {}",
+                        failures, maxConsecutiveFailures, claimId, ex.getMessage());
+            }
             return false;
         }
     }
@@ -227,6 +275,7 @@ public class IdempotencyClaimHeartbeatService {
         private final long claimGeneration;
         private final Duration leaseDuration;
         private final AtomicBoolean ownershipLost = new AtomicBoolean(false);
+        private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
         private volatile ScheduledFuture<?> scheduledFuture;
 
         ActiveClaimHeartbeatContext(
@@ -275,6 +324,18 @@ public class IdempotencyClaimHeartbeatService {
 
         void markOwnershipLost() {
             ownershipLost.set(true);
+        }
+
+        int incrementConsecutiveFailures() {
+            return consecutiveFailures.incrementAndGet();
+        }
+
+        void resetConsecutiveFailures() {
+            consecutiveFailures.set(0);
+        }
+
+        int getConsecutiveFailures() {
+            return consecutiveFailures.get();
         }
 
         void setScheduledFuture(ScheduledFuture<?> future) {
