@@ -27,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -65,7 +66,7 @@ class DefaultMigrationIdempotencyServiceTest {
         fixedClock = Clock.fixed(baseTime, ZoneOffset.UTC);
         objectMapper = new ObjectMapper();
 
-        when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+        lenient().when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
         service = new DefaultMigrationIdempotencyService(
                 repository, executionRepository, transactionManager, fixedClock, objectMapper, claimHeartbeatService

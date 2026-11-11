@@ -1,7 +1,9 @@
 spring:
   datasource:
-    url: jdbc:tc:postgresql:16:///spotify_youtube_test?options=-c%20timezone=UTC
-    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+    url: ${TEST_DATABASE_URL:${DATABASE_URL:jdbc:tc:postgresql:16:///spotify_youtube_test?options=-c%20timezone=UTC}}
+    driver-class-name: ${TEST_DATABASE_DRIVER:org.testcontainers.jdbc.ContainerDatabaseDriver}
+    username: ${TEST_DATABASE_USERNAME:${DATABASE_USERNAME:postgres}}
+    password: ${TEST_DATABASE_PASSWORD:${DATABASE_PASSWORD:postgres}}
 
   jpa:
     hibernate:

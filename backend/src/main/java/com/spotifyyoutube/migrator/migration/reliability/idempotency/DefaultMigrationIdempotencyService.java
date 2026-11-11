@@ -79,7 +79,8 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
         if (userId == null || idempotencyKey == null || idempotencyKey.isBlank()) {
             return Optional.empty();
         }
-        return repository.findByUserIdAndIdempotencyKey(userId, idempotencyKey.trim());
+        String cleanKey = idempotencyKey.trim();
+        return requiresNewTemplate.execute(status -> repository.findByUserIdAndIdempotencyKey(userId, cleanKey));
     }
 
     @Override
@@ -96,7 +97,7 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
         String cleanKey = idempotencyKey.trim();
 
         // 1. Fast check for already completed or pending record
-        Optional<MigrationIdempotencyRecord> existingOpt = repository.findByUserIdAndIdempotencyKey(userId, cleanKey);
+        Optional<MigrationIdempotencyRecord> existingOpt = findExistingRecord(userId, cleanKey);
         if (existingOpt.isPresent()) {
             return evaluateExistingClaim(existingOpt.get(), cleanKey, requestFingerprint, reviewSessionId);
         }
@@ -119,8 +120,9 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
         } catch (DataIntegrityViolationException ex) {
             log.info("Concurrent key collision during claim for user {} on key {}. Evaluating existing.",
                     userId, cleanKey);
-            MigrationIdempotencyRecord winner = repository.findByUserIdAndIdempotencyKey(userId, cleanKey)
-                    .orElseThrow(() -> ex);
+            MigrationIdempotencyRecord winner = requiresNewTemplate.execute(status ->
+                    repository.findByUserIdAndIdempotencyKey(userId, cleanKey)
+            ).orElseThrow(() -> ex);
             return evaluateExistingClaim(winner, cleanKey, requestFingerprint, reviewSessionId);
         }
     }
@@ -199,8 +201,8 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
                 String location = "/api/migrations/" + execution.getId() + "/progress";
                 int status = execution.getStatus() == MigrationExecutionStatus.COMPLETED ? 200 : 202;
                 completeClaimInternal(existing.getId(), execution.getId(), status, payload, location);
-                MigrationIdempotencyRecord completed = repository.findByUserIdAndIdempotencyKey(
-                        existing.getUserId(), idempotencyKey
+                MigrationIdempotencyRecord completed = requiresNewTemplate.execute(statusTx ->
+                        repository.findByUserIdAndIdempotencyKey(existing.getUserId(), idempotencyKey)
                 ).orElse(existing);
                 return ClaimResult.replay(completed);
             }
@@ -499,7 +501,7 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
 
         // If pending, poll for winner
         for (int i = 0; i < 20; i++) {
-            Optional<MigrationIdempotencyRecord> opt = repository.findByUserIdAndIdempotencyKey(userId, cleanKey);
+            Optional<MigrationIdempotencyRecord> opt = findExistingRecord(userId, cleanKey);
             if (opt.isPresent() && opt.get().getStatus() == IdempotencyClaimStatus.COMPLETED) {
                 MigrationIdempotencyRecord rec = opt.get();
                 if (!rec.getRequestFingerprint().equals(requestFingerprint)) {
@@ -514,7 +516,7 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
                 break;
             }
         }
-        return repository.findByUserIdAndIdempotencyKey(userId, cleanKey)
+        return findExistingRecord(userId, cleanKey)
                 .orElseGet(() -> completeClaim(userId, cleanKey, executionId, responseStatus, responsePayload, null));
     }
 

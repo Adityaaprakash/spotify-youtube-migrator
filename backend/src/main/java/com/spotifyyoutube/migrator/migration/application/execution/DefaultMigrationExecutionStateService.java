@@ -294,13 +294,16 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 executionService,
                 musicDestination,
                 failureClassifier,
-                transactionManager,
+                new TransactionTemplate(
+                        Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null")
+                ),
                 null,
                 null,
                 null,
                 null
         );
     }
+
 
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,

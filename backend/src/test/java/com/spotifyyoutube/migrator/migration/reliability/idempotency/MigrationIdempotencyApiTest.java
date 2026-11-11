@@ -9,9 +9,12 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.MigrationController;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationSubmissionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RunMigrationApiRequest;
+import com.spotifyyoutube.migrator.migration.application.MigrationService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
+import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +31,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -129,7 +133,7 @@ class MigrationIdempotencyApiTest {
         MigrationExecutionSummary summary = new MigrationExecutionSummary(
                 executionId, reviewSessionId, MigrationExecutionStatus.QUEUED,
                 "dest-pl-1", "https://youtube.com/playlist?list=dest-pl-1",
-                10, 0, 0, 0, 0, 0, null, null
+                10, 0, 0, 0, 0, 0, null, null, 0L
         );
 
         when(jobDispatcher.dispatchMigration(any(), eq(userId))).thenReturn(summary);
@@ -160,7 +164,7 @@ class MigrationIdempotencyApiTest {
         MigrationExecutionSummary summary = new MigrationExecutionSummary(
                 executionId, reviewSessionId, MigrationExecutionStatus.QUEUED,
                 "dest-pl-1", "https://youtube.com/playlist?list=dest-pl-1",
-                15, 0, 0, 0, 0, 0, null, null
+                15, 0, 0, 0, 0, 0, null, null, 0L
         );
         when(jobDispatcher.dispatchMigration(any(), eq(userId))).thenReturn(summary);
 
@@ -178,7 +182,7 @@ class MigrationIdempotencyApiTest {
 
         verify(jobDispatcher).dispatchMigration(any(), eq(userId));
         verify(idempotencyService).completeClaim(
-                eq(userId), eq(key), eq(executionId), eq(202), any(), eq("/api/migrations/" + executionId + "/progress")
+                eq(userId), eq(key), any(), anyLong(), eq(executionId), eq(202), any(), eq("/api/migrations/" + executionId + "/progress")
         );
     }
 

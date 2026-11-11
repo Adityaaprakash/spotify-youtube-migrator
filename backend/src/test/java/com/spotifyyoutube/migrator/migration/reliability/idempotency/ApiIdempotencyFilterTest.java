@@ -7,6 +7,7 @@ import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -185,7 +187,9 @@ class ApiIdempotencyFilterTest {
             byte[] bytes = req.getInputStream().readAllBytes();
             assertThat(bytes).isNotEmpty();
 
-            res.setStatus(HttpStatus.ACCEPTED.value());
+            if (res instanceof HttpServletResponse httpRes) {
+                httpRes.setStatus(HttpStatus.ACCEPTED.value());
+            }
             res.setContentType("application/json");
             res.getWriter().write("{\"executionId\":\"" + executionId + "\",\"status\":\"QUEUED\"}");
         };
@@ -413,7 +417,9 @@ class ApiIdempotencyFilterTest {
                 .thenThrow(new StaleClaimOwnershipException(idempotencyKey, "stale-owner", 1L));
 
         FilterChain chain = (req, res) -> {
-            res.setStatus(HttpStatus.ACCEPTED.value());
+            if (res instanceof HttpServletResponse httpRes) {
+                httpRes.setStatus(HttpStatus.ACCEPTED.value());
+            }
             res.setContentType("application/json");
             res.getWriter().write("{\"executionId\":\"" + executionId + "\",\"status\":\"QUEUED\"}");
         };
@@ -449,16 +455,19 @@ class ApiIdempotencyFilterTest {
         when(fingerprinter.calculateFingerprint(any(CanonicalMigrationRequest.class)))
                 .thenReturn("v1:heartbeatHash");
 
+        UUID recordId = UUID.randomUUID();
         MigrationIdempotencyRecord pendingRecord = MigrationIdempotencyRecord.createPending(
                 userId, idempotencyKey, "v1:heartbeatHash", null, null
         );
-        UUID recordId = pendingRecord.getId();
+        ReflectionTestUtils.setField(pendingRecord, "id", recordId);
         when(idempotencyService.acquireClaim(eq(userId), eq(idempotencyKey), eq("v1:heartbeatHash"), any()))
                 .thenReturn(ClaimResult.acquired(pendingRecord, "hb-owner", 1L));
 
         UUID executionId = UUID.randomUUID();
         FilterChain chain = (req, res) -> {
-            res.setStatus(HttpStatus.ACCEPTED.value());
+            if (res instanceof HttpServletResponse httpRes) {
+                httpRes.setStatus(HttpStatus.ACCEPTED.value());
+            }
             res.setContentType("application/json");
             res.getWriter().write("{\"executionId\":\"" + executionId + "\",\"status\":\"QUEUED\"}");
         };

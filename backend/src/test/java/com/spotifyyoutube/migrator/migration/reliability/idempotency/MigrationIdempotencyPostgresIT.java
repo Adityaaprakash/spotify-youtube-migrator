@@ -24,12 +24,19 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
+import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
+import org.springframework.transaction.support.TransactionTemplate;
+
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -107,14 +114,7 @@ public class MigrationIdempotencyPostgresIT {
         userRepository.deleteAllInBatch();
     }
 
-    private MigrationExecution createExecution(User user, MigrationExecutionStatus status) {
-        ReviewSession session = reviewSessionRepository.save(new ReviewSession(
-                user,
-                "sp_pl_" + UUID.randomUUID(),
-                "Title " + UUID.randomUUID(),
-                UUID.randomUUID()
-        ));
-
+    private MigrationExecution createExecution(User user, ReviewSession session, MigrationExecutionStatus status) {
         ApprovedTrack track = new ApprovedTrack(
                 0, "sp_" + UUID.randomUUID(), "Song", "Artist",
                 "yt_" + UUID.randomUUID(), "Video", "Channel",
@@ -134,6 +134,16 @@ public class MigrationIdempotencyPostgresIT {
                 status
         );
         return executionRepository.save(exec);
+    }
+
+    private MigrationExecution createExecution(User user, MigrationExecutionStatus status) {
+        ReviewSession session = reviewSessionRepository.save(new ReviewSession(
+                user,
+                "sp_pl_" + UUID.randomUUID(),
+                "Title " + UUID.randomUUID(),
+                UUID.randomUUID()
+        ));
+        return createExecution(user, session, status);
     }
 
     @Test
@@ -569,6 +579,9 @@ public class MigrationIdempotencyPostgresIT {
     @Test
     @DisplayName("Test E — Queued execution recovery: recovered QUEUED execution delegates to Phase 13D scheduler safely")
     void testE_queuedExecutionRecovery_delegatesToSchedulerSafely() {
+        cleanDatabase();
+        testUser1 = userRepository.save(new User("idempotency-user-1@example.com"));
+
         String key = "test-e-recovery-005";
         String fp = "v1:testEFingerprint";
         ReviewSession session = reviewSessionRepository.save(
@@ -576,8 +589,7 @@ public class MigrationIdempotencyPostgresIT {
         );
 
         // 1. Create a QUEUED execution representing execution persisted before dispatcher crash
-        MigrationExecution queuedExec = createExecution(testUser1, MigrationExecutionStatus.QUEUED);
-        queuedExec.setReviewSession(session);
+        MigrationExecution queuedExec = createExecution(testUser1, session, MigrationExecutionStatus.QUEUED);
         executionRepository.saveAndFlush(queuedExec);
 
         // 2. Pre-insert an expired PENDING claim pointing to this session
@@ -752,8 +764,10 @@ public class MigrationIdempotencyPostgresIT {
         idempotencyRepository.saveAndFlush(record);
 
         // 3. Direct SQL takeover attempt must fail with 0 rows because claim_stage != 'ACQUIRED'
-        int sqlTakeoverRows = idempotencyRepository.takeOverClaimWithFencingDatabaseTime(
-                claimId, "contender-c", genA, 60L
+        int sqlTakeoverRows = new TransactionTemplate(transactionManager).execute(
+                status -> idempotencyRepository.takeOverClaimWithFencingDatabaseTime(
+                        claimId, "contender-c", genA, 60L
+                )
         );
         assertThat(sqlTakeoverRows).isEqualTo(0);
 

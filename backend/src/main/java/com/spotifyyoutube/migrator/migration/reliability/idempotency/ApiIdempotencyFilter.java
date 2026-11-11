@@ -14,23 +14,25 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Component;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.web.filter.OncePerRequestFilter;
 import org.springframework.web.util.ContentCachingResponseWrapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.Principal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+
 
 /**
  * Servlet filter providing transparent, distributed HTTP API idempotency for migration submission (Phase 13E).
@@ -48,8 +50,6 @@ import java.util.UUID;
  *   <li>Preserves the request stream for downstream Spring MVC controllers via {@link CachedBodyHttpServletRequest}</li>
  * </ul>
  */
-@Component
-@Order(Ordered.LOWEST_PRECEDENCE - 10)
 public class ApiIdempotencyFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(ApiIdempotencyFilter.class);
@@ -154,10 +154,20 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
 
         String idempotencyKey = rawKey.trim();
 
-        // 3. User Identity Resolution from Security Context
-        UUID userId = resolveAuthenticatedUserId();
+        // 3. User Identity Resolution from Security Context or Request
+        UUID userId = resolveAuthenticatedUserId(request);
         if (userId == null) {
-            // Unauthenticated request; delegate to Spring Security filter
+            if (isTypedSubmit) {
+                writeErrorResponse(
+                        response,
+                        request.getRequestURI(),
+                        HttpStatus.UNAUTHORIZED,
+                        ErrorCode.UNAUTHORIZED,
+                        "Authentication required for migration submission"
+                );
+                return;
+            }
+            // Optional key missing/unauthenticated on legacy endpoint; delegate to downstream
             filterChain.doFilter(request, response);
             return;
         }
@@ -403,12 +413,49 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
     }
 
     private UUID resolveAuthenticatedUserId() {
+        return resolveAuthenticatedUserId(null);
+    }
+
+    private UUID resolveAuthenticatedUserId(HttpServletRequest request) {
+        String identifier = null;
+
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equalsIgnoreCase(auth.getName())) {
+        if (auth != null) {
+            if (auth.isAuthenticated() && !"anonymousUser".equalsIgnoreCase(auth.getName())) {
+                identifier = auth.getName();
+            } else {
+                // Current security context is explicitly unauthenticated or anonymous;
+                // do not allow fallback to override the active security context
+                return null;
+            }
+        }
+
+        // Only fallback if SecurityContextHolder was uninitialized (e.g. MockMvc pre-filter execution)
+        if (identifier == null && request != null) {
+            Principal principal = request.getUserPrincipal();
+            if (principal != null) {
+                if (!"anonymousUser".equalsIgnoreCase(principal.getName())) {
+                    identifier = principal.getName();
+                } else {
+                    return null;
+                }
+            }
+        }
+
+        if (identifier == null && request != null) {
+            Object secContextObj = request.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
+            if (secContextObj instanceof SecurityContext secContext) {
+                Authentication ctxAuth = secContext.getAuthentication();
+                if (ctxAuth != null && ctxAuth.isAuthenticated() && !"anonymousUser".equalsIgnoreCase(ctxAuth.getName())) {
+                    identifier = ctxAuth.getName();
+                }
+            }
+        }
+
+        if (identifier == null || identifier.isBlank()) {
             return null;
         }
 
-        String identifier = auth.getName();
         try {
             User user = userService.getUserByEmail(identifier);
             return user.getId();

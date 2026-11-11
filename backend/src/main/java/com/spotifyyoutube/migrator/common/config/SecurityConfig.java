@@ -1,13 +1,17 @@
 package com.spotifyyoutube.migrator.common.config;
 
+import com.spotifyyoutube.migrator.migration.reliability.idempotency.ApiIdempotencyFilter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.web.SecurityFilterChain;
-
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
@@ -21,7 +25,10 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(
+            HttpSecurity http,
+            @Autowired(required = false) ApiIdempotencyFilter apiIdempotencyFilter
+    ) throws Exception {
         http
             // Use CookieCsrfTokenRepository for SPA architecture (React). 
             // It sends XSRF-TOKEN cookie which the frontend returns in X-XSRF-TOKEN header.
@@ -35,8 +42,15 @@ public class SecurityConfig {
                 // Actuator
                 .requestMatchers("/actuator/**").permitAll()
                 .anyRequest().authenticated()
+            )
+            .exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
             );
-        
+
+        if (apiIdempotencyFilter != null) {
+            http.addFilterAfter(apiIdempotencyFilter, AuthorizationFilter.class);
+        }
+
         return http.build();
     }
 }

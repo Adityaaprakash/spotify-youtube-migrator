@@ -8,15 +8,21 @@ import com.spotifyyoutube.migrator.identity.repository.UserRepository;
 import com.spotifyyoutube.migrator.migration.api.dto.RunMigrationApiRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.CreateDestinationPlaylistRequest;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
+import com.spotifyyoutube.migrator.migration.application.plan.PlanTrackClassification;
 import com.spotifyyoutube.migrator.migration.async.MigrationBackgroundWorker;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
+import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
+import com.spotifyyoutube.migrator.migration.review.domain.ReviewSessionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrack;
+import com.spotifyyoutube.migrator.migration.review.domain.ReviewTrackStatus;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewSessionRepository;
 import com.spotifyyoutube.migrator.migration.review.repository.ReviewTrackRepository;
+import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,8 +40,11 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -109,8 +118,8 @@ public class MigrationIdempotencyConcurrencyIT {
         testSession2 = createApprovedSession(testUser1, "Spotify Playlist 2");
 
         DestinationPlaylist mockPlaylist = new DestinationPlaylist(
-                "PL_mock_dest_123", "Target Playlist", "Description",
-                "https://music.youtube.com/playlist?list=PL_mock_dest_123", 0
+                "PL_mock_dest_123", "Target Playlist", "Description", "private",
+                "https://music.youtube.com/playlist?list=PL_mock_dest_123", Platform.YOUTUBE
         );
         when(musicDestination.createPlaylist(any(UUID.class), any(CreateDestinationPlaylistRequest.class)))
                 .thenReturn(mockPlaylist);
@@ -136,17 +145,22 @@ public class MigrationIdempotencyConcurrencyIT {
         ReviewSession session = new ReviewSession(
                 user, "sp_src_" + UUID.randomUUID(), title, UUID.randomUUID()
         );
-        session = reviewSessionRepository.save(session);
 
         ReviewTrack track = new ReviewTrack();
-        track.setReviewSession(session);
         track.setPosition(0);
         track.setSourceTrackId("sp_tr_001");
         track.setSourceTitle("Test Song");
         track.setSourceArtist("Test Artist");
+        track.setOriginalClassification(PlanTrackClassification.AUTO_MATCH);
+        track.setOriginalCandidateId("yt_cand_001");
         track.setSelectedCandidateId("yt_cand_001");
+        track.setReviewStatus(ReviewTrackStatus.ACCEPTED);
         track.setDecisionSource(ReviewDecisionSource.AUTOMATIC);
         track.setExcluded(false);
+
+        session.addTrack(track);
+        session.setStatus(ReviewSessionStatus.COMPLETED);
+        session = reviewSessionRepository.save(session);
         reviewTrackRepository.save(track);
 
         return session;
@@ -424,10 +438,11 @@ public class MigrationIdempotencyConcurrencyIT {
 
         // Pre-create an execution aggregate for testSession1
         MigrationExecution existingExecution = new MigrationExecution(
-                testUser1, testSession1, null, "PL_crashed_123",
+                testSession1, testUser1, "YOUTUBE", "PL_crashed_123",
                 "https://music.youtube.com/playlist?list=PL_crashed_123",
-                MigrationExecutionStatus.QUEUED
+                "Target Playlist", testSession1.getPlanId()
         );
+        existingExecution.setStatus(MigrationExecutionStatus.QUEUED);
         existingExecution = executionRepository.saveAndFlush(existingExecution);
 
         // Pre-insert an expired PENDING claim referencing testSession1
@@ -505,6 +520,76 @@ public class MigrationIdempotencyConcurrencyIT {
         assertThat(replayRes.getHeader(HttpHeaders.LOCATION)).isEqualTo(initialLocation);
 
         // Worker and playlist creation must NOT have been called twice!
+        verify(musicDestination, times(1)).createPlaylist(any(UUID.class), any(CreateDestinationPlaylistRequest.class));
+        verify(backgroundWorker, times(1)).processMigration(any(UUID.class), any(UUID.class));
+    }
+
+    @Test
+    @DisplayName("7. Focused test: Filter executes once, creates claim before controller, rejects conflict without controller, and replays without controller/dispatcher")
+    void filterExecution_verifiedWithRealIntegrationConfiguration() throws Exception {
+        String key = "focused-filter-key-007";
+        RunMigrationApiRequest req = new RunMigrationApiRequest(
+                testSession1.getId(), testUser1.getId(), null, "Target Playlist", null, true
+        );
+        String requestJson = objectMapper.writeValueAsString(req);
+
+        // 1. Initial valid submission
+        MockHttpServletResponse firstResponse = mockMvc.perform(
+                post("/api/migrations/submit")
+                        .with(csrf())
+                        .with(user(testUser1.getEmail()))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson)
+        ).andReturn().getResponse();
+
+        assertThat(firstResponse.getStatus()).isEqualTo(202);
+
+        // Assertion 1: Filter executes and creates claim record in database before completion
+        List<MigrationIdempotencyRecord> records = idempotencyRepository.findAll();
+        assertThat(records).hasSize(1);
+        MigrationIdempotencyRecord record = records.get(0);
+        assertThat(record.getStatus()).isEqualTo(IdempotencyClaimStatus.COMPLETED);
+        assertThat(record.getExecutionId()).isNotNull();
+
+        // Assertion 2: Destination playlist creation and worker dispatch invoked exactly once
+        verify(musicDestination, times(1)).createPlaylist(any(UUID.class), any(CreateDestinationPlaylistRequest.class));
+        verify(backgroundWorker, times(1)).processMigration(eq(record.getExecutionId()), eq(testUser1.getId()));
+
+        // 2. Conflicting submission with same key but different fingerprint
+        ReviewSession sessionOther = createApprovedSession(testUser1, "Conflicting Playlist");
+        RunMigrationApiRequest conflictingReq = new RunMigrationApiRequest(
+                sessionOther.getId(), testUser1.getId(), null, "Conflicting Target", null, true
+        );
+
+        MockHttpServletResponse conflictResponse = mockMvc.perform(
+                post("/api/migrations/submit")
+                        .with(csrf())
+                        .with(user(testUser1.getEmail()))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(conflictingReq))
+        ).andReturn().getResponse();
+
+        // Assertion 3: Controller and dispatcher are NOT invoked for conflicting fingerprint (returns 409)
+        assertThat(conflictResponse.getStatus()).isEqualTo(409);
+        assertThat(conflictResponse.getContentAsString()).contains(ErrorCode.IDEMPOTENCY_FINGERPRINT_MISMATCH.name());
+        verify(musicDestination, times(1)).createPlaylist(any(UUID.class), any(CreateDestinationPlaylistRequest.class));
+        verify(backgroundWorker, times(1)).processMigration(any(UUID.class), any(UUID.class));
+
+        // 3. Replay of original submission
+        MockHttpServletResponse replayResponse = mockMvc.perform(
+                post("/api/migrations/submit")
+                        .with(csrf())
+                        .with(user(testUser1.getEmail()))
+                        .header("Idempotency-Key", key)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestJson)
+        ).andReturn().getResponse();
+
+        // Assertion 4: Replay does NOT invoke controller or dispatcher again (returns cached 202)
+        assertThat(replayResponse.getStatus()).isEqualTo(202);
+        assertThat(replayResponse.getContentAsString()).isEqualTo(firstResponse.getContentAsString());
         verify(musicDestination, times(1)).createPlaylist(any(UUID.class), any(CreateDestinationPlaylistRequest.class));
         verify(backgroundWorker, times(1)).processMigration(any(UUID.class), any(UUID.class));
     }
