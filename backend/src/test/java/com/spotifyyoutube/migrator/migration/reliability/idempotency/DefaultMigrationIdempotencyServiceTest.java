@@ -44,6 +44,9 @@ class DefaultMigrationIdempotencyServiceTest {
     @Mock
     private PlatformTransactionManager transactionManager;
 
+    @Mock
+    private IdempotencyClaimHeartbeatService claimHeartbeatService;
+
     private Clock fixedClock;
     private Instant baseTime;
     private ObjectMapper objectMapper;
@@ -65,8 +68,9 @@ class DefaultMigrationIdempotencyServiceTest {
         when(transactionManager.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
 
         service = new DefaultMigrationIdempotencyService(
-                repository, executionRepository, transactionManager, fixedClock, objectMapper
+                repository, executionRepository, transactionManager, fixedClock, objectMapper, claimHeartbeatService
         );
+
 
         userId = UUID.fromString("11111111-1111-1111-1111-111111111111");
         otherUserId = UUID.fromString("22222222-2222-2222-2222-222222222222");
@@ -470,4 +474,100 @@ class DefaultMigrationIdempotencyServiceTest {
             assertThat(deleted).isZero();
         }
     }
+
+    @Nested
+    @DisplayName("Stage Transition and Fencing Tests")
+    class StageTransitionFencingTests {
+
+        @Test
+        @DisplayName("markExternalOperationStartedForSession with ClaimOwnershipContext updates stage with fencing")
+        void markExternalOperationStarted_withContext_success() {
+            UUID claimId = UUID.randomUUID();
+            ClaimOwnershipContext.set(new ClaimOwnershipContext(claimId, userId, idempotencyKey, "owner-1", 1L));
+
+            try {
+                when(repository.markExternalOperationStartedWithFencing(claimId, "owner-1", 1L))
+                        .thenReturn(1);
+
+                int rows = service.markExternalOperationStartedForSession(reviewSessionId);
+
+                assertThat(rows).isEqualTo(1);
+                verify(repository).markExternalOperationStartedWithFencing(claimId, "owner-1", 1L);
+            } finally {
+                ClaimOwnershipContext.clear();
+            }
+        }
+
+        @Test
+        @DisplayName("markExternalOperationStartedForSession throws StaleClaimOwnershipException when 0 rows updated")
+        void markExternalOperationStarted_staleContext_throwsStaleException() {
+            UUID claimId = UUID.randomUUID();
+            ClaimOwnershipContext.set(new ClaimOwnershipContext(claimId, userId, idempotencyKey, "stale-owner", 1L));
+
+            try {
+                when(repository.markExternalOperationStartedWithFencing(claimId, "stale-owner", 1L))
+                        .thenReturn(0);
+
+                assertThatThrownBy(() -> service.markExternalOperationStartedForSession(reviewSessionId))
+                        .isInstanceOf(StaleClaimOwnershipException.class);
+            } finally {
+                ClaimOwnershipContext.clear();
+            }
+        }
+
+        @Test
+        @DisplayName("markExternalOperationStartedForSession throws StaleClaimOwnershipException when heartbeat lost ownership")
+        void markExternalOperationStarted_heartbeatLostOwnership_throwsStaleException() {
+            UUID claimId = UUID.randomUUID();
+            ClaimOwnershipContext.set(new ClaimOwnershipContext(claimId, userId, idempotencyKey, "owner-1", 1L));
+
+            try {
+                when(claimHeartbeatService.isOwnershipLost(claimId)).thenReturn(true);
+
+                assertThatThrownBy(() -> service.markExternalOperationStartedForSession(reviewSessionId))
+                        .isInstanceOf(StaleClaimOwnershipException.class);
+
+                verify(repository, never()).markExternalOperationStartedWithFencing(any(), any(), anyLong());
+            } finally {
+                ClaimOwnershipContext.clear();
+            }
+        }
+
+        @Test
+        @DisplayName("recordDestinationPlaylistForSession with ClaimOwnershipContext updates playlist with fencing")
+        void recordDestinationPlaylist_withContext_success() {
+            UUID claimId = UUID.randomUUID();
+            ClaimOwnershipContext.set(new ClaimOwnershipContext(claimId, userId, idempotencyKey, "owner-1", 1L));
+
+            try {
+                when(repository.recordDestinationPlaylistWithFencing(claimId, "owner-1", 1L, "PL_youtube_123"))
+                        .thenReturn(1);
+
+                int rows = service.recordDestinationPlaylistForSession(reviewSessionId, "PL_youtube_123");
+
+                assertThat(rows).isEqualTo(1);
+                verify(repository).recordDestinationPlaylistWithFencing(claimId, "owner-1", 1L, "PL_youtube_123");
+            } finally {
+                ClaimOwnershipContext.clear();
+            }
+        }
+
+        @Test
+        @DisplayName("recordDestinationPlaylistForSession throws StaleClaimOwnershipException when 0 rows updated")
+        void recordDestinationPlaylist_staleContext_throwsStaleException() {
+            UUID claimId = UUID.randomUUID();
+            ClaimOwnershipContext.set(new ClaimOwnershipContext(claimId, userId, idempotencyKey, "stale-owner", 1L));
+
+            try {
+                when(repository.recordDestinationPlaylistWithFencing(claimId, "stale-owner", 1L, "PL_youtube_123"))
+                        .thenReturn(0);
+
+                assertThatThrownBy(() -> service.recordDestinationPlaylistForSession(reviewSessionId, "PL_youtube_123"))
+                        .isInstanceOf(StaleClaimOwnershipException.class);
+            } finally {
+                ClaimOwnershipContext.clear();
+            }
+        }
+    }
 }
+

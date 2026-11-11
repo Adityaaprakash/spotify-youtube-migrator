@@ -63,6 +63,17 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
     private final ReviewSessionRepository reviewSessionRepository;
     private final UserService userService;
     private final ObjectMapper objectMapper;
+    private final IdempotencyClaimHeartbeatService claimHeartbeatService;
+
+    public ApiIdempotencyFilter(
+            MigrationIdempotencyService idempotencyService,
+            CanonicalRequestFingerprinter fingerprinter,
+            ReviewSessionRepository reviewSessionRepository,
+            UserService userService,
+            ObjectMapper objectMapper
+    ) {
+        this(idempotencyService, fingerprinter, reviewSessionRepository, userService, objectMapper, null);
+    }
 
     @Autowired
     public ApiIdempotencyFilter(
@@ -70,14 +81,17 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
             CanonicalRequestFingerprinter fingerprinter,
             ReviewSessionRepository reviewSessionRepository,
             UserService userService,
-            @Autowired(required = false) ObjectMapper objectMapper
+            @Autowired(required = false) ObjectMapper objectMapper,
+            @Autowired(required = false) IdempotencyClaimHeartbeatService claimHeartbeatService
     ) {
         this.idempotencyService = Objects.requireNonNull(idempotencyService, "idempotencyService must not be null");
         this.fingerprinter = Objects.requireNonNull(fingerprinter, "fingerprinter must not be null");
         this.reviewSessionRepository = reviewSessionRepository;
         this.userService = Objects.requireNonNull(userService, "userService must not be null");
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+        this.claimHeartbeatService = claimHeartbeatService;
     }
+
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -231,8 +245,29 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
         // 7. Winning Leader Execution: Proceed Downstream with Fencing Tokens
         String claimOwner = claimResult.claimOwner();
         long claimGeneration = claimResult.claimGeneration();
+        UUID claimRecordId = claimResult.getRecord().map(MigrationIdempotencyRecord::getId).orElse(null);
         ContentCachingResponseWrapper wrappedResponse = new ContentCachingResponseWrapper(response);
         boolean completed = false;
+
+        if (claimRecordId != null) {
+            ClaimOwnershipContext.set(new ClaimOwnershipContext(
+                    claimRecordId,
+                    userId,
+                    idempotencyKey,
+                    claimOwner,
+                    claimGeneration
+            ));
+            if (claimHeartbeatService != null) {
+                claimHeartbeatService.registerClaim(
+                        claimRecordId,
+                        userId,
+                        idempotencyKey,
+                        claimOwner,
+                        claimGeneration,
+                        Duration.ofSeconds(60)
+                );
+            }
+        }
 
         try {
             filterChain.doFilter(wrappedRequest, wrappedResponse);
@@ -248,37 +283,55 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
             }
 
             if (responseStatus >= 200 && responseStatus < 300 && executionId != null) {
-                try {
-                    idempotencyService.completeClaim(
-                            userId,
-                            idempotencyKey,
-                            claimOwner,
-                            claimGeneration,
-                            executionId,
-                            responseStatus,
-                            responsePayload,
-                            locationHeader
-                    );
-                    completed = true;
-                } catch (StaleClaimOwnershipException ex) {
-                    log.warn("Stale leader fenced out during completion for key {}: attempted owner {}, gen {}",
-                            idempotencyKey, claimOwner, claimGeneration);
+                if (claimHeartbeatService != null && claimRecordId != null && claimHeartbeatService.isOwnershipLost(claimRecordId)) {
+                    log.warn("Leader lost claim ownership during preparation for key {}. Fencing out completion.", idempotencyKey);
+                } else {
+                    try {
+                        idempotencyService.completeClaim(
+                                userId,
+                                idempotencyKey,
+                                claimOwner,
+                                claimGeneration,
+                                executionId,
+                                responseStatus,
+                                responsePayload,
+                                locationHeader
+                        );
+                        completed = true;
+                    } catch (StaleClaimOwnershipException ex) {
+                        log.warn("Stale leader fenced out during completion for key {}: attempted owner {}, gen {}",
+                                idempotencyKey, claimOwner, claimGeneration);
+                    }
                 }
             } else {
                 // Non-2xx response or execution not created: release pending claim so client can retry
                 if (executionId == null) {
-                    idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
+                    try {
+                        idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
+                    } catch (StaleClaimOwnershipException ex) {
+                        log.warn("Stale leader unable to release claim for key {}: {}", idempotencyKey, ex.getMessage());
+                    }
                 }
             }
 
             wrappedResponse.copyBodyToResponse();
         } catch (Throwable ex) {
             if (!completed) {
-                idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
+                try {
+                    idempotencyService.releaseClaim(userId, idempotencyKey, claimOwner, claimGeneration);
+                } catch (StaleClaimOwnershipException staleEx) {
+                    log.warn("Stale leader failed to release claim on error: {}", staleEx.getMessage());
+                }
             }
             throw ex;
+        } finally {
+            if (claimHeartbeatService != null && claimRecordId != null) {
+                claimHeartbeatService.unregisterClaim(claimRecordId);
+            }
+            ClaimOwnershipContext.clear();
         }
     }
+
 
     private boolean pollAndReplay(
             UUID userId,

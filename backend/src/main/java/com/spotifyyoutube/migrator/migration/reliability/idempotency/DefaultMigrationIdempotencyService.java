@@ -43,6 +43,17 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
     private final TransactionTemplate requiresNewTemplate;
     private final Clock clock;
     private final ObjectMapper objectMapper;
+    private final IdempotencyClaimHeartbeatService claimHeartbeatService;
+
+    public DefaultMigrationIdempotencyService(
+            MigrationIdempotencyRepository repository,
+            MigrationExecutionRepository executionRepository,
+            PlatformTransactionManager transactionManager,
+            Clock clock,
+            ObjectMapper objectMapper
+    ) {
+        this(repository, executionRepository, transactionManager, clock, objectMapper, null);
+    }
 
     @Autowired
     public DefaultMigrationIdempotencyService(
@@ -50,7 +61,8 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
             @Autowired(required = false) MigrationExecutionRepository executionRepository,
             PlatformTransactionManager transactionManager,
             @Autowired(required = false) Clock clock,
-            @Autowired(required = false) ObjectMapper objectMapper
+            @Autowired(required = false) ObjectMapper objectMapper,
+            @Autowired(required = false) IdempotencyClaimHeartbeatService claimHeartbeatService
     ) {
         this.repository = Objects.requireNonNull(repository, "MigrationIdempotencyRepository must not be null");
         this.executionRepository = executionRepository;
@@ -59,6 +71,7 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.clock = clock != null ? clock : Clock.systemUTC();
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
+        this.claimHeartbeatService = claimHeartbeatService;
     }
 
     @Override
@@ -395,22 +408,63 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
     }
 
     @Override
-    @Transactional
     public int markExternalOperationStartedForSession(UUID reviewSessionId) {
         if (reviewSessionId == null) {
             return 0;
         }
-        return repository.markExternalOperationStartedForSession(reviewSessionId);
+
+        ClaimOwnershipContext ctx = ClaimOwnershipContext.get();
+        if (ctx != null) {
+            if (claimHeartbeatService != null && claimHeartbeatService.isOwnershipLost(ctx.claimId())) {
+                throw new StaleClaimOwnershipException(ctx.idempotencyKey(), ctx.claimOwner(), ctx.claimGeneration());
+            }
+
+            Integer updated = requiresNewTemplate.execute(status ->
+                    repository.markExternalOperationStartedWithFencing(
+                            ctx.claimId(), ctx.claimOwner(), ctx.claimGeneration()
+                    )
+            );
+            if (updated == null || updated == 0) {
+                throw new StaleClaimOwnershipException(ctx.idempotencyKey(), ctx.claimOwner(), ctx.claimGeneration());
+            }
+            return updated;
+        }
+
+        Integer updated = requiresNewTemplate.execute(status ->
+                repository.markExternalOperationStartedForSession(reviewSessionId)
+        );
+        return updated != null ? updated : 0;
     }
 
     @Override
-    @Transactional
     public int recordDestinationPlaylistForSession(UUID reviewSessionId, String destinationPlaylistId) {
         if (reviewSessionId == null || destinationPlaylistId == null) {
             return 0;
         }
-        return repository.recordDestinationPlaylistForSession(reviewSessionId, destinationPlaylistId);
+
+        ClaimOwnershipContext ctx = ClaimOwnershipContext.get();
+        if (ctx != null) {
+            if (claimHeartbeatService != null && claimHeartbeatService.isOwnershipLost(ctx.claimId())) {
+                throw new StaleClaimOwnershipException(ctx.idempotencyKey(), ctx.claimOwner(), ctx.claimGeneration());
+            }
+
+            Integer updated = requiresNewTemplate.execute(status ->
+                    repository.recordDestinationPlaylistWithFencing(
+                            ctx.claimId(), ctx.claimOwner(), ctx.claimGeneration(), destinationPlaylistId
+                    )
+            );
+            if (updated == null || updated == 0) {
+                throw new StaleClaimOwnershipException(ctx.idempotencyKey(), ctx.claimOwner(), ctx.claimGeneration());
+            }
+            return updated;
+        }
+
+        Integer updated = requiresNewTemplate.execute(status ->
+                repository.recordDestinationPlaylistForSession(reviewSessionId, destinationPlaylistId)
+        );
+        return updated != null ? updated : 0;
     }
+
 
     @Override
     public MigrationIdempotencyRecord recordSubmission(

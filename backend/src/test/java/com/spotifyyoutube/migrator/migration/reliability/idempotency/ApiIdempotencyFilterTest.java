@@ -52,8 +52,12 @@ class ApiIdempotencyFilterTest {
     @Mock
     private UserService userService;
 
+    @Mock
+    private IdempotencyClaimHeartbeatService claimHeartbeatService;
+
     private ObjectMapper objectMapper;
     private ApiIdempotencyFilter filter;
+
 
     private UUID userId;
     private User testUser;
@@ -419,4 +423,56 @@ class ApiIdempotencyFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(HttpStatus.ACCEPTED.value());
     }
+
+    @Test
+    @DisplayName("Leader execution registers and unregisters claim heartbeat service")
+    void leaderClaimWithHeartbeat_registersAndUnregistersHeartbeat() throws ServletException, IOException {
+        ApiIdempotencyFilter filterWithHeartbeat = new ApiIdempotencyFilter(
+                idempotencyService,
+                fingerprinter,
+                reviewSessionRepository,
+                userService,
+                objectMapper,
+                claimHeartbeatService
+        );
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/migrations/submit");
+        request.addHeader("Idempotency-Key", idempotencyKey);
+        request.setContent("{\"reviewSessionId\":\"12345678-1234-1234-1234-123456789abc\"}".getBytes(StandardCharsets.UTF_8));
+        request.setContentType("application/json");
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        when(userService.getUserByEmail(testUser.getEmail())).thenReturn(testUser);
+        when(fingerprinter.resolveFromPayload(any(), any(), any()))
+                .thenReturn(new CanonicalMigrationRequest(userId, "src", "target", List.of()));
+        when(fingerprinter.calculateFingerprint(any(CanonicalMigrationRequest.class)))
+                .thenReturn("v1:heartbeatHash");
+
+        MigrationIdempotencyRecord pendingRecord = MigrationIdempotencyRecord.createPending(
+                userId, idempotencyKey, "v1:heartbeatHash", null, null
+        );
+        UUID recordId = pendingRecord.getId();
+        when(idempotencyService.acquireClaim(eq(userId), eq(idempotencyKey), eq("v1:heartbeatHash"), any()))
+                .thenReturn(ClaimResult.acquired(pendingRecord, "hb-owner", 1L));
+
+        UUID executionId = UUID.randomUUID();
+        FilterChain chain = (req, res) -> {
+            res.setStatus(HttpStatus.ACCEPTED.value());
+            res.setContentType("application/json");
+            res.getWriter().write("{\"executionId\":\"" + executionId + "\",\"status\":\"QUEUED\"}");
+        };
+
+        filterWithHeartbeat.doFilterInternal(request, response, chain);
+
+        // Verify claim heartbeat was registered with recordId, owner, and generation
+        verify(claimHeartbeatService).registerClaim(eq(recordId), eq(userId), eq(idempotencyKey), eq("hb-owner"), eq(1L), any());
+
+        // Verify claim was completed
+        verify(idempotencyService).completeClaim(eq(userId), eq(idempotencyKey), eq("hb-owner"), eq(1L), eq(executionId), eq(202), any(), any());
+
+        // Verify claim heartbeat was unregistered in finally block
+        verify(claimHeartbeatService).unregisterClaim(recordId);
+    }
 }
+

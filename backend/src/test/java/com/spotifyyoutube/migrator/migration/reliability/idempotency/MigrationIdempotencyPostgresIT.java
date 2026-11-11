@@ -46,10 +46,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @ActiveProfiles("test")
-@Import({JpaConfig.class, DefaultMigrationIdempotencyService.class})
+@Import({JpaConfig.class, DefaultMigrationIdempotencyService.class, IdempotencyClaimHeartbeatService.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 @DisplayName("Phase 13E: API Idempotency PostgreSQL Integration Tests")
 public class MigrationIdempotencyPostgresIT {
+
 
     @Autowired
     private MigrationIdempotencyRepository idempotencyRepository;
@@ -612,4 +613,159 @@ public class MigrationIdempotencyPostgresIT {
         assertThat(schedulerClaim).isPresent();
         assertThat(schedulerClaim.get().executionId()).isEqualTo(queuedExec.getId());
     }
+
+    @Test
+    @DisplayName("Test F — Independent heartbeat renewal during a blocked external operation")
+    void testF_independentHeartbeatRenewal_duringBlockedExternalOperation() throws Exception {
+        String key = "test-f-heartbeat-blocked-006";
+        String fp = "v1:testFFingerprint";
+
+        // 1. Leader acquires claim
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        assertThat(claimA.isAcquired()).isTrue();
+        UUID claimId = claimA.getRecord().orElseThrow().getId();
+        String ownerA = claimA.claimOwner();
+        long genA = claimA.claimGeneration();
+
+        // 2. Set up heartbeat service with fast 50ms interval and 120s extension
+        IdempotencyClaimHeartbeatService heartbeatSvc = new IdempotencyClaimHeartbeatService(
+                idempotencyRepository, transactionManager, null, 50L
+        );
+
+        try {
+            // Register claim for background renewal
+            heartbeatSvc.registerClaim(claimId, testUser1.getId(), key, ownerA, genA, Duration.ofSeconds(120));
+
+            // Record initial database expiration timestamp
+            MigrationIdempotencyRecord initialRecord = idempotencyRepository.findById(claimId).orElseThrow();
+            Instant initialExpiresAt = initialRecord.getClaimExpiresAt();
+
+            // 3. Simulate caller blocked in external YouTube operation for 250ms
+            Thread.sleep(250);
+
+            // 4. Verify background heartbeat renewed the claim in PostgreSQL independently of caller thread
+            MigrationIdempotencyRecord renewedRecord = idempotencyRepository.findById(claimId).orElseThrow();
+            assertThat(renewedRecord.getHeartbeatAt()).isNotNull();
+            assertThat(renewedRecord.getClaimExpiresAt()).isAfter(initialExpiresAt);
+            assertThat(renewedRecord.getClaimOwner()).isEqualTo(ownerA);
+            assertThat(renewedRecord.getClaimGeneration()).isEqualTo(genA);
+        } finally {
+            heartbeatSvc.unregisterClaim(claimId);
+            heartbeatSvc.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("Test G — Heartbeat shutdown after ownership loss")
+    void testG_heartbeatShutdown_afterOwnershipLoss() {
+        String key = "test-g-heartbeat-shutdown-007";
+        String fp = "v1:testGFingerprint";
+
+        // 1. Leader acquires claim
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, null);
+        assertThat(claimA.isAcquired()).isTrue();
+        UUID claimId = claimA.getRecord().orElseThrow().getId();
+        String ownerA = claimA.claimOwner();
+        long genA = claimA.claimGeneration();
+
+        IdempotencyClaimHeartbeatService heartbeatSvc = new IdempotencyClaimHeartbeatService(
+                idempotencyRepository, transactionManager, null, 5000L
+        );
+
+        try {
+            heartbeatSvc.registerClaim(claimId, testUser1.getId(), key, ownerA, genA, Duration.ofSeconds(60));
+            assertThat(heartbeatSvc.isOwnershipLost(claimId)).isFalse();
+
+            // 2. Simulate takeover advancing generation in database to gen 2 by a new owner
+            MigrationIdempotencyRecord record = idempotencyRepository.findById(claimId).orElseThrow();
+            record.setClaimOwner("new-owner-b");
+            record.setClaimGeneration(2L);
+            idempotencyRepository.saveAndFlush(record);
+
+            // 3. Trigger heartbeat renewal directly
+            boolean renewed = heartbeatSvc.renewClaimDirectly(claimId);
+
+            // 4. Renewal must return false and mark ownership as lost
+            assertThat(renewed).isFalse();
+            assertThat(heartbeatSvc.isOwnershipLost(claimId)).isTrue();
+        } finally {
+            heartbeatSvc.unregisterClaim(claimId);
+            heartbeatSvc.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("Test H — Stale leader cannot record a playlist ID")
+    void testH_staleLeaderCannotRecordPlaylistId() {
+        String key = "test-h-stale-record-008";
+        String fp = "v1:testHFingerprint";
+        UUID sessionId = UUID.randomUUID();
+
+        // 1. Leader A acquires claim
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, sessionId);
+        assertThat(claimA.isAcquired()).isTrue();
+        UUID claimId = claimA.getRecord().orElseThrow().getId();
+        String ownerA = claimA.claimOwner();
+        long genA = claimA.claimGeneration();
+
+        // 2. Simulate takeover advancing generation to 2 by Leader B
+        MigrationIdempotencyRecord record = idempotencyRepository.findById(claimId).orElseThrow();
+        record.setClaimOwner("new-leader-b");
+        record.setClaimGeneration(2L);
+        idempotencyRepository.saveAndFlush(record);
+
+        // 3. Stale Leader A attempts to record playlist ID using old fencing token in ClaimOwnershipContext
+        ClaimOwnershipContext.set(new ClaimOwnershipContext(claimId, testUser1.getId(), key, ownerA, genA));
+        try {
+            assertThatThrownBy(() -> idempotencyService.recordDestinationPlaylistForSession(
+                    sessionId, "PL_stale_dest_456"
+            )).isInstanceOf(StaleClaimOwnershipException.class);
+        } finally {
+            ClaimOwnershipContext.clear();
+        }
+
+        // 4. Verify database record has NOT been updated with the stale leader's playlist ID
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
+        assertThat(recordInDb.getDestinationPlaylistId()).isNull();
+        assertThat(recordInDb.getClaimGeneration()).isEqualTo(2L);
+        assertThat(recordInDb.getClaimOwner()).isEqualTo("new-leader-b");
+    }
+
+    @Test
+    @DisplayName("Test I — State B cannot be taken over for another external mutation")
+    void testI_stateBCannotBeTakenOverForAnotherExternalMutation() {
+        String key = "test-i-state-b-takeover-009";
+        String fp = "v1:testIFingerprint";
+        UUID sessionId = UUID.randomUUID();
+
+        // 1. Leader A acquires claim and starts external operation (State B)
+        ClaimResult claimA = idempotencyService.acquireClaim(testUser1.getId(), key, fp, sessionId);
+        assertThat(claimA.isAcquired()).isTrue();
+        UUID claimId = claimA.getRecord().orElseThrow().getId();
+        long genA = claimA.claimGeneration();
+
+        idempotencyService.markExternalOperationStartedForSession(sessionId);
+
+        // 2. Simulate lease expiry in the past
+        MigrationIdempotencyRecord record = idempotencyRepository.findById(claimId).orElseThrow();
+        record.setClaimExpiresAt(Instant.now().minusSeconds(30));
+        idempotencyRepository.saveAndFlush(record);
+
+        // 3. Direct SQL takeover attempt must fail with 0 rows because claim_stage != 'ACQUIRED'
+        int sqlTakeoverRows = idempotencyRepository.takeOverClaimWithFencingDatabaseTime(
+                claimId, "contender-c", genA, 60L
+        );
+        assertThat(sqlTakeoverRows).isEqualTo(0);
+
+        // 4. Service-level acquireClaim attempt must fail closed into RECONCILIATION_REQUIRED
+        ClaimResult contenderClaim = idempotencyService.acquireClaim(testUser1.getId(), key, fp, sessionId);
+        assertThat(contenderClaim.isReconciliationRequired()).isTrue();
+        assertThat(contenderClaim.isAcquired()).isFalse();
+
+        // Verify the record is still owned by the original leader at gen 1, still in State B
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
+        assertThat(recordInDb.getClaimGeneration()).isEqualTo(genA);
+        assertThat(recordInDb.getClaimStage()).isEqualTo(MigrationIdempotencyRecord.STAGE_EXTERNAL_OPERATION_STARTED);
+    }
 }
+

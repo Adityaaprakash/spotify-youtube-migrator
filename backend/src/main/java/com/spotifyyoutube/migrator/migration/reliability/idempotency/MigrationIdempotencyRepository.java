@@ -131,6 +131,8 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
                 heartbeat_at = clock_timestamp()
             WHERE id = :id
               AND status = 'PENDING'
+              AND claim_stage = 'ACQUIRED'
+              AND destination_playlist_id IS NULL
               AND claim_generation = :expectedGeneration
               AND claim_expires_at <= clock_timestamp()
             """, nativeQuery = true)
@@ -267,6 +269,60 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
     );
 
     /**
+     * Marks the claim stage as EXTERNAL_OPERATION_STARTED protected by strict claim ownership,
+     * generation fencing, and active lease validity (Phase 13E).
+     *
+     * @param id              claim record ID
+     * @param claimOwner      expected leader ownership identity
+     * @param claimGeneration expected leader fencing generation
+     * @return number of records updated (1 if valid, 0 if stale or lease expired)
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE migration_idempotency_keys
+            SET claim_stage = 'EXTERNAL_OPERATION_STARTED'
+            WHERE id = :id
+              AND claim_owner = :claimOwner
+              AND claim_generation = :claimGeneration
+              AND status = 'PENDING'
+              AND claim_stage = 'ACQUIRED'
+              AND claim_expires_at > clock_timestamp()
+            """, nativeQuery = true)
+    int markExternalOperationStartedWithFencing(
+            @Param("id") UUID id,
+            @Param("claimOwner") String claimOwner,
+            @Param("claimGeneration") long claimGeneration
+    );
+
+    /**
+     * Records the created destination playlist ID protected by strict claim ownership,
+     * generation fencing, and active lease validity (Phase 13E).
+     *
+     * @param id                    claim record ID
+     * @param claimOwner            expected leader ownership identity
+     * @param claimGeneration       expected leader fencing generation
+     * @param destinationPlaylistId YouTube playlist ID
+     * @return number of records updated (1 if valid, 0 if stale or lease expired)
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE migration_idempotency_keys
+            SET destination_playlist_id = :destinationPlaylistId,
+                claim_stage = 'PLAYLIST_CREATED'
+            WHERE id = :id
+              AND claim_owner = :claimOwner
+              AND claim_generation = :claimGeneration
+              AND status = 'PENDING'
+              AND claim_expires_at > clock_timestamp()
+            """, nativeQuery = true)
+    int recordDestinationPlaylistWithFencing(
+            @Param("id") UUID id,
+            @Param("claimOwner") String claimOwner,
+            @Param("claimGeneration") long claimGeneration,
+            @Param("destinationPlaylistId") String destinationPlaylistId
+    );
+
+    /**
      * Marks the claim stage as EXTERNAL_OPERATION_STARTED for any active pending claim on the review session.
      *
      * @param reviewSessionId review session identifier
@@ -279,6 +335,7 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
             WHERE review_session_id = :reviewSessionId
               AND status = 'PENDING'
               AND claim_stage = 'ACQUIRED'
+              AND claim_expires_at > clock_timestamp()
             """, nativeQuery = true)
     int markExternalOperationStartedForSession(@Param("reviewSessionId") UUID reviewSessionId);
 
@@ -296,9 +353,11 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
                 claim_stage = 'PLAYLIST_CREATED'
             WHERE review_session_id = :reviewSessionId
               AND status = 'PENDING'
+              AND claim_expires_at > clock_timestamp()
             """, nativeQuery = true)
     int recordDestinationPlaylistForSession(
             @Param("reviewSessionId") UUID reviewSessionId,
             @Param("destinationPlaylistId") String destinationPlaylistId
     );
 }
+
