@@ -232,11 +232,12 @@ class DefaultMigrationIdempotencyServiceTest {
             when(repository.findByUserIdAndIdempotencyKey(userId, idempotencyKey))
                     .thenReturn(Optional.of(expired));
 
-            when(repository.recoverClaimWithFencing(eq(expired.getId()), eq(1L), eq(executionId), eq(202), any(), any()))
-                    .thenAnswer(inv -> {
-                        expired.markCompleted(executionId, 202, (String) inv.getArgument(4), (String) inv.getArgument(5));
-                        return 1;
-                    });
+            when(repository.recoverClaimWithFencing(
+                    eq(expired.getId()), any(), eq(1L), any(), eq(reviewSessionId), eq(executionId), eq(202), any(), any()
+            )).thenAnswer(inv -> {
+                expired.markCompleted(executionId, 202, (String) inv.getArgument(7), (String) inv.getArgument(8));
+                return 1;
+            });
 
             ReviewSession mockSession = org.mockito.Mockito.mock(ReviewSession.class);
             when(mockSession.getId()).thenReturn(reviewSessionId);
@@ -257,8 +258,38 @@ class DefaultMigrationIdempotencyServiceTest {
 
             assertThat(result.isReplay()).isTrue();
             verify(repository).recoverClaimWithFencing(
-                    eq(expired.getId()), eq(1L), eq(executionId), eq(202), any(), eq("/api/migrations/" + executionId + "/progress")
+                    eq(expired.getId()), any(), eq(1L), any(), eq(reviewSessionId), eq(executionId), eq(202), any(), eq("/api/migrations/" + executionId + "/progress")
             );
+        }
+
+        @Test
+        @DisplayName("Expired PENDING claim with execution belonging to different review session rejects State C recovery")
+        void acquireClaim_expiredPendingWithExecutionDifferentSession_rejectsRecovery() {
+            MigrationIdempotencyRecord expired = MigrationIdempotencyRecord.createPending(
+                    userId, idempotencyKey, fingerprint, reviewSessionId, baseTime.minusSeconds(10)
+            );
+
+            when(repository.findByUserIdAndIdempotencyKey(userId, idempotencyKey))
+                    .thenReturn(Optional.of(expired));
+
+            UUID differentSessionId = UUID.randomUUID();
+            ReviewSession mockDifferentSession = org.mockito.Mockito.mock(ReviewSession.class);
+            when(mockDifferentSession.getId()).thenReturn(differentSessionId);
+
+            MigrationExecution mockExecution = org.mockito.Mockito.mock(MigrationExecution.class);
+            when(mockExecution.getId()).thenReturn(executionId);
+            when(mockExecution.getReviewSession()).thenReturn(mockDifferentSession);
+
+            when(executionRepository.findByReviewSessionId(reviewSessionId))
+                    .thenReturn(Optional.of(mockExecution));
+            when(executionRepository.findById(executionId))
+                    .thenReturn(Optional.of(mockExecution));
+
+            ClaimResult result = service.acquireClaim(userId, idempotencyKey, fingerprint, reviewSessionId);
+
+            assertThat(result.isPending()).isTrue();
+            assertThat(result.isReplay()).isFalse();
+            verify(repository, never()).recoverClaimWithFencing(any(), any(), anyLong(), any(), any(), any(), anyInt(), any(), any());
         }
 
         @Test

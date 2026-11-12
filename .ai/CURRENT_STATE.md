@@ -58,37 +58,30 @@ Latest Pushed Commit: af88f3aa0df0230a5dfe14d9840c39391ea5a05c
   - `isClaimActiveDatabaseTime`: Evaluates `(claim_expires_at > clock_timestamp())` directly in PostgreSQL, falling back to local clock only in detached mock unit tests.
   - `takeOverClaimWithFencingDatabaseTime`: Enforces `claim_expires_at <= clock_timestamp()` and sets new expiry via `clock_timestamp() + (:timeoutSeconds * INTERVAL '1 second')`.
   - `renewClaimDatabaseTime`: Checks `claim_expires_at > clock_timestamp()` and extends expiry relative to `clock_timestamp()`.
-- **Heartbeat Bounded Failure Policy & Fail-Closed Resolution**:
-  - `IdempotencyClaimHeartbeatService`: Implements bounded failure policy with `DEFAULT_MAX_CONSECUTIVE_FAILURES = 3`.
-  - A zero-row renewal (lease expired, taken over, or completed) immediately marks ownership as lost and cancels future renewals.
-  - Transient database renewal exceptions increment consecutive failure counter. If failures reach `maxConsecutiveFailures` (45s window of 60s lease), service fails closed: marks ownership lost and cancels future renewals.
+- **Heartbeat Safe Lease Window Tracking & Fail-Closed Timing**:
+  - `IdempotencyClaimHeartbeatService`: Injects `Clock` with `DEFAULT_SAFETY_MARGIN = Duration.ofSeconds(15)`. Tracks `lastConfirmedRenewalTime` and enforces `safeLeaseWindow = leaseDuration - safetyMargin` (e.g. 45s for a 60s lease).
+  - Evaluates safe lease window on every query to `isOwnershipLost()` and during renewal attempts: if elapsed time since last confirmed renewal reaches or exceeds `safeLeaseWindow` (due to scheduler delay, task starvation, or hung DB query), ownership is immediately marked lost and scheduled renewals are cancelled, even if failure count has not reached 3.
+  - Preserves ownership across transient exceptions if elapsed time is safely within `safeLeaseWindow` and failures < 3.
+  - Deterministic clock-based boundary condition tests added in `IdempotencyClaimHeartbeatServiceTest` (zero sleep-based tests).
   - `ClaimOwnershipContext`: Propagates thread-local ownership and heartbeat service reference across downstream execution.
   - `DefaultApprovedMigrationOrchestrator`: Request thread checks `ClaimOwnershipContext.isOwnershipLost()` before external YouTube playlist creation and before queued execution initialization, throwing `StaleClaimOwnershipException` to prevent external side effects or duplicate worker dispatch.
   - `ApiIdempotencyFilter`: Checks `claimHeartbeatService.isOwnershipLost(...)` before completion and before release, guaranteeing a stale leader whose lease expired never completes or releases a claim owned by a newer leader.
   - Scheduler shutdown in `@PreDestroy` cancels all active scheduled futures and invokes `shutdownNow()`.
-- **Fenced Crash Recovery (State C)**:
-  - `MigrationIdempotencyRepository.recoverClaimWithFencing`: Atomic CAS update setting `status = 'COMPLETED'` conditioned on `status = 'PENDING' AND claim_generation = :expectedGeneration`.
-  - If a concurrent takeover or newer generation took over the claim during crash recovery, the recovery CAS updates 0 rows and the contending thread reloads without corrupting the newer owner's claim.
+- **Atomic Fenced Crash Recovery (State C)**:
+  - `MigrationIdempotencyRepository.recoverClaimWithFencing`: Full atomic CAS validating `id = :id`, `status = 'PENDING'`, `claim_generation = :expectedGeneration`, `claim_owner = :expectedOwner`, `claim_stage = :expectedStage`, `(execution_id IS NULL OR execution_id = :executionId)`, and `review_session_id = :expectedReviewSessionId`.
+  - `DefaultMigrationIdempotencyService.recoverExpiredClaim`: Validates review session ownership of discovered execution before CAS attempt. Rejects execution if it belongs to a different session.
+  - If a concurrent takeover, newer generation, or completion raced ahead, CAS returns 0 rows updated and the recovery contender reloads without corrupting the newer owner's claim or payload.
   - Reuses existing `MigrationExecution` without creating duplicate execution aggregates or dispatching duplicate background workers. Phase 13D `DurableMigrationScheduler` remains the recovery authority for queued executions.
-- **Components Created & Updated**:
-  - `SecurityConfig.java`: Injected `ApiIdempotencyFilter` after `AuthorizationFilter`, added `HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)`.
-  - `IdempotencyConfig.java`: Disabled servlet `FilterRegistrationBean` duplicate registration (`setEnabled(false)`).
-  - `MigrationIdempotencyRepository.java`: Added `insertPendingClaimDatabaseTime`, `isClaimActiveDatabaseTime`, `getDatabaseTime`, and `recoverClaimWithFencing`.
-  - `DefaultMigrationIdempotencyService.java`: Integrated database-time queries and fenced recovery.
-  - `IdempotencyClaimHeartbeatService.java`: Added bounded failure policy, failure counters, and fail-closed detection.
-  - `ClaimOwnershipContext.java`: Added `isOwnershipLost()` helper wired to `IdempotencyClaimHeartbeatService`.
-  - `ApiIdempotencyFilter.java`: Guarded `releaseClaim` and `completeClaim` against stale leaders with lost ownership.
-  - `DefaultApprovedMigrationOrchestrator.java`: Added pre-mutation and pre-initialization ownership loss checks.
-- **Comprehensive Unit & Integration Test Suites (95 Tests Total across 9 Suites)**:
+- **Comprehensive Unit & Integration Test Suites (105 Tests Total across 9 Suites)**:
   - `CanonicalRequestFingerprinterTest` (14 unit tests): Canonical hashing, Unicode NFC determinism, sorting, duplicate preservation.
   - `IdempotencyKeyValidatorTest` (7 unit tests): Length, blankness, printable ASCII validation.
-  - `IdempotencyClaimHeartbeatServiceTest` (7 unit tests): Zero-row renewal, transient exception, repeated failures fail-closed, failure counter reset on success, ownership loss propagation, scheduler shutdown.
+  - `IdempotencyClaimHeartbeatServiceTest` (12 unit tests): Deterministic timing, safe lease window boundary tests, transient exception tolerance, scheduler delay fail-closed, slow query fail-closed, renewal time advancement, zero-row renewal, repeated failures fail-closed, failure counter reset, ownership loss propagation, scheduler shutdown.
   - `ApiIdempotencyFilterTest` (14 unit tests): Header enforcement, user resolution, leader claim acquisition, replay caching, 409 mismatch, follower polling, lost ownership completion/release fencing.
-  - `DefaultMigrationIdempotencyServiceTest` (20 unit tests): Atomic claims, replay, mismatch, database-time evaluation, takeover, State B reconciliation-required, State C fenced recovery.
+  - `DefaultMigrationIdempotencyServiceTest` (21 unit tests): Atomic claims, replay, mismatch, database-time evaluation, takeover, State B reconciliation-required, State C fenced recovery, review session mismatch rejection.
   - `MigrationIdempotencyApiTest` (6 WebMvc tests): Typed submit 202, legacy submit, missing key 400, invalid key 400, mismatch 409.
   - `MigrationIdempotencyAutoConfiguredMockMvcIT` (2 integration tests): Normal Spring Boot `@AutoConfigureMockMvc` filter ordering, claim precedes playlist creation, replay, 409 mismatch, anonymous 401 rejection.
   - `MigrationIdempotencyConcurrencyIT` (6 integration tests): Pure auto-configured `MockMvc` concurrency: 8 concurrent identical submissions converge on 1 execution, 409 on different fingerprints, multi-user isolation, crash takeover, replay.
-  - `MigrationIdempotencyPostgresIT` (19 integration tests): Testcontainers PostgreSQL persistence, claim contention, terminal retention, cleanup sweeper, Tests A–J (including Test J for State C recovery fencing and stale generation rejection).
+  - `MigrationIdempotencyPostgresIT` (23 integration tests): Testcontainers PostgreSQL persistence, claim contention, terminal retention, cleanup sweeper, Tests A–J (including Tests J1 through J5 for State C recovery CAS: contending threads, stale generation rejection, session mismatch rejection, race with completion rejection, and execution ID preservation).
 - **Required Local Maven Verification Commands**:
   1. Clean compile and Checkstyle: `.\mvnw.cmd clean test-compile`
   2. Auto-configured MockMvc integration test: `.\mvnw.cmd test-compile failsafe:integration-test failsafe:verify "-Dit.test=MigrationIdempotencyAutoConfiguredMockMvcIT"`

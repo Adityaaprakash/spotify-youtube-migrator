@@ -783,25 +783,24 @@ public class MigrationIdempotencyPostgresIT {
     }
 
     @Test
-    @DisplayName("Test J — Competing State C recovery attempts preserve generation fencing and reject stale generation")
-    void testJ_competingRecoveryAttempts_preserveFencingAndRejectStaleGeneration() {
+    @DisplayName("Test J1 — Two recovery contenders using the same generation: atomic CAS ensures exactly one winner")
+    void testJ1_twoRecoveryContenders_sameGeneration_onlyOneWins() {
         cleanDatabase();
-        testUser1 = userRepository.save(new User("idempotency-user-j@example.com"));
+        testUser1 = userRepository.save(new User("idempotency-user-j1@example.com"));
 
-        String key = "test-j-fenced-recovery-010";
-        String fp = "v1:testJFingerprint";
+        String key = "test-j1-two-contenders";
+        String fp = "v1:testJ1Fingerprint";
         ReviewSession session = reviewSessionRepository.save(
-                new ReviewSession(testUser1, "src-playlist-j", "Source J", null)
+                new ReviewSession(testUser1, "src-playlist-j1", "Source J1", null)
         );
 
         MigrationExecution queuedExec = createExecution(testUser1, session, MigrationExecutionStatus.QUEUED);
         executionRepository.saveAndFlush(queuedExec);
 
-        // Pre-insert an expired PENDING claim at generation 1
         MigrationIdempotencyRecord expiredClaim = new MigrationIdempotencyRecord(
                 testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
                 null, null, null, null, session.getId(),
-                "stale-owner-j", 1L, Instant.now().minusSeconds(100), null,
+                "stale-owner-j1", 1L, Instant.now().minusSeconds(100), null,
                 MigrationIdempotencyRecord.STAGE_ACQUIRED,
                 Instant.now().minusSeconds(100),
                 Instant.now().minusSeconds(10),
@@ -810,36 +809,231 @@ public class MigrationIdempotencyPostgresIT {
         idempotencyRepository.saveAndFlush(expiredClaim);
         UUID claimId = expiredClaim.getId();
 
-        // 1. Contender A executes fenced recovery with expectedGeneration = 1
+        // Contender A attempts recovery CAS at generation 1
         int updatedA = new TransactionTemplate(transactionManager).execute(status ->
                 idempotencyRepository.recoverClaimWithFencing(
-                        claimId, 1L, queuedExec.getId(), 202, "{\"recovered\":true}", "/api/migrations/progress"
+                        claimId, "stale-owner-j1", 1L, MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                        session.getId(), queuedExec.getId(), 202, "{\"winner\":\"contenderA\"}", "/api/migrations/progress"
                 )
         );
         assertThat(updatedA).isEqualTo(1);
 
-        // 2. Competing Contender B executes recovery with the same expectedGeneration = 1
-        // Since status is now COMPLETED, the atomic CAS condition (status = 'PENDING') rejects it with 0 rows
+        // Contender B attempts recovery CAS at the same generation 1
         int updatedB = new TransactionTemplate(transactionManager).execute(status ->
                 idempotencyRepository.recoverClaimWithFencing(
-                        claimId, 1L, queuedExec.getId(), 202, "{\"recovered\":true}", "/api/migrations/progress"
+                        claimId, "stale-owner-j1", 1L, MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                        session.getId(), queuedExec.getId(), 202, "{\"winner\":\"contenderB\"}", "/api/migrations/progress"
                 )
         );
+        // Contender B is fenced out because status is now COMPLETED
         assertThat(updatedB).isEqualTo(0);
 
-        // 3. Contender C with mismatched/stale generation (e.g. 0L or 2L) is also rejected with 0 rows
-        int updatedC = new TransactionTemplate(transactionManager).execute(status ->
-                idempotencyRepository.recoverClaimWithFencing(
-                        claimId, 2L, queuedExec.getId(), 202, "{\"recovered\":true}", "/api/migrations/progress"
-                )
-        );
-        assertThat(updatedC).isEqualTo(0);
-
-        // 4. Verify the database record remains completed by Contender A
         MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
         assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.COMPLETED);
+        assertThat(recordInDb.getResponsePayload()).isEqualTo("{\"winner\":\"contenderA\"}");
         assertThat(recordInDb.getExecutionId()).isEqualTo(queuedExec.getId());
-        assertThat(recordInDb.getClaimGeneration()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("Test J2 — Stale generation attempting recovery after takeover is rejected")
+    void testJ2_staleGeneration_attemptingRecoveryAfterTakeover_rejected() {
+        cleanDatabase();
+        testUser1 = userRepository.save(new User("idempotency-user-j2@example.com"));
+
+        String key = "test-j2-stale-generation";
+        String fp = "v1:testJ2Fingerprint";
+        ReviewSession session = reviewSessionRepository.save(
+                new ReviewSession(testUser1, "src-playlist-j2", "Source J2", null)
+        );
+
+        MigrationExecution queuedExec = createExecution(testUser1, session, MigrationExecutionStatus.QUEUED);
+        executionRepository.saveAndFlush(queuedExec);
+
+        MigrationIdempotencyRecord expiredClaim = new MigrationIdempotencyRecord(
+                testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
+                null, null, null, null, session.getId(),
+                "stale-owner-j2", 1L, Instant.now().minusSeconds(100), null,
+                MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                Instant.now().minusSeconds(100),
+                Instant.now().minusSeconds(10),
+                null
+        );
+        idempotencyRepository.saveAndFlush(expiredClaim);
+        UUID claimId = expiredClaim.getId();
+
+        // Simulate takeover by a new leader: increments generation from 1 to 2
+        int takeoverRows = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.takeOverClaimWithFencingDatabaseTime(
+                        claimId, "new-leader-j2", 1L, 60L
+                )
+        );
+        assertThat(takeoverRows).isEqualTo(1);
+
+        // Stale recovery thread attempts recovery with generation 1
+        int staleRecoveryRows = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, "stale-owner-j2", 1L, MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                        session.getId(), queuedExec.getId(), 202, "{\"recovered\":true}", "/api/migrations/progress"
+                )
+        );
+        assertThat(staleRecoveryRows).isEqualTo(0);
+
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
+        assertThat(recordInDb.getClaimGeneration()).isEqualTo(2L);
+        assertThat(recordInDb.getClaimOwner()).isEqualTo("new-leader-j2");
+    }
+
+    @Test
+    @DisplayName("Test J3 — Execution belonging to a different review session is rejected by State C recovery")
+    void testJ3_executionBelongingToDifferentReviewSession_rejected() {
+        cleanDatabase();
+        testUser1 = userRepository.save(new User("idempotency-user-j3@example.com"));
+
+        String key = "test-j3-different-session";
+        String fp = "v1:testJ3Fingerprint";
+        ReviewSession sessionA = reviewSessionRepository.save(
+                new ReviewSession(testUser1, "src-playlist-j3a", "Source J3A", null)
+        );
+        ReviewSession sessionB = reviewSessionRepository.save(
+                new ReviewSession(testUser1, "src-playlist-j3b", "Source J3B", null)
+        );
+
+        // Execution belongs to session B
+        MigrationExecution execB = createExecution(testUser1, sessionB, MigrationExecutionStatus.QUEUED);
+        executionRepository.saveAndFlush(execB);
+
+        // Claim belongs to session A
+        MigrationIdempotencyRecord expiredClaim = new MigrationIdempotencyRecord(
+                testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
+                null, null, null, null, sessionA.getId(),
+                "owner-j3", 1L, Instant.now().minusSeconds(100), null,
+                MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                Instant.now().minusSeconds(100),
+                Instant.now().minusSeconds(10),
+                null
+        );
+        idempotencyRepository.saveAndFlush(expiredClaim);
+        UUID claimId = expiredClaim.getId();
+
+        // 1. Direct repository CAS with mismatched reviewSessionId is rejected with 0 rows
+        int casRows = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, "owner-j3", 1L, MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                        sessionB.getId(), execB.getId(), 202, "{}", "/progress"
+                )
+        );
+        assertThat(casRows).isEqualTo(0);
+
+        // 2. Service-level acquireClaim when execution belongs to different review session
+        ClaimResult result = idempotencyService.acquireClaim(testUser1.getId(), key, fp, sessionA.getId());
+        assertThat(result.isPending()).isTrue();
+        assertThat(result.isReplay()).isFalse();
+
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
+        assertThat(recordInDb.getExecutionId()).isNull();
+    }
+
+    @Test
+    @DisplayName("Test J4 — Claim completed between execution discovery and recovery CAS is rejected")
+    void testJ4_claimCompletedBetweenDiscoveryAndRecoveryCas_rejected() {
+        cleanDatabase();
+        testUser1 = userRepository.save(new User("idempotency-user-j4@example.com"));
+
+        String key = "test-j4-race-completion";
+        String fp = "v1:testJ4Fingerprint";
+        ReviewSession session = reviewSessionRepository.save(
+                new ReviewSession(testUser1, "src-playlist-j4", "Source J4", null)
+        );
+
+        MigrationExecution exec = createExecution(testUser1, session, MigrationExecutionStatus.QUEUED);
+        executionRepository.saveAndFlush(exec);
+
+        MigrationIdempotencyRecord claim = new MigrationIdempotencyRecord(
+                testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
+                null, null, null, null, session.getId(),
+                "leader-j4", 1L, Instant.now().minusSeconds(100), null,
+                MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                Instant.now().minusSeconds(100),
+                Instant.now().minusSeconds(10),
+                null
+        );
+        idempotencyRepository.saveAndFlush(claim);
+        UUID claimId = claim.getId();
+
+        // Leader finishes and completes claim first
+        int completedRows = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.completeClaimWithFencing(
+                        claimId, "leader-j4", 1L, exec.getId(), 200, "{\"initial\":\"completed\"}", "/api/progress"
+                )
+        );
+        assertThat(completedRows).isEqualTo(1);
+
+        // Contender runs recovery CAS after claim was completed
+        int recoveryRows = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, "leader-j4", 1L, MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                        session.getId(), exec.getId(), 202, "{\"overwritten\":true}", "/api/progress"
+                )
+        );
+        assertThat(recoveryRows).isEqualTo(0);
+
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.COMPLETED);
+        assertThat(recordInDb.getResponsePayload()).isEqualTo("{\"initial\":\"completed\"}");
+    }
+
+    @Test
+    @DisplayName("Test J5 — Successful State C recovery preserves existing execution ID")
+    void testJ5_successfulStateCRecovery_preservesExistingExecutionId() {
+        cleanDatabase();
+        testUser1 = userRepository.save(new User("idempotency-user-j5@example.com"));
+
+        String key = "test-j5-preserve-execution";
+        String fp = "v1:testJ5Fingerprint";
+        ReviewSession session = reviewSessionRepository.save(
+                new ReviewSession(testUser1, "src-playlist-j5", "Source J5", null)
+        );
+
+        MigrationExecution existingExec = createExecution(testUser1, session, MigrationExecutionStatus.QUEUED);
+        executionRepository.saveAndFlush(existingExec);
+
+        // Pre-insert claim with execution_id already populated
+        MigrationIdempotencyRecord claimWithExec = new MigrationIdempotencyRecord(
+                testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
+                existingExec.getId(), null, null, null, session.getId(),
+                "owner-j5", 1L, Instant.now().minusSeconds(100), null,
+                MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                Instant.now().minusSeconds(100),
+                Instant.now().minusSeconds(10),
+                null
+        );
+        idempotencyRepository.saveAndFlush(claimWithExec);
+        UUID claimId = claimWithExec.getId();
+
+        // Recovery CAS with the matching executionId succeeds
+        int updated = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, "owner-j5", 1L, MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                        session.getId(), existingExec.getId(), 202, "{\"recovered\":true}", "/api/progress"
+                )
+        );
+        assertThat(updated).isEqualTo(1);
+
+        MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
+        assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.COMPLETED);
+        assertThat(recordInDb.getExecutionId()).isEqualTo(existingExec.getId());
+
+        // A second attempt with a different execution ID would be rejected by CAS
+        UUID randomOtherExecId = UUID.randomUUID();
+        int mismatchedExecUpdated = new TransactionTemplate(transactionManager).execute(status ->
+                idempotencyRepository.recoverClaimWithFencing(
+                        claimId, "owner-j5", 1L, MigrationIdempotencyRecord.STAGE_ACQUIRED,
+                        session.getId(), randomOtherExecId, 202, "{}", "/progress"
+                )
+        );
+        assertThat(mismatchedExecUpdated).isEqualTo(0);
     }
 }
 

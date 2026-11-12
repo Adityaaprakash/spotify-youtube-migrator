@@ -202,8 +202,10 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
 
         // State C: Check if an execution aggregate was already created before crash
         UUID execId = existing.getExecutionId();
-        if (execId == null && reviewSessionId != null && executionRepository != null) {
-            Optional<MigrationExecution> bySession = executionRepository.findByReviewSessionId(reviewSessionId);
+        UUID expectedReviewSessionId = existing.getReviewSessionId() != null ? existing.getReviewSessionId() : reviewSessionId;
+
+        if (execId == null && expectedReviewSessionId != null && executionRepository != null) {
+            Optional<MigrationExecution> bySession = executionRepository.findByReviewSessionId(expectedReviewSessionId);
             if (bySession.isPresent()) {
                 execId = bySession.get().getId();
             }
@@ -213,10 +215,19 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
             Optional<MigrationExecution> execOpt = executionRepository.findById(execId);
             if (execOpt.isPresent()) {
                 MigrationExecution execution = execOpt.get();
+
+                // Review session ownership check: discovered MigrationExecution must belong to the same review_session_id
+                UUID executionSessionId = execution.getReviewSession() != null ? execution.getReviewSession().getId() : null;
+                if (expectedReviewSessionId != null && (executionSessionId == null || !expectedReviewSessionId.equals(executionSessionId))) {
+                    log.warn("State C recovery rejected: execution {} belongs to review session {}, but claim requires session {}",
+                            execution.getId(), executionSessionId, expectedReviewSessionId);
+                    return ClaimResult.pending(existing);
+                }
+
                 log.info("State C: Recovering existing execution {} for expired claim {}", execution.getId(), idempotencyKey);
                 MigrationSubmissionResponse responseDto = new MigrationSubmissionResponse(
                         execution.getId(),
-                        execution.getReviewSession().getId(),
+                        execution.getReviewSession() != null ? execution.getReviewSession().getId() : null,
                         execution.getStatus(),
                         "/api/migrations/" + execution.getId() + "/progress",
                         "Migration request accepted and queued for background processing",
@@ -234,7 +245,15 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
                 int status = execution.getStatus() == MigrationExecutionStatus.COMPLETED ? 200 : 202;
                 long expectedGen = existing.getClaimGeneration();
                 int recovered = completeClaimWithFencingInternal(
-                        existing.getId(), expectedGen, execution.getId(), status, payload, location
+                        existing.getId(),
+                        existing.getClaimOwner(),
+                        expectedGen,
+                        existing.getClaimStage(),
+                        expectedReviewSessionId,
+                        execution.getId(),
+                        status,
+                        payload,
+                        location
                 );
                 if (recovered == 0) {
                     log.warn("State C recovery fenced out for claim {} (gen {}): concurrent takeover occurred",
@@ -300,7 +319,10 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
 
     private int completeClaimWithFencingInternal(
             UUID recordId,
+            String expectedOwner,
             long expectedGeneration,
+            String expectedStage,
+            UUID expectedReviewSessionId,
             UUID executionId,
             int responseStatus,
             String responsePayload,
@@ -309,7 +331,15 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
         Integer updated = requiresNewTemplate.execute(status -> {
             try {
                 return repository.recoverClaimWithFencing(
-                        recordId, expectedGeneration, executionId, responseStatus, responsePayload, locationHeader
+                        recordId,
+                        expectedOwner,
+                        expectedGeneration,
+                        expectedStage,
+                        expectedReviewSessionId,
+                        executionId,
+                        responseStatus,
+                        responsePayload,
+                        locationHeader
                 );
             } catch (Exception ex) {
                 // In mock unit tests where recoverClaimWithFencing is not stubbed, fallback to completeClaim

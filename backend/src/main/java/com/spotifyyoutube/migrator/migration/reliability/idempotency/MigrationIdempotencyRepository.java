@@ -204,15 +204,18 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
 
     /**
      * Atomically recovers an expired PENDING claim in State C by linking it to an existing execution aggregate,
-     * protected by strict generation and status fencing (Phase 13E).
+     * protected by strict generation, owner, stage, session, and execution fencing (Phase 13E).
      *
-     * @param id                 claim record ID
-     * @param expectedGeneration expected claim generation to fence against
-     * @param executionId        existing execution aggregate identifier
-     * @param responseStatus     HTTP response status
-     * @param responsePayload    serialized response payload
-     * @param locationHeader     Location header URL
-     * @return 1 if successfully recovered, 0 if fenced out by concurrent takeover
+     * @param id                      claim record ID
+     * @param expectedOwner           expected leader ownership identity (optional)
+     * @param expectedGeneration      expected claim generation to fence against
+     * @param expectedStage           expected claim stage (optional)
+     * @param expectedReviewSessionId expected review session identifier (optional)
+     * @param executionId             existing execution aggregate identifier
+     * @param responseStatus          HTTP response status
+     * @param responsePayload         serialized response payload
+     * @param locationHeader          Location header URL
+     * @return 1 if successfully recovered, 0 if fenced out by concurrent takeover or mismatch
      */
     @Modifying
     @Query(value = """
@@ -226,10 +229,17 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
             WHERE id = :id
               AND status = 'PENDING'
               AND claim_generation = :expectedGeneration
+              AND (CAST(:expectedOwner AS varchar) IS NULL OR claim_owner = :expectedOwner)
+              AND (CAST(:expectedStage AS varchar) IS NULL OR claim_stage = :expectedStage)
+              AND (execution_id IS NULL OR execution_id = :executionId)
+              AND (CAST(:expectedReviewSessionId AS uuid) IS NULL OR review_session_id IS NULL OR review_session_id = :expectedReviewSessionId)
             """, nativeQuery = true)
     int recoverClaimWithFencing(
             @Param("id") UUID id,
+            @Param("expectedOwner") String expectedOwner,
             @Param("expectedGeneration") long expectedGeneration,
+            @Param("expectedStage") String expectedStage,
+            @Param("expectedReviewSessionId") UUID expectedReviewSessionId,
             @Param("executionId") UUID executionId,
             @Param("responseStatus") int responseStatus,
             @Param("responsePayload") String responsePayload,

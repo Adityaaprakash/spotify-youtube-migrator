@@ -9,7 +9,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,10 +35,13 @@ public class IdempotencyClaimHeartbeatService {
     private static final Logger log = LoggerFactory.getLogger(IdempotencyClaimHeartbeatService.class);
     private static final long DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000L;
     public static final int DEFAULT_MAX_CONSECUTIVE_FAILURES = 3;
+    public static final Duration DEFAULT_SAFETY_MARGIN = Duration.ofSeconds(15);
 
     private final MigrationIdempotencyRepository repository;
     private final TransactionTemplate requiresNewTemplate;
     private final ScheduledExecutorService scheduler;
+    private final Clock clock;
+    private final Duration safetyMargin;
     private final long heartbeatIntervalMs;
     private final int maxConsecutiveFailures;
     private final ConcurrentHashMap<UUID, ActiveClaimHeartbeatContext> activeClaims = new ConcurrentHashMap<>();
@@ -44,9 +49,17 @@ public class IdempotencyClaimHeartbeatService {
     @Autowired
     public IdempotencyClaimHeartbeatService(
             MigrationIdempotencyRepository repository,
+            PlatformTransactionManager transactionManager,
+            @Autowired(required = false) Clock clock
+    ) {
+        this(repository, transactionManager, null, clock, DEFAULT_HEARTBEAT_INTERVAL_MS, DEFAULT_MAX_CONSECUTIVE_FAILURES, DEFAULT_SAFETY_MARGIN);
+    }
+
+    public IdempotencyClaimHeartbeatService(
+            MigrationIdempotencyRepository repository,
             PlatformTransactionManager transactionManager
     ) {
-        this(repository, transactionManager, null, DEFAULT_HEARTBEAT_INTERVAL_MS, DEFAULT_MAX_CONSECUTIVE_FAILURES);
+        this(repository, transactionManager, null, null, DEFAULT_HEARTBEAT_INTERVAL_MS, DEFAULT_MAX_CONSECUTIVE_FAILURES, DEFAULT_SAFETY_MARGIN);
     }
 
     public IdempotencyClaimHeartbeatService(
@@ -55,7 +68,7 @@ public class IdempotencyClaimHeartbeatService {
             ScheduledExecutorService scheduler,
             long heartbeatIntervalMs
     ) {
-        this(repository, transactionManager, scheduler, heartbeatIntervalMs, DEFAULT_MAX_CONSECUTIVE_FAILURES);
+        this(repository, transactionManager, scheduler, null, heartbeatIntervalMs, DEFAULT_MAX_CONSECUTIVE_FAILURES, DEFAULT_SAFETY_MARGIN);
     }
 
     public IdempotencyClaimHeartbeatService(
@@ -65,11 +78,26 @@ public class IdempotencyClaimHeartbeatService {
             long heartbeatIntervalMs,
             int maxConsecutiveFailures
     ) {
+        this(repository, transactionManager, scheduler, null, heartbeatIntervalMs, maxConsecutiveFailures, DEFAULT_SAFETY_MARGIN);
+    }
+
+    public IdempotencyClaimHeartbeatService(
+            MigrationIdempotencyRepository repository,
+            PlatformTransactionManager transactionManager,
+            ScheduledExecutorService scheduler,
+            Clock clock,
+            long heartbeatIntervalMs,
+            int maxConsecutiveFailures,
+            Duration safetyMargin
+    ) {
         this.repository = Objects.requireNonNull(repository, "MigrationIdempotencyRepository must not be null");
         Objects.requireNonNull(transactionManager, "PlatformTransactionManager must not be null");
         this.requiresNewTemplate = new TransactionTemplate(transactionManager);
         this.requiresNewTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
+        this.clock = clock != null ? clock : Clock.systemUTC();
+        this.safetyMargin = (safetyMargin != null && !safetyMargin.isNegative() && !safetyMargin.isZero())
+                ? safetyMargin : DEFAULT_SAFETY_MARGIN;
         this.heartbeatIntervalMs = heartbeatIntervalMs > 0 ? heartbeatIntervalMs : DEFAULT_HEARTBEAT_INTERVAL_MS;
         this.maxConsecutiveFailures = maxConsecutiveFailures > 0 ? maxConsecutiveFailures : DEFAULT_MAX_CONSECUTIVE_FAILURES;
         if (scheduler != null) {
@@ -114,7 +142,9 @@ public class IdempotencyClaimHeartbeatService {
                 idempotencyKey,
                 claimOwner,
                 claimGeneration,
-                duration
+                duration,
+                clock.instant(),
+                safetyMargin
         );
 
         ActiveClaimHeartbeatContext existing = activeClaims.put(claimId, context);
@@ -130,8 +160,8 @@ public class IdempotencyClaimHeartbeatService {
         );
         context.setScheduledFuture(future);
 
-        log.debug("Registered claim heartbeat for claim {} (gen {}) by owner '{}' with interval {}ms",
-                claimId, claimGeneration, claimOwner, heartbeatIntervalMs);
+        log.debug("Registered claim heartbeat for claim {} (gen {}) by owner '{}' with interval {}ms (safe window: {}s)",
+                claimId, claimGeneration, claimOwner, heartbeatIntervalMs, context.getSafeLeaseWindow().toSeconds());
     }
 
     /**
@@ -151,7 +181,8 @@ public class IdempotencyClaimHeartbeatService {
     }
 
     /**
-     * Checks whether lease ownership was detected as lost during a previous heartbeat attempt.
+     * Checks whether lease ownership was detected as lost during a previous heartbeat attempt
+     * or because the elapsed time since the last confirmed renewal has exceeded the safe lease window.
      *
      * @param claimId claim record UUID
      * @return true if claim was registered and lost ownership, false otherwise
@@ -161,7 +192,7 @@ public class IdempotencyClaimHeartbeatService {
             return false;
         }
         ActiveClaimHeartbeatContext context = activeClaims.get(claimId);
-        return context != null && context.isOwnershipLost();
+        return context != null && context.isOwnershipLost(clock.instant());
     }
 
     /**
@@ -207,13 +238,42 @@ public class IdempotencyClaimHeartbeatService {
         return maxConsecutiveFailures;
     }
 
+    /**
+     * Returns the last successfully confirmed renewal timestamp for a given claim.
+     *
+     * @param claimId claim record UUID
+     * @return last confirmed renewal instant, or null if claim is not registered
+     */
+    public Instant getLastConfirmedRenewalTime(UUID claimId) {
+        if (claimId == null) {
+            return null;
+        }
+        ActiveClaimHeartbeatContext context = activeClaims.get(claimId);
+        return context != null ? context.getLastConfirmedRenewalTime() : null;
+    }
+
+    /**
+     * Returns the safe lease window before which a leader must mark ownership lost.
+     *
+     * @param claimId claim record UUID
+     * @return safe lease window duration, or null if claim is not registered
+     */
+    public Duration getSafeLeaseWindow(UUID claimId) {
+        if (claimId == null) {
+            return null;
+        }
+        ActiveClaimHeartbeatContext context = activeClaims.get(claimId);
+        return context != null ? context.getSafeLeaseWindow() : null;
+    }
+
     private boolean renewClaimHeartbeat(UUID claimId) {
         ActiveClaimHeartbeatContext context = activeClaims.get(claimId);
         if (context == null) {
             return false;
         }
 
-        if (context.isOwnershipLost()) {
+        Instant now = clock.instant();
+        if (context.isOwnershipLost(now)) {
             context.cancelFuture();
             return false;
         }
@@ -229,6 +289,7 @@ public class IdempotencyClaimHeartbeatService {
             );
 
             if (rows != null && rows == 1) {
+                context.setLastConfirmedRenewalTime(clock.instant());
                 context.resetConsecutiveFailures();
                 log.debug("Heartbeat successfully renewed claim {} (gen {}) for owner {}",
                         claimId, context.claimGeneration(), context.claimOwner());
@@ -243,15 +304,24 @@ public class IdempotencyClaimHeartbeatService {
             }
         } catch (Exception ex) {
             int failures = context.incrementConsecutiveFailures();
-            if (failures >= maxConsecutiveFailures) {
-                log.error("Heartbeat renewal failed {} consecutive times for claim {} (gen {}). "
+            Instant failureTime = clock.instant();
+            boolean elapsedExpired = Duration.between(context.getLastConfirmedRenewalTime(), failureTime)
+                    .compareTo(context.getSafeLeaseWindow()) >= 0;
+
+            if (failures >= maxConsecutiveFailures || elapsedExpired) {
+                log.error("Heartbeat renewal failed (consecutive failures: {}, elapsed: {}s, safe window: {}s) for claim {} (gen {}). "
                                 + "Failing closed: marking ownership lost.",
-                        failures, claimId, context.claimGeneration());
+                        failures,
+                        Duration.between(context.getLastConfirmedRenewalTime(), failureTime).toSeconds(),
+                        context.getSafeLeaseWindow().toSeconds(),
+                        claimId, context.claimGeneration());
                 context.markOwnershipLost();
                 context.cancelFuture();
             } else {
-                log.warn("Heartbeat renewal failed (attempt {}/{}) for claim {} due to exception: {}",
-                        failures, maxConsecutiveFailures, claimId, ex.getMessage());
+                log.warn("Heartbeat renewal failed (attempt {}/{}, elapsed: {}s) for claim {} due to exception: {}",
+                        failures, maxConsecutiveFailures,
+                        Duration.between(context.getLastConfirmedRenewalTime(), failureTime).toSeconds(),
+                        claimId, ex.getMessage());
             }
             return false;
         }
@@ -274,8 +344,10 @@ public class IdempotencyClaimHeartbeatService {
         private final String claimOwner;
         private final long claimGeneration;
         private final Duration leaseDuration;
+        private final Duration safeLeaseWindow;
         private final AtomicBoolean ownershipLost = new AtomicBoolean(false);
         private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
+        private volatile Instant lastConfirmedRenewalTime;
         private volatile ScheduledFuture<?> scheduledFuture;
 
         ActiveClaimHeartbeatContext(
@@ -284,7 +356,9 @@ public class IdempotencyClaimHeartbeatService {
                 String idempotencyKey,
                 String claimOwner,
                 long claimGeneration,
-                Duration leaseDuration
+                Duration leaseDuration,
+                Instant initialConfirmedTime,
+                Duration safetyMargin
         ) {
             this.claimId = claimId;
             this.userId = userId;
@@ -292,6 +366,12 @@ public class IdempotencyClaimHeartbeatService {
             this.claimOwner = claimOwner;
             this.claimGeneration = claimGeneration;
             this.leaseDuration = leaseDuration;
+            this.lastConfirmedRenewalTime = Objects.requireNonNull(initialConfirmedTime, "initialConfirmedTime must not be null");
+            if (leaseDuration.compareTo(safetyMargin) > 0) {
+                this.safeLeaseWindow = leaseDuration.minus(safetyMargin);
+            } else {
+                this.safeLeaseWindow = leaseDuration.dividedBy(2);
+            }
         }
 
         UUID claimId() {
@@ -318,8 +398,28 @@ public class IdempotencyClaimHeartbeatService {
             return leaseDuration;
         }
 
-        boolean isOwnershipLost() {
-            return ownershipLost.get();
+        Duration getSafeLeaseWindow() {
+            return safeLeaseWindow;
+        }
+
+        Instant getLastConfirmedRenewalTime() {
+            return lastConfirmedRenewalTime;
+        }
+
+        void setLastConfirmedRenewalTime(Instant instant) {
+            this.lastConfirmedRenewalTime = instant;
+        }
+
+        boolean isOwnershipLost(Instant now) {
+            if (ownershipLost.get()) {
+                return true;
+            }
+            if (now != null && Duration.between(lastConfirmedRenewalTime, now).compareTo(safeLeaseWindow) >= 0) {
+                markOwnershipLost();
+                cancelFuture();
+                return true;
+            }
+            return false;
         }
 
         void markOwnershipLost() {

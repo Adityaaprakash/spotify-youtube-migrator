@@ -201,4 +201,158 @@ class IdempotencyClaimHeartbeatServiceTest {
         assertThat(heartbeatService.getActiveClaimCount()).isEqualTo(0);
         assertThat(scheduler.isShutdown()).isTrue();
     }
+
+    @Test
+    @DisplayName("Deterministic timing: transient failure within safe lease window does not lose ownership")
+    void timing_transientFailureWithinSafeLeaseWindow_doesNotLoseOwnership() {
+        MutableClock clock = new MutableClock(java.time.Instant.parse("2026-11-12T12:00:00Z"));
+        IdempotencyClaimHeartbeatService clockHeartbeatService = new IdempotencyClaimHeartbeatService(
+                repository, transactionManager, scheduler, clock, 15_000L, 3, Duration.ofSeconds(15)
+        );
+
+        clockHeartbeatService.registerClaim(claimId, userId, idempotencyKey, claimOwner, claimGeneration, Duration.ofSeconds(60));
+        assertThat(clockHeartbeatService.getSafeLeaseWindow(claimId)).isEqualTo(Duration.ofSeconds(45));
+
+        // Advance 15 seconds (well within the 45s safe lease window)
+        clock.advance(Duration.ofSeconds(15));
+        when(repository.renewClaimDatabaseTime(eq(claimId), eq(claimOwner), eq(claimGeneration), anyLong()))
+                .thenThrow(new DataAccessResourceFailureException("Transient connection reset"));
+
+        boolean renewed = clockHeartbeatService.renewClaimDirectly(claimId);
+
+        assertThat(renewed).isFalse();
+        assertThat(clockHeartbeatService.getConsecutiveFailures(claimId)).isEqualTo(1);
+        assertThat(clockHeartbeatService.isOwnershipLost(claimId)).isFalse();
+    }
+
+    @Test
+    @DisplayName("Deterministic timing: scheduler delay exceeding safe lease window marks ownership lost even with zero failures")
+    void timing_schedulerDelay_marksOwnershipLostEvenWithZeroFailures() {
+        MutableClock clock = new MutableClock(java.time.Instant.parse("2026-11-12T12:00:00Z"));
+        IdempotencyClaimHeartbeatService clockHeartbeatService = new IdempotencyClaimHeartbeatService(
+                repository, transactionManager, scheduler, clock, 15_000L, 3, Duration.ofSeconds(15)
+        );
+
+        clockHeartbeatService.registerClaim(claimId, userId, idempotencyKey, claimOwner, claimGeneration, Duration.ofSeconds(60));
+        assertThat(clockHeartbeatService.isOwnershipLost(claimId)).isFalse();
+
+        // Simulate 46 seconds elapsed without any renewal task executing (scheduler starvation / delay)
+        clock.advance(Duration.ofSeconds(46));
+
+        // Ownership must be marked lost immediately before PostgreSQL lease can plausibly expire
+        assertThat(clockHeartbeatService.isOwnershipLost(claimId)).isTrue();
+        assertThat(clockHeartbeatService.getConsecutiveFailures(claimId)).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("Deterministic timing: slow query or delayed task fails closed on first attempt if safe window exceeded")
+    void timing_slowQueryOrDelayedTask_failsClosedOnFirstAttemptIfSafeWindowExceeded() {
+        MutableClock clock = new MutableClock(java.time.Instant.parse("2026-11-12T12:00:00Z"));
+        IdempotencyClaimHeartbeatService clockHeartbeatService = new IdempotencyClaimHeartbeatService(
+                repository, transactionManager, scheduler, clock, 15_000L, 3, Duration.ofSeconds(15)
+        );
+
+        clockHeartbeatService.registerClaim(claimId, userId, idempotencyKey, claimOwner, claimGeneration, Duration.ofSeconds(60));
+
+        // Simulate 46 seconds elapsed when task finally runs and throws exception
+        clock.advance(Duration.ofSeconds(46));
+        when(repository.renewClaimDatabaseTime(eq(claimId), eq(claimOwner), eq(claimGeneration), anyLong()))
+                .thenThrow(new DataAccessResourceFailureException("Query timeout after long delay"));
+
+        boolean renewed = clockHeartbeatService.renewClaimDirectly(claimId);
+
+        // Even though failures is only 1 (< 3), elapsed time exceeded safe lease window -> fails closed
+        assertThat(renewed).isFalse();
+        assertThat(clockHeartbeatService.getConsecutiveFailures(claimId)).isEqualTo(1);
+        assertThat(clockHeartbeatService.isOwnershipLost(claimId)).isTrue();
+
+        // Subsequent renewal attempt returns false without hitting repository
+        boolean nextAttempt = clockHeartbeatService.renewClaimDirectly(claimId);
+        assertThat(nextAttempt).isFalse();
+        verify(repository, times(1)).renewClaimDatabaseTime(any(), any(), anyLong(), anyLong());
+    }
+
+    @Test
+    @DisplayName("Deterministic timing: successful renewal advances confirmed renewal time and extends safe lease window")
+    void timing_successfulRenewalAdvancesConfirmedTime_extendsSafeWindow() {
+        MutableClock clock = new MutableClock(java.time.Instant.parse("2026-11-12T12:00:00Z"));
+        IdempotencyClaimHeartbeatService clockHeartbeatService = new IdempotencyClaimHeartbeatService(
+                repository, transactionManager, scheduler, clock, 15_000L, 3, Duration.ofSeconds(15)
+        );
+
+        clockHeartbeatService.registerClaim(claimId, userId, idempotencyKey, claimOwner, claimGeneration, Duration.ofSeconds(60));
+        java.time.Instant initialConfirmed = clockHeartbeatService.getLastConfirmedRenewalTime(claimId);
+        assertThat(initialConfirmed).isEqualTo(clock.instant());
+
+        // Advance 20 seconds and renew successfully
+        clock.advance(Duration.ofSeconds(20));
+        when(repository.renewClaimDatabaseTime(eq(claimId), eq(claimOwner), eq(claimGeneration), anyLong()))
+                .thenReturn(1);
+
+        boolean renewed = clockHeartbeatService.renewClaimDirectly(claimId);
+        assertThat(renewed).isTrue();
+        assertThat(clockHeartbeatService.getLastConfirmedRenewalTime(claimId)).isEqualTo(clock.instant());
+
+        // Advance another 30 seconds (total 50s from start, but only 30s from last confirmed renewal)
+        clock.advance(Duration.ofSeconds(30));
+        when(repository.renewClaimDatabaseTime(eq(claimId), eq(claimOwner), eq(claimGeneration), anyLong()))
+                .thenThrow(new DataAccessResourceFailureException("Temporary glitch"));
+
+        boolean secondRenewal = clockHeartbeatService.renewClaimDirectly(claimId);
+        assertThat(secondRenewal).isFalse();
+        // Since elapsed from confirmed renewal is 30s (< 45s safe window), ownership is NOT lost
+        assertThat(clockHeartbeatService.isOwnershipLost(claimId)).isFalse();
+
+        // Advance 16 more seconds (46s from confirmed renewal >= 45s safe window)
+        clock.advance(Duration.ofSeconds(16));
+        assertThat(clockHeartbeatService.isOwnershipLost(claimId)).isTrue();
+    }
+
+    @Test
+    @DisplayName("Deterministic timing: once ownership is lost, no further database renewals or mutations permitted")
+    void timing_onceOwnershipLost_noFurtherRenewalsPermitted() {
+        MutableClock clock = new MutableClock(java.time.Instant.parse("2026-11-12T12:00:00Z"));
+        IdempotencyClaimHeartbeatService clockHeartbeatService = new IdempotencyClaimHeartbeatService(
+                repository, transactionManager, scheduler, clock, 15_000L, 3, Duration.ofSeconds(15)
+        );
+
+        clockHeartbeatService.registerClaim(claimId, userId, idempotencyKey, claimOwner, claimGeneration, Duration.ofSeconds(60));
+
+        // Advance past safe lease window
+        clock.advance(Duration.ofSeconds(46));
+        assertThat(clockHeartbeatService.isOwnershipLost(claimId)).isTrue();
+
+        // Any subsequent direct renewal must fail closed and never touch database
+        boolean renewed = clockHeartbeatService.renewClaimDirectly(claimId);
+        assertThat(renewed).isFalse();
+        verify(repository, times(0)).renewClaimDatabaseTime(any(), any(), anyLong(), anyLong());
+    }
+
+    static class MutableClock extends java.time.Clock {
+        private java.time.Instant currentInstant;
+        private final java.time.ZoneId zone = java.time.ZoneId.of("UTC");
+
+        MutableClock(java.time.Instant initialInstant) {
+            this.currentInstant = initialInstant;
+        }
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return zone;
+        }
+
+        @Override
+        public java.time.Clock withZone(java.time.ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public java.time.Instant instant() {
+            return currentInstant;
+        }
+
+        public void advance(Duration duration) {
+            this.currentInstant = this.currentInstant.plus(duration);
+        }
+    }
 }
