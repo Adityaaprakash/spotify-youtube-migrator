@@ -271,7 +271,7 @@ class TrackOccurrenceMatcherTest {
             );
 
             assertThat(result.isIntegrityViolation()).isTrue();
-            assertThat(result.message()).contains("already assigned");
+            assertThat(result.message()).containsAnyOf("already assigned", "expected remote item");
         }
 
         @Test
@@ -289,6 +289,217 @@ class TrackOccurrenceMatcherTest {
 
             assertThat(result.isIntegrityViolation()).isTrue();
             assertThat(result.message()).contains("not found in execution track list");
+        }
+    }
+
+    @Nested
+    @DisplayName("Phase 13F: Track Occurrence Identity Verification (Audit Finding 3)")
+    class Phase13FOccurrenceIdentityTests {
+
+        @Test
+        @DisplayName("Two identical source video occurrences: first ADDED matches, second verified ADDED")
+        void twoIdenticalSourceOccurrencesBothDispatchedFirstAddedSecondVerified() {
+            UUID track1Id = UUID.randomUUID();
+            UUID track2Id = UUID.randomUUID();
+
+            ExecutionTrackRecord track1 = createTrack(track1Id, 0, "video_A");
+            track1.markAdding();
+            track1.markAdded("item_1");
+
+            ExecutionTrackRecord track2 = createTrack(track2Id, 1, "video_A");
+            track2.markAdding();
+
+            List<DestinationPlaylistItemDetails> remote = List.of(
+                    new DestinationPlaylistItemDetails("item_1", "video_A", 0),
+                    new DestinationPlaylistItemDetails("item_2", "video_A", 1)
+            );
+
+            TrackOccurrenceMatchResult result = TrackOccurrenceMatcher.matchTrack(
+                    List.of(track1, track2),
+                    remote,
+                    track2Id
+            );
+
+            assertThat(result.isVerifiedAdded()).isTrue();
+            assertThat(result.verifiedPlaylistItemId()).isEqualTo("item_2");
+        }
+
+        @Test
+        @DisplayName("First occurrence ADDED but its stored remote item ID is absent yields INTEGRITY_VIOLATION")
+        void firstOccurrenceAddedButStoredRemoteItemIdIsAbsent() {
+            UUID track1Id = UUID.randomUUID();
+            UUID track2Id = UUID.randomUUID();
+
+            ExecutionTrackRecord track1 = createTrack(track1Id, 0, "video_A");
+            track1.markAdding();
+            track1.markAdded("item_1");
+
+            ExecutionTrackRecord track2 = createTrack(track2Id, 1, "video_A");
+            track2.markAdding();
+
+            // Remote is completely empty: prior ADDED item is missing!
+            TrackOccurrenceMatchResult result = TrackOccurrenceMatcher.matchTrack(
+                    List.of(track1, track2),
+                    Collections.emptyList(),
+                    track2Id
+            );
+
+            assertThat(result.isIntegrityViolation()).isTrue();
+            assertThat(result.isConfirmedAbsent()).isFalse();
+            assertThat(result.message()).contains("Prior ADDED occurrence 1 of video video_A (item item_1) is missing remotely");
+        }
+
+        @Test
+        @DisplayName("First occurrence ADDED but its remote item ID appears at different position yields INTEGRITY_VIOLATION")
+        void firstOccurrenceAddedButRemoteItemIdAppearsAtDifferentPosition() {
+            UUID track1Id = UUID.randomUUID();
+            UUID track2Id = UUID.randomUUID();
+
+            ExecutionTrackRecord track1 = createTrack(track1Id, 0, "video_A");
+            track1.markAdding();
+            track1.markAdded("item_1");
+
+            ExecutionTrackRecord track2 = createTrack(track2Id, 1, "video_A");
+            track2.markAdding();
+
+            // Remote has item_2 at position 0 and item_1 at position 1 (reordered)
+            List<DestinationPlaylistItemDetails> remote = List.of(
+                    new DestinationPlaylistItemDetails("item_2", "video_A", 0),
+                    new DestinationPlaylistItemDetails("item_1", "video_A", 1)
+            );
+
+            TrackOccurrenceMatchResult result = TrackOccurrenceMatcher.matchTrack(
+                    List.of(track1, track2),
+                    remote,
+                    track2Id
+            );
+
+            assertThat(result.isIntegrityViolation()).isTrue();
+            assertThat(result.isConfirmedAbsent()).isFalse();
+            assertThat(result.message()).contains("expected remote item item_1 but found item_2 at position 1");
+        }
+
+        @Test
+        @DisplayName("Earlier occurrence removed by user before target reconciliation yields INTEGRITY_VIOLATION")
+        void earlierOccurrenceRemovedByUserBeforeTargetReconciliation() {
+            UUID track1Id = UUID.randomUUID();
+            UUID track2Id = UUID.randomUUID();
+
+            ExecutionTrackRecord track1 = createTrack(track1Id, 0, "video_A");
+            track1.markAdding();
+            track1.markAdded("item_1");
+
+            ExecutionTrackRecord track2 = createTrack(track2Id, 1, "video_A");
+            track2.markAdding();
+
+            // User deleted item_1 remotely, so only item_2 remains at position 0
+            List<DestinationPlaylistItemDetails> remote = List.of(
+                    new DestinationPlaylistItemDetails("item_2", "video_A", 0)
+            );
+
+            TrackOccurrenceMatchResult result = TrackOccurrenceMatcher.matchTrack(
+                    List.of(track1, track2),
+                    remote,
+                    track2Id
+            );
+
+            // Must NOT conclude confirmedAbsent merely because remoteCount (1) < targetOccurrence (2)!
+            assertThat(result.isIntegrityViolation()).isTrue();
+            assertThat(result.isConfirmedAbsent()).isFalse();
+            assertThat(result.message()).contains("expected remote item item_1 but found item_2 at position 1");
+        }
+
+        @Test
+        @DisplayName("Earlier occurrence replaced by different playlist item yields INTEGRITY_VIOLATION")
+        void earlierOccurrenceReplacedByDifferentPlaylistItem() {
+            UUID track1Id = UUID.randomUUID();
+            UUID track2Id = UUID.randomUUID();
+
+            ExecutionTrackRecord track1 = createTrack(track1Id, 0, "video_A");
+            track1.markAdding();
+            track1.markAdded("item_1");
+
+            ExecutionTrackRecord track2 = createTrack(track2Id, 1, "video_A");
+            track2.markAdding();
+
+            // Remote position 0 was replaced by foreign_item
+            List<DestinationPlaylistItemDetails> remote = List.of(
+                    new DestinationPlaylistItemDetails("foreign_item", "video_A", 0),
+                    new DestinationPlaylistItemDetails("item_2", "video_A", 1)
+            );
+
+            TrackOccurrenceMatchResult result = TrackOccurrenceMatcher.matchTrack(
+                    List.of(track1, track2),
+                    remote,
+                    track2Id
+            );
+
+            assertThat(result.isIntegrityViolation()).isTrue();
+            assertThat(result.message()).contains("expected remote item item_1 but found foreign_item at position 1");
+        }
+
+        @Test
+        @DisplayName("Three intentional duplicate occurrences with sequential mapping")
+        void threeIntentionalDuplicatesSequentialMapping() {
+            UUID id1 = UUID.randomUUID();
+            UUID id2 = UUID.randomUUID();
+            UUID id3 = UUID.randomUUID();
+
+            ExecutionTrackRecord t1 = createTrack(id1, 0, "video_X");
+            t1.markAdding();
+            t1.markAdded("item_1");
+
+            ExecutionTrackRecord t2 = createTrack(id2, 1, "video_X");
+            t2.markAdding();
+            t2.markAdded("item_2");
+
+            ExecutionTrackRecord t3 = createTrack(id3, 2, "video_X");
+            t3.markAdding();
+
+            List<DestinationPlaylistItemDetails> remote = List.of(
+                    new DestinationPlaylistItemDetails("item_1", "video_X", 0),
+                    new DestinationPlaylistItemDetails("item_2", "video_X", 1),
+                    new DestinationPlaylistItemDetails("item_3", "video_X", 2)
+            );
+
+            TrackOccurrenceMatchResult result = TrackOccurrenceMatcher.matchTrack(
+                    List.of(t1, t2, t3),
+                    remote,
+                    id3
+            );
+
+            assertThat(result.isVerifiedAdded()).isTrue();
+            assertThat(result.verifiedPlaylistItemId()).isEqualTo("item_3");
+        }
+
+        @Test
+        @DisplayName("Correctly mapped duplicate occurrences remain supported and conclude absence when target missing")
+        void correctlyMappedDuplicateOccurrencesRemainSupported() {
+            UUID track1Id = UUID.randomUUID();
+            UUID track2Id = UUID.randomUUID();
+
+            ExecutionTrackRecord track1 = createTrack(track1Id, 0, "video_A");
+            track1.markAdding();
+            track1.markAdded("item_1");
+
+            ExecutionTrackRecord track2 = createTrack(track2Id, 1, "video_A");
+            track2.markAdding();
+
+            // Item 1 matches position 0, but item 2 does not exist yet
+            List<DestinationPlaylistItemDetails> remote = List.of(
+                    new DestinationPlaylistItemDetails("item_1", "video_A", 0)
+            );
+
+            TrackOccurrenceMatchResult result = TrackOccurrenceMatcher.matchTrack(
+                    List.of(track1, track2),
+                    remote,
+                    track2Id
+            );
+
+            assertThat(result.isConfirmedAbsent()).isTrue();
+            assertThat(result.isVerifiedAdded()).isFalse();
+            assertThat(result.isIntegrityViolation()).isFalse();
+            assertThat(result.message()).contains("Occurrence 2 of video video_A not found remotely (only 1 occurrences exist)");
         }
     }
 }

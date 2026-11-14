@@ -194,4 +194,62 @@ class DestinationPlaylistReconciliationServiceTest {
             assertThat(result.diagnosticMessage()).contains("YouTube 503 Service Unavailable");
         }
     }
+
+    @Nested
+    @DisplayName("Phase 13F: Complete Inspection Invariants (Audit Finding 2)")
+    class Phase13FIncompleteInspectionSafetyTests {
+
+        @Test
+        @DisplayName("Marker present on later page is resolved to EXACT_MATCH_FOUND")
+        void markerPresentOnlyOnLaterPageFound() {
+            String marker = PlaylistCorrelationMarker.formatMarker(opId);
+            DestinationPlaylist p1 = new DestinationPlaylist("yt_1", "Page 1 Title", "Desc 1", "url1", Platform.YOUTUBE);
+            DestinationPlaylist p2 = new DestinationPlaylist("yt_2", "Page 2 Title", "Desc 2 " + marker, "url2", Platform.YOUTUBE);
+
+            // musicDestination returns all pages aggregated
+            when(musicDestination.getUserPlaylists(eq(userId))).thenReturn(List.of(p1, p2));
+
+            PlaylistReconciliationResult result = reconciliationService.reconcilePlaylistCreation(
+                    userId, opId, "Any Title"
+            );
+
+            assertThat(result.isExactMatch()).isTrue();
+            assertThat(result.matchedPlaylist().id()).isEqualTo("yt_2");
+        }
+
+        @Test
+        @DisplayName("No marker on fully completed inspection resolves to CONCLUSIVELY_ABSENT")
+        void noMarkerOnFullyCompletedInspection() {
+            DestinationPlaylist p1 = new DestinationPlaylist("yt_1", "Page 1 Title", "Desc 1", "url1", Platform.YOUTUBE);
+            DestinationPlaylist p2 = new DestinationPlaylist("yt_2", "Page 2 Title", "Desc 2", "url2", Platform.YOUTUBE);
+
+            when(musicDestination.getUserPlaylists(eq(userId)))
+                    .thenReturn(List.of(p1, p2))
+                    .thenReturn(List.of(p1, p2));
+
+            PlaylistReconciliationResult result = reconciliationService.reconcilePlaylistCreation(
+                    userId, opId, "Different Title"
+            );
+
+            assertThat(result.isAbsent()).isTrue();
+            assertThat(result.outcome()).isEqualTo(PlaylistReconciliationOutcome.CONCLUSIVELY_ABSENT);
+        }
+
+        @Test
+        @DisplayName("Incomplete inspection yields PROVIDER_ERROR, never CONCLUSIVELY_ABSENT, preventing duplicate creation")
+        void incompleteInspectionCannotAuthorizeAnotherPlaylistCreation() {
+            when(musicDestination.getUserPlaylists(eq(userId)))
+                    .thenThrow(new ExternalProviderException("YouTube playlist inspection exceeded maximum limit of 100 pages"));
+
+            PlaylistReconciliationResult result = reconciliationService.reconcilePlaylistCreation(
+                    userId, opId, "My Title"
+            );
+
+            assertThat(result.outcome()).isEqualTo(PlaylistReconciliationOutcome.PROVIDER_ERROR);
+            assertThat(result.isAbsent()).isFalse();
+            assertThat(result.isExactMatch()).isFalse();
+            assertThat(result.isCollision()).isFalse();
+            assertThat(result.diagnosticMessage()).contains("exceeded maximum limit of 100 pages");
+        }
+    }
 }

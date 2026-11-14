@@ -6,6 +6,8 @@ import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackReco
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.List;
@@ -31,6 +33,7 @@ import java.util.function.BooleanSupplier;
  * </ol>
  */
 @Service
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class TrackInsertionReconciliationService {
 
     private static final Logger log = LoggerFactory.getLogger(TrackInsertionReconciliationService.class);

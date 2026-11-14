@@ -7,6 +7,7 @@ import com.spotifyyoutube.migrator.identity.application.OAuthTokenLifecycleServi
 import com.spotifyyoutube.migrator.identity.domain.ConnectionStatus;
 import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistVerification;
 import com.spotifyyoutube.migrator.migration.application.destination.model.PlaylistVerificationStatus;
 import com.spotifyyoutube.migrator.youtube.api.dto.AddVideoToPlaylistRequest;
@@ -501,5 +502,146 @@ class YouTubePlaylistServiceTest {
 
         assertThat(result.status()).isEqualTo(PlaylistVerificationStatus.FAILED);
         assertThat(result.playlist()).isNull();
+    }
+
+    @org.junit.jupiter.api.Nested
+    @org.junit.jupiter.api.DisplayName("Phase 13F: getUserPlaylists Complete Pagination (Audit Finding 2)")
+    class GetUserPlaylistsPaginationTests {
+
+        private OAuthConnection connection;
+
+        @BeforeEach
+        void setUpAuth() {
+            connection = createMockConnection(ConnectionStatus.CONNECTED, "valid-token");
+            when(tokenLifecycleService.refreshConnectionIfNeeded(testUserId, OAuthProvider.GOOGLE)).thenReturn(connection);
+        }
+
+        private YouTubePlaylistDto createPlaylistDto(String id, String title) {
+            YouTubePlaylistSnippetDto snippet = new YouTubePlaylistSnippetDto(
+                    title, "Description for " + title, null, null, null, null
+            );
+            YouTubePlaylistStatusDto status = new YouTubePlaylistStatusDto("private");
+            return new YouTubePlaylistDto("youtube#playlist", "etag-" + id, id, snippet, status);
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("One-page complete inspection returns all playlists")
+        void onePageCompleteInspection() {
+            YouTubePlaylistDto p1 = createPlaylistDto("pl1", "Playlist 1");
+            YouTubePlaylistDto p2 = createPlaylistDto("pl2", "Playlist 2");
+            YouTubePlaylistListResponseDto page1 = new YouTubePlaylistListResponseDto(
+                    "youtube#playlistListResponse", "etag", null, null, null, List.of(p1, p2)
+            );
+
+            when(youTubeClient.getMyPlaylists("valid-token", 50, null)).thenReturn(page1);
+
+            List<DestinationPlaylist> playlists = playlistService.getUserPlaylists(testUserId);
+
+            assertThat(playlists).hasSize(2);
+            assertThat(playlists.get(0).id()).isEqualTo("pl1");
+            assertThat(playlists.get(1).id()).isEqualTo("pl2");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Multiple-page complete inspection traverses until nextPageToken is null")
+        void multiplePageCompleteInspection() {
+            YouTubePlaylistDto p1 = createPlaylistDto("pl1", "Playlist 1");
+            YouTubePlaylistDto p2 = createPlaylistDto("pl2", "Playlist 2");
+            YouTubePlaylistDto p3 = createPlaylistDto("pl3", "Playlist 3");
+
+            YouTubePlaylistListResponseDto page1 = new YouTubePlaylistListResponseDto(
+                    "youtube#playlistListResponse", "etag1", "page2_tok", null, null, List.of(p1, p2)
+            );
+            YouTubePlaylistListResponseDto page2 = new YouTubePlaylistListResponseDto(
+                    "youtube#playlistListResponse", "etag2", null, null, null, List.of(p3)
+            );
+
+            when(youTubeClient.getMyPlaylists("valid-token", 50, null)).thenReturn(page1);
+            when(youTubeClient.getMyPlaylists("valid-token", 50, "page2_tok")).thenReturn(page2);
+
+            List<DestinationPlaylist> playlists = playlistService.getUserPlaylists(testUserId);
+
+            assertThat(playlists).hasSize(3);
+            assertThat(playlists.get(0).id()).isEqualTo("pl1");
+            assertThat(playlists.get(1).id()).isEqualTo("pl2");
+            assertThat(playlists.get(2).id()).isEqualTo("pl3");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Null provider response throws ExternalProviderException")
+        void nullProviderResponseThrows() {
+            when(youTubeClient.getMyPlaylists("valid-token", 50, null)).thenReturn(null);
+
+            assertThatThrownBy(() -> playlistService.getUserPlaylists(testUserId))
+                    .isInstanceOf(ExternalProviderException.class)
+                    .hasMessageContaining("null playlist response on page 1");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Null items collection throws ExternalProviderException")
+        void nullItemsCollectionThrows() {
+            YouTubePlaylistListResponseDto pageNullItems = new YouTubePlaylistListResponseDto(
+                    "youtube#playlistListResponse", "etag", null, null, null, null
+            );
+            when(youTubeClient.getMyPlaylists("valid-token", 50, null)).thenReturn(pageNullItems);
+
+            assertThatThrownBy(() -> playlistService.getUserPlaylists(testUserId))
+                    .isInstanceOf(ExternalProviderException.class)
+                    .hasMessageContaining("null playlist items collection on page 1");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Repeated page token throws ExternalProviderException on cycle")
+        void repeatedPageTokenThrows() {
+            YouTubePlaylistDto p1 = createPlaylistDto("pl1", "Playlist 1");
+            YouTubePlaylistListResponseDto page1 = new YouTubePlaylistListResponseDto(
+                    "youtube#playlistListResponse", "etag1", "cycle_tok", null, null, List.of(p1)
+            );
+            YouTubePlaylistListResponseDto page2 = new YouTubePlaylistListResponseDto(
+                    "youtube#playlistListResponse", "etag2", "cycle_tok", null, null, List.of(p1)
+            );
+
+            when(youTubeClient.getMyPlaylists("valid-token", 50, null)).thenReturn(page1);
+            when(youTubeClient.getMyPlaylists("valid-token", 50, "cycle_tok")).thenReturn(page2);
+
+            assertThatThrownBy(() -> playlistService.getUserPlaylists(testUserId))
+                    .isInstanceOf(ExternalProviderException.class)
+                    .hasMessageContaining("Detected cycle in YouTube playlist pagination tokens: cycle_tok");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Reaching MAX_INSPECTION_PAGES while next page exists throws ExternalProviderException")
+        void maxPageLimitWithNextPageAvailableThrows() {
+            when(youTubeClient.getMyPlaylists(eq("valid-token"), eq(50), any()))
+                    .thenAnswer(invocation -> {
+                        String token = invocation.getArgument(2);
+                        int nextNum = (token == null) ? 1 : Integer.parseInt(token) + 1;
+                        YouTubePlaylistDto item = createPlaylistDto("pl_" + nextNum, "PL " + nextNum);
+                        return new YouTubePlaylistListResponseDto(
+                                "youtube#playlistListResponse", "etag", String.valueOf(nextNum), null, null, List.of(item)
+                        );
+                    });
+
+            assertThatThrownBy(() -> playlistService.getUserPlaylists(testUserId))
+                    .isInstanceOf(ExternalProviderException.class)
+                    .hasMessageContaining("exceeded maximum limit of 100 pages");
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("Provider failure on a later page propagates ExternalProviderException")
+        void providerFailureOnLaterPageThrows() {
+            YouTubePlaylistDto p1 = createPlaylistDto("pl1", "Playlist 1");
+            YouTubePlaylistListResponseDto page1 = new YouTubePlaylistListResponseDto(
+                    "youtube#playlistListResponse", "etag1", "page2_tok", null, null, List.of(p1)
+            );
+
+            when(youTubeClient.getMyPlaylists("valid-token", 50, null)).thenReturn(page1);
+            when(youTubeClient.getMyPlaylists("valid-token", 50, "page2_tok"))
+                    .thenThrow(new ExternalProviderException("YouTube 503 Service Unavailable", 503));
+
+            assertThatThrownBy(() -> playlistService.getUserPlaylists(testUserId))
+                    .isInstanceOf(ExternalProviderException.class)
+                    .hasMessageContaining("503");
+        }
     }
 }

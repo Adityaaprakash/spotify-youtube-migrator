@@ -134,7 +134,7 @@ public final class TrackOccurrenceMatcher {
             ));
         }
 
-        // 8. Verify existing ADDED occurrences match prior remote items
+        // 8. Verify existing ADDED occurrences match prior remote items at their expected positions
         Set<String> alreadyAssignedItemIds = new HashSet<>();
         for (int i = 0; i < targetOccurrenceIndex - 1; i++) {
             ExecutionTrackRecord priorTrack = occurrences.get(i);
@@ -145,7 +145,30 @@ public final class TrackOccurrenceMatcher {
                             "Prior ADDED track " + priorTrack.getId() + " lacks destinationPlaylistItemId"
                     );
                 }
-                alreadyAssignedItemIds.add(assignedItemId.trim());
+                String trimmedAssignedId = assignedItemId.trim();
+
+                // 1. Verify remote has an item at this occurrence position
+                if (remoteOccurrences.size() <= i) {
+                    return TrackOccurrenceMatchResult.integrityViolation(String.format(
+                            "Prior ADDED occurrence %d of video %s (item %s) is missing remotely (only %d remote items found)",
+                            i + 1, targetVideoId, trimmedAssignedId, remoteOccurrences.size()
+                    ));
+                }
+
+                // 2. Verify the remote item at this exact occurrence index matches the persisted destinationPlaylistItemId
+                DestinationPlaylistItemDetails priorRemoteItem = remoteOccurrences.get(i);
+                String actualRemoteItemId = priorRemoteItem.playlistItemId() != null
+                        ? priorRemoteItem.playlistItemId().trim()
+                        : null;
+
+                if (!Objects.equals(trimmedAssignedId, actualRemoteItemId)) {
+                    return TrackOccurrenceMatchResult.integrityViolation(String.format(
+                            "Prior ADDED occurrence %d of video %s expected remote item %s but found %s at position %d",
+                            i + 1, targetVideoId, trimmedAssignedId, actualRemoteItemId, i + 1
+                    ));
+                }
+
+                alreadyAssignedItemIds.add(trimmedAssignedId);
             }
         }
 

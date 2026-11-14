@@ -6,6 +6,8 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.Desti
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -30,6 +32,7 @@ import java.util.UUID;
  * </ol>
  */
 @Service
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class DestinationPlaylistReconciliationService {
 
     private static final Logger log = LoggerFactory.getLogger(DestinationPlaylistReconciliationService.class);

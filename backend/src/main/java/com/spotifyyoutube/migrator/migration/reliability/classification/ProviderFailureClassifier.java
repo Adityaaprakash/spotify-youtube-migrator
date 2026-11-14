@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.ResourceAccessException;
 
+import java.net.ConnectException;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -115,8 +118,8 @@ public class ProviderFailureClassifier {
             );
         }
 
-        // 4. ResourceAccessException (I/O connection or socket timeout)
-        if (throwable instanceof ResourceAccessException) {
+        // 4. ResourceAccessException, socket timeout, or connection reset
+        if (isNetworkTimeoutOrConnectionError(throwable)) {
             return new ProviderFailureClassification(
                     ProviderFailureCategory.TRANSIENT_SERVER_ERROR,
                     null,
@@ -243,8 +246,8 @@ public class ProviderFailureClassifier {
             );
         }
 
-        // 6. HTTP 500, 502, 503 Server Errors
-        if (code == 500 || code == 502 || code == 503) {
+        // 6. HTTP 500, 502, 503, 504 Server Errors
+        if (code == 500 || code == 502 || code == 503 || code == 504) {
             return new ProviderFailureClassification(
                     ProviderFailureCategory.TRANSIENT_SERVER_ERROR,
                     code,
@@ -414,6 +417,23 @@ public class ProviderFailureClassifier {
             return "null";
         }
         return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+    }
+
+    private static boolean isNetworkTimeoutOrConnectionError(Throwable t) {
+        if (t == null) {
+            return false;
+        }
+        if (t instanceof ResourceAccessException
+                || t instanceof SocketTimeoutException
+                || t instanceof ConnectException
+                || t instanceof SocketException) {
+            return true;
+        }
+        Throwable cause = t.getCause();
+        if (cause != null && cause != t) {
+            return isNetworkTimeoutOrConnectionError(cause);
+        }
+        return false;
     }
 
     private record ParsedErrorPayload(String reason, String message) {

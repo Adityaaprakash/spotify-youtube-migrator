@@ -916,17 +916,20 @@ Implemented and verified:
 
 ## Current Blockers & Status
 
-- **Phase 13 (Reliability Engineering)**: IN PROGRESS (Phases 13A, 13B, 13C Complete & Verified; Phases 13D and 13E Implemented & Audited).
-  - Implementation & Architecture: Phase 13A architecture audited and approved (ADR-031). Phase 13B provider failure classification engine (`ProviderFailureClassifier`, `RetryAfterParser`, and classification models) implemented and verified across 50 unit tests. Phase 13C retry policy and backoff engine implemented and verified across 43 tests. Phase 13D (13D-A through 13D-F) durable lease lifecycle, atomic scheduler claiming, post-commit worker dispatch, lease heartbeat service, durable retry scheduling, and graceful shutdown hardening implemented across 49 dedicated unit tests (in 6 classes) and 48 PostgreSQL Testcontainers integration tests (in 6 IT classes). Phase 13E API idempotency contract, Flyway V11 `migration_idempotency_keys` baseline and V12 claim-fencing protocol (`V12__phase13e_idempotency_claim_protocol.sql`), canonical request fingerprinter with NFC normalization, validator, filter, idempotency service with generational claim fencing and heartbeat renewal, `IdempotencyClaimHeartbeatService`, `ClaimOwnershipContext`, crash recovery distinguishing States A/B/C, terminal retention, and bounded cleanup sweeper implemented across 55 unit/WebMvc tests (in 5 classes) and 23 PostgreSQL Testcontainers integration tests (in 2 IT classes).
+- **Phase 13 (Reliability Engineering)**: IN PROGRESS (Phases 13A, 13B, 13C Complete & Verified; Phases 13D, 13E, and 13F Implemented & Audited; Phase 13F Remediated & Hardened).
+  - Implementation & Architecture: Phase 13A architecture audited and approved (ADR-031). Phase 13B provider failure classification engine (`ProviderFailureClassifier`, `RetryAfterParser`, and classification models) implemented and verified across 50 unit tests. Phase 13C retry policy and backoff engine implemented and verified across 43 tests. Phase 13D (13D-A through 13D-F) durable lease lifecycle, atomic scheduler claiming, post-commit worker dispatch, lease heartbeat service, durable retry scheduling, and graceful shutdown hardening implemented across 49 dedicated unit tests (in 6 classes) and 48 PostgreSQL Testcontainers integration tests (in 6 IT classes). Phase 13E API idempotency contract, Flyway V11 `migration_idempotency_keys` baseline and V12 claim-fencing protocol (`V12__phase13e_idempotency_claim_protocol.sql`), canonical request fingerprinter with NFC normalization, validator, filter, idempotency service with generational claim fencing and heartbeat renewal, `IdempotencyClaimHeartbeatService`, `ClaimOwnershipContext`, crash recovery distinguishing States A/B/C, terminal retention, and bounded cleanup sweeper implemented across 55 unit/WebMvc tests (in 5 classes) and 23 PostgreSQL Testcontainers integration tests (in 2 IT classes). Phase 13F external operation safety, correlation markers, two-read reconciliation, occurrence matching, narrowed failure classification, fail-closed pagination, and prior occurrence identity verification implemented across 57 unit tests (in 6 classes) and 6 PostgreSQL Testcontainers integration tests.
   - Test Reconciliation Evidence:
     - Phase 13D Unit Tests (49 total): `DurableWorkerLeaseDomainTest` (17), `StaleLeaseOwnershipExceptionTest` (2), `WorkerDispatchAndCompensationTest` (9), `DurableLeaseHeartbeatServiceTest` (10), `DurableRetrySchedulingTest` (4), `DurableSchedulerLifecycleAndHardeningTest` (7).
     - Phase 13D Integration Tests (48 total): `DurableLeaseAndFencingPersistenceIT` (19), `AtomicPostgresSchedulerClaimingIT` (8), `WorkerDispatchAndCompensationIT` (7), `DurableHeartbeatAndRenewalIT` (7), `DurableRetrySchedulingIT` (4), `GracefulShutdownAndSaturationIT` (3).
     - Phase 13E Unit & WebMvc Tests (55 total): `CanonicalRequestFingerprinterTest` (14), `IdempotencyKeyValidatorTest` (7), `DefaultMigrationIdempotencyServiceTest` (25), `ApiIdempotencyFilterTest` (14), `MigrationIdempotencyApiTest` (6).
     - Phase 13E Integration Tests (23 total): `MigrationIdempotencyPostgresIT` (17), `MigrationIdempotencyConcurrencyIT` (6).
-    - Execution Evidence: 19 unit tests and 19 integration tests (Phase 13D-A) were executed by Maven Surefire/Failsafe (0 errors, 0 failures). The remaining Phase 13D and Phase 13E tests are compiled and statically verified; runtime execution remains pending local terminal execution due to IDE host security policy restrictions on terminal commands.
+    - Phase 13F Unit Tests (63 total): `PlaylistCorrelationMarkerTest` (9), `TrackOccurrenceMatcherTest` (14), `DestinationPlaylistReconciliationServiceTest` (9), `TrackInsertionReconciliationServiceTest` (5), `YouTubePlaylistServiceTest.GetUserPlaylistsPaginationTests` (7), `ApprovedMigrationOrchestratorTest.PlaylistCreationFailureClassificationTests` (7), `ExternalOperationTransactionPropagationTest` (6), plus existing orchestrator lifecycle tests.
+    - Phase 13F Integration Tests (6 total): `ExternalOperationSafetyPostgresIT` (6).
+    - Execution Evidence: 19 unit tests and 19 integration tests (Phase 13D-A) were executed by Maven Surefire/Failsafe (0 errors, 0 failures). The remaining Phase 13D, Phase 13E, and Phase 13F tests are compiled and statically verified; runtime execution remains pending local terminal execution due to IDE host security policy restrictions on terminal commands.
   - Phase 13D Status: IMPLEMENTED & AUDITED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION.
   - Phase 13E Status: IMPLEMENTED & AUDITED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION.
-  - Next Subphase: Phase 13F (External Operation Idempotency & Reconciliation) — STRICTLY UNSTARTED & BLOCKED.
+  - Phase 13F Status: IMPLEMENTED, AUDITED & REMEDIATED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION.
+  - Next Subphase: Phase 13G (Operational Observability, Alerting & Runbooks) — STRICTLY UNSTARTED & BLOCKED.
 
 - **Phase 13E (API Idempotency Contract, Concurrency Hardening & Verification)**: IMPLEMENTED & AUDITED (89 tests across 7 test suites).
   - Scope: Distributed API idempotency contract, database-backed atomic claim reservation with fencing and ownership tokens (`V12__phase13e_idempotency_claim_protocol.sql`), canonical request fingerprinting with Unicode NFC normalization and ASCII unit/record separators, leader execution, safe follower polling, `IdempotencyClaimHeartbeatService` with independent background renewal, `ClaimOwnershipContext` thread-local fencing propagation, stale leader fencing (`StaleClaimOwnershipException`), crash recovery distinguishing States A/B/C, replay response caching with `Location` header preservation, terminal-only 72-hour retention, and database wall-clock cleanup sweeper.
@@ -1026,7 +1029,7 @@ Implemented and verified:
 - **Format Verification**: `mvnw checkstyle:check` is completely passing with 0 violations.
 
 ### Phase 13F Testing Scope (External Operation Safety & Reconciliation)
-Implemented and statically verified (33 new unit and PostgreSQL integration test methods across 5 new test classes, plus updated orchestrator test coverage):
+Implemented, audited, remediated, and statically verified (60 unit test methods across 6 test classes, plus 6 PostgreSQL integration test methods):
 - `PlaylistCorrelationMarkerTest` (9 unit tests):
   - Deterministic tag generation: `[ref: migrator-op:<uuid>]`.
   - Null UUID rejection with `IllegalArgumentException`.
@@ -1037,7 +1040,7 @@ Implemented and statically verified (33 new unit and PostgreSQL integration test
   - 5,000 character length limit enforcement with deterministic base description truncation.
   - Detection and rejection of multiple correlation markers (`hasSingleMarker`, `extractAllMarkers`).
   - `matchesOperation` validation rejecting non-matching or multiple-marked descriptions.
-- `TrackOccurrenceMatcherTest` (7 unit tests):
+- `TrackOccurrenceMatcherTest` (14 unit tests):
   - Single track confirmed absent when remote list is empty.
   - Single track verified added when remote item is present.
   - Intentional duplicates preservation: when 2 identical source tracks share a destination video ID, occurrence 1 matched to remote item 1, occurrence 2 confirmed absent when remote has only 1 item.
@@ -1047,13 +1050,43 @@ Implemented and statically verified (33 new unit and PostgreSQL integration test
   - Fails closed into `INTEGRITY_VIOLATION` on unexpected extra remote occurrences.
   - Fails closed into `INTEGRITY_VIOLATION` when remote item ID was already claimed by a prior track.
   - Fails closed into `INTEGRITY_VIOLATION` if target track ID is missing from source track list.
-- `DestinationPlaylistReconciliationServiceTest` (6 unit tests):
+  - Remediation Suite (`Phase13FOccurrenceIdentityTests` - 7 tests):
+    - Two identical tracks dispatched: first matches, second confirmed absent when remote has only 1.
+    - Earlier `ADDED` item missing remotely: fails closed into `INTEGRITY_VIOLATION` (never shifts downstream occurrence identities).
+    - Earlier `ADDED` item reordered remotely: fails closed into `INTEGRITY_VIOLATION`.
+    - Earlier `ADDED` item deleted by user during execution: fails closed into `INTEGRITY_VIOLATION`.
+    - Earlier `ADDED` item replaced with different remote ID: fails closed into `INTEGRITY_VIOLATION`.
+    - 3 duplicate occurrences: verified sequentially 1-to-1 when all present and matching.
+    - 2 duplicate occurrences: earlier present and matching, second absent, safely concludes `CONFIRMED_ABSENT`.
+- `DestinationPlaylistReconciliationServiceTest` (9 unit tests):
   - Case A: `EXACT_MATCH_FOUND` returns matched playlist with single inspection read.
   - Case B: `CONCLUSIVELY_ABSENT` confirmed after two inspection reads with grace period.
   - Case B: Eventual consistency discovery on second read after replication lag.
   - Case C: `TITLE_COLLISION` detected when remote playlist shares title but lacks marker.
   - Case D: `MULTIPLE_MATCHING_MARKERS` detected as integrity violation when multiple playlists share marker.
   - Case E: `PROVIDER_ERROR` handled gracefully on destination provider exception.
+  - Remediation Suite (`Phase13FIncompleteInspectionSafetyTests` - 3 tests):
+    - Marker found on later page: returns `EXACT_MATCH_FOUND` without creating duplicate playlist.
+    - Fully completed inspection without marker: returns `CONCLUSIVELY_ABSENT` safely.
+    - Incomplete inspection (due to null response, null items, cyclic token, or page limit cutoff): maps to `PROVIDER_ERROR`, NEVER `CONCLUSIVELY_ABSENT`, preventing duplicate playlist creation.
+- `YouTubePlaylistServiceTest.GetUserPlaylistsPaginationTests` (7 unit tests):
+  - Single-page complete: returns all user playlists cleanly.
+  - Multi-page complete: paginates until `nextPageToken` is null.
+  - Null response from provider: throws `ExternalProviderException`, rejecting incomplete partial list.
+  - Null items list in response: throws `ExternalProviderException`, rejecting incomplete partial list.
+  - Repeated page token (cycle): throws `ExternalProviderException`, terminating cycle safely.
+  - Max page limit (100) reached while `nextPageToken` remains: throws `ExternalProviderException`, preventing truncated inspection results.
+  - Mid-pagination 503 provider failure: propagates `ExternalProviderException`.
+- `ApprovedMigrationOrchestratorTest` (Lifecycle tests + 7 failure classification tests):
+  - Updated `executesSuccessfulMigration` and `prepareQueuedMigrationSuccess` to verify pre-allocated intent and confirmation flow.
+  - Remediation Suite (`PlaylistCreationFailureClassificationTests` - 7 tests):
+    - Ambiguous network timeout (`SocketTimeoutException`, `ConnectException`, `SocketException`): invokes reconciliation.
+    - Ambiguous HTTP 500 / 502 / 503 / 504 server error: invokes reconciliation.
+    - Definite HTTP 400 Bad Request: rethrows immediately without reconciliation.
+    - Definite HTTP 403 Forbidden / Quota Exhaustion: rethrows immediately without reconciliation.
+    - Definite HTTP 401 Unauthorized: rethrows immediately without reconciliation.
+    - Definite unexpected programming exception (`NullPointerException`): rethrows immediately without reconciliation.
+    - `isAmbiguousPlaylistCreationOutcome`: comprehensive unit test verifying classification contract.
 - `TrackInsertionReconciliationServiceTest` (5 unit tests):
   - Stage 2: `VERIFIED_ADDED` returned on first read when remote item matches.
   - Stage 2: `INTEGRITY_VIOLATION` returned on first read when duplicate remote IDs discovered.
@@ -1067,5 +1100,13 @@ Implemented and statically verified (33 new unit and PostgreSQL integration test
   - `markExternalOperationStartedForSession` records operation UUID and stage on pending claim.
   - State B recovery: discovers remote playlist matching operation UUID and safely takes over claim with new leader generation.
   - State B recovery: fails closed into `ClaimResult.reconciliationRequired` when remote playlist outcome is ambiguous.
-- `ApprovedMigrationOrchestratorTest`:
-  - Updated `executesSuccessfulMigration` and `prepareQueuedMigrationSuccess` to verify pre-allocated intent and confirmation flow.
+- `ExternalOperationTransactionPropagationTest` (9 unit tests with `TrackingDataSource`):
+  - Destination playlist reconciliation suspends inherited transaction; HTTP reads and sleep execute without active transaction.
+  - Track insertion reconciliation suspends inherited transaction; grace periods and remote inspections execute without active transaction.
+  - Playlist creation service suspends inherited transaction; external YouTube HTTP call executes without active transaction.
+  - YouTubeMusicDestinationAdapter suspends inherited transaction across all destination mutations and read calls.
+  - DefaultApprovedMigrationOrchestrator suspends inherited transaction, separating DB phases and external calls cleanly.
+  - Non-transactional caller: all external operations and grace periods execute cleanly without active transaction.
+  - Ambient transaction retains database connection during suspension: proves `NOT_SUPPORTED` alone does NOT release the database connection or locks (connection remains checked out in `SuspendedResourcesHolder` until outer transaction commits).
+  - Canonical production execution path: holds zero connections and zero locks during external calls and reconciliation sleeps (discrete persistence operations check out and release immediately via `TransactionTemplate`).
+  - Architectural invariant: Canonical production entry points (`MigrationExecutionController`, `MigrationController`, `MigrationJobDispatcher`, `MigrationBackgroundWorker`, `DurableMigrationScheduler`, `DefaultMigrationIdempotencyService`, `ApiIdempotencyFilter`) are strictly non-transactional.

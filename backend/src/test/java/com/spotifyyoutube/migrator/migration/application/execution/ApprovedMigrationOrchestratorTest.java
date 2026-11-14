@@ -21,6 +21,9 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Vali
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
+import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.DestinationPlaylistReconciliationService;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.PlaylistReconciliationResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -29,6 +32,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.mockito.Mockito;
+import org.springframework.web.client.ResourceAccessException;
+
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
@@ -638,6 +645,221 @@ class ApprovedMigrationOrchestratorTest {
             assertThatThrownBy(() -> orchestrator.executeClaimedMigration(executionId, null, 1L))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Authenticated user ID must not be null");
+        }
+    }
+
+    @Nested
+    @DisplayName("Phase 13F: Playlist Creation Failure Classification (Audit Finding 1)")
+    class PlaylistCreationFailureClassificationTests {
+
+        private DestinationPlaylistReconciliationService playlistReconciliationService;
+        private DefaultApprovedMigrationOrchestrator orchestratorWithRecon;
+
+        @BeforeEach
+        void setUpReconciliation() {
+            playlistReconciliationService = Mockito.mock(DestinationPlaylistReconciliationService.class);
+            orchestratorWithRecon = new DefaultApprovedMigrationOrchestrator(
+                    executionService,
+                    playlistCreationService,
+                    executionStateService,
+                    null,
+                    playlistReconciliationService
+            );
+
+            when(executionService.validateExecution(any(), eq(userId))).thenReturn(ExecutionValidationResult.valid(validContext));
+            when(executionStateService.getExecutionByReviewSession(sessionId, userId)).thenThrow(new ResourceNotFoundException("Not found"));
+        }
+
+        @Test
+        @DisplayName("Ambiguous timeout invokes playlist reconciliation and recovers on match")
+        void ambiguousTimeoutInvokesReconciliation() {
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, null, null, "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ResourceAccessException("Connection timed out"));
+
+            DestinationPlaylist matchedPlaylist = new DestinationPlaylist(
+                    "yt_reconciled_123", "Target Playlist", "Description", "private",
+                    "https://youtube.com/playlist?list=yt_reconciled_123", Platform.YOUTUBE
+            );
+            when(playlistReconciliationService.reconcilePlaylistCreation(eq(userId), any(UUID.class), any()))
+                    .thenReturn(PlaylistReconciliationResult.exactMatch(matchedPlaylist, "Found matching marker"));
+
+            when(executionStateService.confirmDestinationPlaylist(eq(executionId), eq("yt_reconciled_123"), any(), any(), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, "yt_reconciled_123", "https://youtube.com/playlist?list=yt_reconciled_123", "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            when(executionStateService.executeTrackInsertion(executionId, userId))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, "yt_reconciled_123", "https://youtube.com/playlist?list=yt_reconciled_123", "Source Playlist",
+                            MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                            false, false, Instant.now(), Instant.now(), Collections.emptyList()
+                    ));
+
+            MigrationExecutionSummary summary = orchestratorWithRecon.executeApprovedMigration(request, userId);
+
+            assertThat(summary).isNotNull();
+            assertThat(summary.destinationPlaylistId()).isEqualTo("yt_reconciled_123");
+            verify(playlistReconciliationService).reconcilePlaylistCreation(eq(userId), any(UUID.class), any());
+        }
+
+        @Test
+        @DisplayName("Ambiguous 500 server error invokes playlist reconciliation")
+        void ambiguous500ServerFailureInvokesReconciliation() {
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, null, null, "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(new ExternalProviderException("YouTube 500 Internal Server Error", 500));
+
+            DestinationPlaylist matchedPlaylist = new DestinationPlaylist(
+                    "yt_reconciled_500", "Target Playlist", "Description", "private",
+                    "https://youtube.com/playlist?list=yt_reconciled_500", Platform.YOUTUBE
+            );
+            when(playlistReconciliationService.reconcilePlaylistCreation(eq(userId), any(UUID.class), any()))
+                    .thenReturn(PlaylistReconciliationResult.exactMatch(matchedPlaylist, "Found matching marker"));
+
+            when(executionStateService.confirmDestinationPlaylist(eq(executionId), eq("yt_reconciled_500"), any(), any(), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, "yt_reconciled_500", "https://youtube.com/playlist?list=yt_reconciled_500", "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            when(executionStateService.executeTrackInsertion(executionId, userId))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, "yt_reconciled_500", "https://youtube.com/playlist?list=yt_reconciled_500", "Source Playlist",
+                            MigrationExecutionStatus.COMPLETED, 2, 2, 0, 0, 0,
+                            false, false, Instant.now(), Instant.now(), Collections.emptyList()
+                    ));
+
+            MigrationExecutionSummary summary = orchestratorWithRecon.executeApprovedMigration(request, userId);
+
+            assertThat(summary).isNotNull();
+            assertThat(summary.destinationPlaylistId()).isEqualTo("yt_reconciled_500");
+            verify(playlistReconciliationService).reconcilePlaylistCreation(eq(userId), any(UUID.class), any());
+        }
+
+        @Test
+        @DisplayName("HTTP 400 Bad Request does NOT invoke reconciliation and rethrows original exception")
+        void http400BadRequestDoesNotInvokeReconciliation() {
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, null, null, "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            ExternalProviderException badRequestEx = new ExternalProviderException("Bad Request: invalid title", 400);
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(badRequestEx);
+
+            assertThatThrownBy(() -> orchestratorWithRecon.executeApprovedMigration(request, userId))
+                    .isSameAs(badRequestEx);
+
+            verify(playlistReconciliationService, never()).reconcilePlaylistCreation(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Permission-denied HTTP 403 does NOT invoke reconciliation and rethrows")
+        void permissionDenied403DoesNotInvokeReconciliation() {
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, null, null, "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            ExternalProviderException forbiddenEx = new ExternalProviderException("Forbidden: insufficient permissions", 403);
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(forbiddenEx);
+
+            assertThatThrownBy(() -> orchestratorWithRecon.executeApprovedMigration(request, userId))
+                    .isSameAs(forbiddenEx);
+
+            verify(playlistReconciliationService, never()).reconcilePlaylistCreation(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Authentication failure HTTP 401 does NOT invoke reconciliation and rethrows")
+        void authenticationFailureDoesNotInvokeReconciliation() {
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, null, null, "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            ExternalProviderException authEx = new ExternalProviderException("Invalid credentials", 401);
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(authEx);
+
+            assertThatThrownBy(() -> orchestratorWithRecon.executeApprovedMigration(request, userId))
+                    .isSameAs(authEx);
+
+            verify(playlistReconciliationService, never()).reconcilePlaylistCreation(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Unexpected programming exception (NPE) does NOT invoke reconciliation and rethrows")
+        void unexpectedProgrammingExceptionDoesNotInvokeReconciliation() {
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(new MigrationExecutionSummary(
+                            executionId, sessionId, validContext.planId(), userId,
+                            Platform.YOUTUBE, null, null, "Source Playlist",
+                            MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
+                            false, false, Instant.now(), null, Collections.emptyList()
+                    ));
+
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
+                    .thenThrow(new NullPointerException("Null snippet detected"));
+
+            assertThatThrownBy(() -> orchestratorWithRecon.executeApprovedMigration(request, userId))
+                    .isInstanceOf(NullPointerException.class)
+                    .hasMessageContaining("Null snippet detected");
+
+            verify(playlistReconciliationService, never()).reconcilePlaylistCreation(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Direct classification test: differentiates ambiguous vs definite exceptions")
+        void testIsAmbiguousPlaylistCreationOutcome() {
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ResourceAccessException("Timeout"))).isTrue();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new SocketTimeoutException("Read timeout"))).isTrue();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("500", 500))).isTrue();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("502", 502))).isTrue();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("503", 503))).isTrue();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("504", 504))).isTrue();
+
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("400", 400))).isFalse();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("401", 401))).isFalse();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("403", 403))).isFalse();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new ExternalProviderException("404", 404))).isFalse();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new NullPointerException())).isFalse();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new IllegalArgumentException())).isFalse();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(new IllegalStateException())).isFalse();
+            assertThat(orchestratorWithRecon.isAmbiguousPlaylistCreationOutcome(null)).isFalse();
         }
     }
 }

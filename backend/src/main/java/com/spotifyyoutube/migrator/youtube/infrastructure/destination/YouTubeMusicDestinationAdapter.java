@@ -22,6 +22,8 @@ import com.spotifyyoutube.migrator.youtube.api.dto.YouTubeVideoSummaryResponse;
 import com.spotifyyoutube.migrator.youtube.application.YouTubePlaylistService;
 import com.spotifyyoutube.migrator.youtube.application.YouTubeSearchService;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,6 +35,7 @@ import java.util.UUID;
  * Adapts YouTube search and playlist services to the provider-neutral destination contract.
  */
 @Component
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class YouTubeMusicDestinationAdapter implements MusicDestination {
 
     private final YouTubeSearchService searchService;

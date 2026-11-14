@@ -478,12 +478,16 @@ public class YouTubePlaylistService {
         String currentPageToken = null;
         List<DestinationPlaylist> allPlaylists = new ArrayList<>();
         int pageCount = 0;
+        boolean completedCleanly = false;
 
         while (pageCount < MAX_INSPECTION_PAGES) {
             pageCount++;
             YouTubePlaylistListResponseDto responseDto = youTubeClient.getMyPlaylists(accessToken, 50, currentPageToken);
-            if (responseDto == null || responseDto.items() == null) {
-                break;
+            if (responseDto == null) {
+                throw new ExternalProviderException("YouTube returned null playlist response on page " + pageCount);
+            }
+            if (responseDto.items() == null) {
+                throw new ExternalProviderException("YouTube returned null playlist items collection on page " + pageCount);
             }
 
             for (YouTubePlaylistDto item : responseDto.items()) {
@@ -508,15 +512,20 @@ public class YouTubePlaylistService {
 
             String nextPageToken = responseDto.nextPageToken();
             if (nextPageToken == null || nextPageToken.isBlank()) {
+                completedCleanly = true;
                 break;
             }
 
             if (seenPageTokens.contains(nextPageToken)) {
-                break;
+                throw new ExternalProviderException("Detected cycle in YouTube playlist pagination tokens: " + nextPageToken);
             }
 
             seenPageTokens.add(nextPageToken);
             currentPageToken = nextPageToken;
+        }
+
+        if (!completedCleanly) {
+            throw new ExternalProviderException("YouTube playlist inspection exceeded maximum limit of " + MAX_INSPECTION_PAGES + " pages");
         }
 
         return Collections.unmodifiableList(allPlaylists);

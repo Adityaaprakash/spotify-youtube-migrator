@@ -13,6 +13,8 @@ import com.spotifyyoutube.migrator.youtube.application.YouTubePlaylistService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 
@@ -35,6 +37,7 @@ import java.util.regex.Pattern;
  * </ol>
  */
 @Service
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class DefaultDestinationPlaylistCreationService implements DestinationPlaylistCreationService {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultDestinationPlaylistCreationService.class);

@@ -16,6 +16,9 @@ import com.spotifyyoutube.migrator.migration.application.execution.contract.Reco
 import com.spotifyyoutube.migrator.migration.application.execution.contract.RollbackExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ValidationFailureCode;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.reliability.classification.ProviderFailureCategory;
+import com.spotifyyoutube.migrator.migration.reliability.classification.ProviderFailureClassification;
+import com.spotifyyoutube.migrator.migration.reliability.classification.ProviderFailureClassifier;
 import com.spotifyyoutube.migrator.migration.reliability.idempotency.ClaimOwnershipContext;
 import com.spotifyyoutube.migrator.migration.reliability.idempotency.MigrationIdempotencyService;
 import com.spotifyyoutube.migrator.migration.reliability.idempotency.StaleClaimOwnershipException;
@@ -27,6 +30,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -39,6 +44,7 @@ import java.util.UUID;
  * transaction boundaries, idempotency invariants, and security ownership.
  */
 @Service
+@Transactional(propagation = Propagation.NOT_SUPPORTED)
 public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultApprovedMigrationOrchestrator.class);
@@ -48,13 +54,14 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
     private final MigrationExecutionStateService executionStateService;
     private final MigrationIdempotencyService idempotencyService;
     private final DestinationPlaylistReconciliationService playlistReconciliationService;
+    private final ProviderFailureClassifier providerFailureClassifier;
 
     public DefaultApprovedMigrationOrchestrator(
             ApprovedMigrationExecutionService executionService,
             DestinationPlaylistCreationService playlistCreationService,
             MigrationExecutionStateService executionStateService
     ) {
-        this(executionService, playlistCreationService, executionStateService, null, null);
+        this(executionService, playlistCreationService, executionStateService, null, null, null);
     }
 
     public DefaultApprovedMigrationOrchestrator(
@@ -63,7 +70,17 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
             MigrationExecutionStateService executionStateService,
             MigrationIdempotencyService idempotencyService
     ) {
-        this(executionService, playlistCreationService, executionStateService, idempotencyService, null);
+        this(executionService, playlistCreationService, executionStateService, idempotencyService, null, null);
+    }
+
+    public DefaultApprovedMigrationOrchestrator(
+            ApprovedMigrationExecutionService executionService,
+            DestinationPlaylistCreationService playlistCreationService,
+            MigrationExecutionStateService executionStateService,
+            MigrationIdempotencyService idempotencyService,
+            DestinationPlaylistReconciliationService playlistReconciliationService
+    ) {
+        this(executionService, playlistCreationService, executionStateService, idempotencyService, playlistReconciliationService, null);
     }
 
     @Autowired
@@ -72,13 +89,17 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
             DestinationPlaylistCreationService playlistCreationService,
             MigrationExecutionStateService executionStateService,
             @Autowired(required = false) MigrationIdempotencyService idempotencyService,
-            @Autowired(required = false) DestinationPlaylistReconciliationService playlistReconciliationService
+            @Autowired(required = false) DestinationPlaylistReconciliationService playlistReconciliationService,
+            @Autowired(required = false) ProviderFailureClassifier providerFailureClassifier
     ) {
         this.executionService = Objects.requireNonNull(executionService, "ApprovedMigrationExecutionService must not be null");
         this.playlistCreationService = Objects.requireNonNull(playlistCreationService, "DestinationPlaylistCreationService must not be null");
         this.executionStateService = Objects.requireNonNull(executionStateService, "MigrationExecutionStateService must not be null");
         this.idempotencyService = idempotencyService;
         this.playlistReconciliationService = playlistReconciliationService;
+        this.providerFailureClassifier = providerFailureClassifier != null
+                ? providerFailureClassifier
+                : new ProviderFailureClassifier();
     }
 
     @Override
@@ -321,8 +342,8 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
             destinationPlaylistUrl = playlistResult.destinationPlaylistUrl();
             log.info("Destination playlist created successfully: {}", destinationPlaylistId);
         } catch (Exception ex) {
-            if (playlistReconciliationService != null) {
-                log.warn("Destination playlist creation failed with {}. Initiating external reconciliation for session {} with opId {}",
+            if (isAmbiguousPlaylistCreationOutcome(ex) && playlistReconciliationService != null) {
+                log.warn("Destination playlist creation failed with ambiguous outcome {}. Initiating external reconciliation for session {} with opId {}",
                         ex.getMessage(), request.reviewSessionId(), opId);
                 PlaylistReconciliationResult recon = playlistReconciliationService.reconcilePlaylistCreation(
                         authenticatedUserId, opId, request.getTargetPlaylistTitle().orElse(null)
@@ -399,6 +420,21 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
         }
 
         throw new InvalidStateException("Cannot reconcile ALLOCATING_DESTINATION execution without reconciliation service");
+    }
+
+    boolean isAmbiguousPlaylistCreationOutcome(Exception ex) {
+        if (ex == null) {
+            return false;
+        }
+        if (ex instanceof IllegalArgumentException
+                || ex instanceof NullPointerException
+                || ex instanceof IllegalStateException
+                || ex instanceof MigrationExecutionValidationException) {
+            return false;
+        }
+
+        ProviderFailureClassification classification = providerFailureClassifier.classify(ex);
+        return classification.category() == ProviderFailureCategory.TRANSIENT_SERVER_ERROR;
     }
 
     private record DestinationPlaylistDetails(String playlistId, String playlistUrl) {}
