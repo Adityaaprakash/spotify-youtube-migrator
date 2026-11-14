@@ -92,6 +92,9 @@ public class MigrationIdempotencyRecord {
     @Column(name = "destination_playlist_id", length = 255)
     private String destinationPlaylistId;
 
+    @Column(name = "playlist_creation_operation_id")
+    private UUID playlistCreationOperationId;
+
     @Column(name = "claim_stage", nullable = false, length = 32)
     private String claimStage = STAGE_ACQUIRED;
 
@@ -367,6 +370,14 @@ public class MigrationIdempotencyRecord {
 
     public void setDestinationPlaylistId(String destinationPlaylistId) {
         this.destinationPlaylistId = destinationPlaylistId;
+    }
+
+    public UUID getPlaylistCreationOperationId() {
+        return playlistCreationOperationId;
+    }
+
+    public void setPlaylistCreationOperationId(UUID playlistCreationOperationId) {
+        this.playlistCreationOperationId = playlistCreationOperationId;
     }
 
     public void setClaimStage(String claimStage) {

@@ -10,6 +10,7 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.Desti
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackDetails;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -101,4 +102,12 @@ public interface MusicDestination {
      * @return inspection result containing all remote playlist items or error details
      */
     DestinationPlaylistInspection inspectPlaylist(UUID userId, String playlistId);
+
+    /**
+     * Retrieves all playlists owned by the authenticated user at the destination (Phase 13F).
+     *
+     * @param userId user identifier possessing destination authorization
+     * @return list of playlists owned by the user
+     */
+    List<DestinationPlaylist> getUserPlaylists(UUID userId);
 }

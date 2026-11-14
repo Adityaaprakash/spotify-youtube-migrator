@@ -2,15 +2,16 @@
 
 Last Updated: 2026-11-09
 
-Current Phase: Phase 13 — Reliability Engineering [PHASE 13E IMPLEMENTED & AUDITED — FINAL CLAIM FENCING, CRASH SAFETY AUDIT & FREEZE GATE]
-Current Subphase: Phase 13E — API Idempotency [IMPLEMENTED & AUDITED — READY FOR LOCAL RUNTIME VERIFICATION] -> Phase 13F — External Operation Safety & Reconciliation [UNSTARTED & BLOCKED]
+Current Phase: Phase 13 — Reliability Engineering [PHASE 13F IMPLEMENTED & AUDITED — EXTERNAL OPERATION SAFETY & RECONCILIATION]
+Current Subphase: Phase 13F — External Operation Safety & Reconciliation [IMPLEMENTED — READY FOR LOCAL RUNTIME VERIFICATION] -> Phase 13G — Migration Recovery & Resume Integration [UNSTARTED & BLOCKED]
 Latest Pushed Commit: af88f3aa0df0230a5dfe14d9840c39391ea5a05c
 
 ## Verification Status & Release Gate
+- **Phase 13F Engineering Audit Status**: IMPLEMENTED & STATIC-REVIEWED — READY FOR LOCAL RUNTIME VERIFICATION (Flyway V13 `V13__phase13f_external_operation_safety.sql` schema evolution: nullable `destination_playlist_id` in `ALLOCATING_DESTINATION` status, partial unique index on `playlist_creation_operation_id`, attempt counters, failure codes, and idempotency key operation binding; `PlaylistCorrelationMarker` with deterministic `[ref: migrator-op:<uuid>]` formatting, 5,000 char length limits, description preservation, and duplicate marker avoidance; `DestinationPlaylistReconciliationService` with bounded two-stage inspection covering Cases A-E; `TrackOccurrenceMatcher` with pure deterministic 1-to-1 occurrence mapping preserving intentional duplicate tracks in source playlists while failing closed on extra remote items, ordering anomalies, or duplicate playlist item IDs; `TrackInsertionReconciliationService` with mandatory initial 3-second grace period and second confirmation read; `DefaultApprovedMigrationOrchestrator` pre-allocation workflow; and `DefaultMigrationIdempotencyService` State B crash recovery integration. 5 new test classes added: `PlaylistCorrelationMarkerTest`, `TrackOccurrenceMatcherTest`, `DestinationPlaylistReconciliationServiceTest`, `TrackInsertionReconciliationServiceTest`, `ExternalOperationSafetyPostgresIT`).
 - **Phase 13E Engineering Audit Status**: IMPLEMENTED & STATIC-REVIEWED — READY FOR LOCAL RUNTIME VERIFICATION (Flyway V11 `migration_idempotency_keys` baseline and V12 claim-protocol evolution with monotonic claim fencing `claim_owner`, `claim_generation`, `heartbeat_at`, `destination_playlist_id`, and `claim_stage`; `IdempotencyClaimHeartbeatService` executing independent background claim lease renewals; `ClaimOwnershipContext` thread-local fencing propagation; conditional ownership completion/release throwing `StaleClaimOwnershipException`; crash recovery safely distinguishing States A, B, and C to prevent duplicate playlist creation; safe Phase 13D scheduler delegation; 7 test classes with 89 tests across unit, filter, WebMvc API, and Testcontainers PostgreSQL integration suites, Checkstyle compliant with 0 violations).
 - **Phase 13D Engineering Audit Status**: IMPLEMENTED & AUDITED — READY FOR FREEZE PENDING LOCAL RUNTIME VERIFICATION (Phases 13D-A through 13D-F fully integrated, 49 unit test methods and 48 integration test methods implemented, Checkstyle compliant with 0 violations, PostgreSQL database wall-clock interval enforced for retry scheduling to eliminate clock skew).
 - **Runtime Verification Status**: PENDING LOCAL TERMINAL EXECUTION (`.\mvnw.cmd clean verify`). Terminal command execution on host is restricted by IDE security policy (`permission check failed for command ... unexpected user interaction type: not permission`).
-- **Clean Test Compilation**: STATIC AUDIT PASSED (zero syntax or import errors in production and test suites across all 13E subsystems; local verification pending terminal execution).
+- **Clean Test Compilation**: STATIC AUDIT PASSED (zero syntax or import errors in production and test suites across all 13F subsystems; local verification pending terminal execution).
 
 - **Checkstyle Hygiene**: STATIC AUDIT PASSED (0 unused imports, zero wildcard imports, line lengths strictly <= 120 characters across all classes and tests).
 - **Final Engineering Audit Status**: PASSED WITH LIMITATIONS (All confirmed production and test defects resolved with regression coverage; terminal command execution on host remains blocked by IDE security policy).
@@ -45,6 +46,40 @@ Latest Pushed Commit: af88f3aa0df0230a5dfe14d9840c39391ea5a05c
 - **Host Security Permission Notice**: Terminal command execution on the host machine is restricted by the IDE host security policy (`permission check failed for command ... unexpected user interaction type: not permission`). Static analysis, code inspection, defect remediation, and regression test suites confirm complete architectural and invariant compliance.
 
 ## Completed
+### Phase 13F (External Operation Safety & Reconciliation) [IMPLEMENTED & AUDITED — READY FOR LOCAL RUNTIME VERIFICATION]
+- **Implemented Subsystem**: Delivered comprehensive external operation idempotency and reconciliation (`V13__phase13f_external_operation_safety.sql`, `com.spotifyyoutube.migrator.migration.reliability.reconciliation`) safeguarding external write mutations to the YouTube Data API against network timeouts, HTTP 5xx responses, process crashes, duplicate playlist creation, and duplicate track insertions while strictly preserving intentional duplicate tracks.
+- **Pre-Allocated Execution Intent (`ALLOCATING_DESTINATION`)**:
+  - Flyway V13 relaxed `destination_playlist_id NOT NULL` constraint on `migration_executions`, permitting durable intent persistence prior to calling YouTube.
+  - Added `playlist_creation_operation_id UUID`, `playlist_creation_attempt_count INT NOT NULL DEFAULT 0`, `playlist_creation_max_attempts INT NOT NULL DEFAULT 3`, `playlist_creation_next_attempt_at TIMESTAMPTZ`, and `playlist_creation_failure_code VARCHAR(50)`.
+  - Added partial unique index `idx_migrationexecutions_active_op_id` on `(playlist_creation_operation_id) WHERE status = 'ALLOCATING_DESTINATION'`.
+  - Added `playlist_creation_operation_id UUID` to `migration_idempotency_keys` with index.
+  - `MigrationExecutionStatus.ALLOCATING_DESTINATION` introduced without altering the 8 track execution status states.
+- **Machine-Parseable Correlation Marker**:
+  - `PlaylistCorrelationMarker`: Enforces deterministic format `[ref: migrator-op:<uuid>]`.
+  - Strict regex pattern `^\[ref: migrator-op:([0-9a-fA-F-]{36})\]$`.
+  - Preserves user description, truncates base description if combined length exceeds YouTube's 5,000 character limit, avoids duplicate marker application, and extracts single vs multiple markers.
+- **Destination Playlist Reconciliation**:
+  - `YouTubeClient` and `YouTubePlaylistService`: Implemented `getMyPlaylists(accessToken, maxResults, pageToken)` and `getUserPlaylists(userId)` with full pagination across all pages up to `MAX_INSPECTION_PAGES = 100`, token refreshing, and cycle detection.
+  - `DestinationPlaylistReconciliationService`: Implements bounded two-stage inspection with configurable grace period (default 3s).
+  - Handles Cases A through E: `EXACT_MATCH_FOUND` (Case A), `CONCLUSIVELY_ABSENT` (Case B, verified across two consecutive reads), `TITLE_COLLISION` (Case C), `MULTIPLE_MATCHING_MARKERS` (Case D, integrity violation), and `PROVIDER_ERROR` (Case E).
+- **Deterministic Track Occurrence Matcher (1-to-1 Mapping)**:
+  - `TrackOccurrenceMatcher`: Pure, deterministic matching engine between ordered source playlist occurrences and remote playlist items.
+  - Strictly preserves intentional duplicate tracks in source playlists (e.g. multiple tracks sharing the same YouTube video ID) by mapping them 1-to-1 based on targetPosition order.
+  - Fails closed into `INTEGRITY_VIOLATION` if unexpected extra remote occurrences are discovered, remote playlist item IDs are duplicated, or remote item IDs were already assigned to prior tracks.
+- **Multi-Stage Track Insertion Reconciliation**:
+  - `TrackInsertionReconciliationService`: Enforces mandatory initial 3-second grace period (accounting for YouTube read-after-write replication lag) $\to$ first read $\to$ occurrence match $\to$ second 3-second grace period $\to$ second confirmation read $\to$ occurrence match $\to$ confirmed absent.
+  - Zero HTTP requests or thread sleeps executed inside database transactions.
+- **Orchestration & Idempotency Integration**:
+  - `DefaultApprovedMigrationOrchestrator`: Pre-allocates `MigrationExecution` in `ALLOCATING_DESTINATION` status with unique operation UUID before initiating external playlist creation. On ambiguous timeout or 5xx, executes reconciliation; confirms playlist identity on match, or fails into `RECOVERY_REQUIRED`.
+  - `DefaultMigrationIdempotencyService`: State B crash recovery reconciles external playlist creation using `playlistCreationOperationId`. On exact match or conclusive absence, safely takes over claim with new generation; fails closed into `ClaimResult.reconciliationRequired` on ambiguity.
+- **Comprehensive Test Coverage**:
+  - `PlaylistCorrelationMarkerTest` (9 unit tests): Formatting, parsing, idempotency, 5000-char bounds, multiple markers, invalid UUID.
+  - `TrackOccurrenceMatcherTest` (7 unit tests): Single track, intentional duplicates (2 and 3 occurrences), duplicate remote IDs, extra remote items, reused remote items, target track missing.
+  - `DestinationPlaylistReconciliationServiceTest` (6 unit tests): Cases A, B (eventual consistency on 2nd read), C, D, E.
+  - `TrackInsertionReconciliationServiceTest` (5 unit tests): First read verified, duplicate remote IDs integrity violation, second read verified after replication lag, confirmed absent after 2 reads, cancellation during grace period, provider failure.
+  - `ExternalOperationSafetyPostgresIT` (6 integration tests): Pre-allocated intent persistence, confirmation transition, partial unique index constraint enforcement, idempotency operation ID binding, State B recovery exact match takeover, State B ambiguity fail-closed.
+  - `ApprovedMigrationOrchestratorTest`: Updated to verify Phase 13F pre-allocated intent workflow.
+
 ### Phase 13E (API Idempotency Contract, Concurrency Hardening & Verification) [IMPLEMENTED & REMEDIATED — READY FOR LOCAL RUNTIME VERIFICATION]
 - **Implemented Subsystem**: Delivered end-to-end API idempotency contract, database-backed atomic claim protocol, and persistence infrastructure (`V11__phase13e_api_idempotency_keys.sql`, `V12__phase13e_idempotency_claim_protocol.sql`, `com.spotifyyoutube.migrator.migration.reliability.idempotency`) safeguarding migration submissions against double-clicks, browser retries, network timeouts, client retry storms, lost HTTP responses, and concurrent duplicate submissions.
 - **SecurityFilterChain Integration & Authentication Resolution**:

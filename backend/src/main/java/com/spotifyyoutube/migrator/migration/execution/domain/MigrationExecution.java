@@ -68,11 +68,26 @@ public class MigrationExecution extends BaseEntity {
     @Column(name = "destination_platform", nullable = false)
     private Platform destinationPlatform = Platform.YOUTUBE;
 
-    @Column(name = "destination_playlist_id", nullable = false)
+    @Column(name = "destination_playlist_id")
     private String destinationPlaylistId;
 
     @Column(name = "destination_playlist_url", length = 2048)
     private String destinationPlaylistUrl;
+
+    @Column(name = "playlist_creation_operation_id")
+    private UUID playlistCreationOperationId;
+
+    @Column(name = "playlist_creation_attempt_count", nullable = false)
+    private int playlistCreationAttemptCount = 0;
+
+    @Column(name = "playlist_creation_max_attempts", nullable = false)
+    private int playlistCreationMaxAttempts = 3;
+
+    @Column(name = "playlist_creation_next_attempt_at")
+    private Instant playlistCreationNextAttemptAt;
+
+    @Column(name = "playlist_creation_failure_code", length = 50)
+    private String playlistCreationFailureCode;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
@@ -195,6 +210,33 @@ public class MigrationExecution extends BaseEntity {
         this.sourcePlaylistTitle = sourcePlaylistTitle != null ? sourcePlaylistTitle : "Migrated Playlist";
         this.planId = planId;
         this.status = MigrationExecutionStatus.INITIALIZED;
+    }
+
+    /**
+     * Pre-allocates execution intent before initiating remote playlist creation (Phase 13F).
+     * Binds user, session, and approved tracks while awaiting remote playlist identity.
+     */
+    public MigrationExecution(
+            User user,
+            ReviewSession reviewSession,
+            ApprovedMigrationContext context,
+            UUID playlistCreationOperationId
+    ) {
+        this.user = Objects.requireNonNull(user, "User must not be null");
+        this.reviewSession = Objects.requireNonNull(reviewSession, "ReviewSession must not be null");
+        Objects.requireNonNull(context, "ApprovedMigrationContext must not be null");
+        this.playlistCreationOperationId = Objects.requireNonNull(playlistCreationOperationId, "playlistCreationOperationId must not be null");
+        this.planId = context.planId();
+        this.sourcePlaylistId = context.sourcePlaylistId();
+        this.sourcePlaylistTitle = context.sourcePlaylistTitle() != null ? context.sourcePlaylistTitle() : "Migrated Playlist";
+        this.destinationPlatform = Platform.YOUTUBE;
+        this.destinationPlaylistId = null;
+        this.destinationPlaylistUrl = null;
+        this.status = MigrationExecutionStatus.ALLOCATING_DESTINATION;
+        this.playlistCreationAttemptCount = 1;
+        this.playlistCreationMaxAttempts = 3;
+
+        initializeTracks(context);
     }
 
     /**
@@ -467,6 +509,70 @@ public class MigrationExecution extends BaseEntity {
 
     public String getDestinationPlaylistUrl() {
         return destinationPlaylistUrl;
+    }
+
+    public UUID getPlaylistCreationOperationId() {
+        return playlistCreationOperationId;
+    }
+
+    public void setPlaylistCreationOperationId(UUID playlistCreationOperationId) {
+        this.playlistCreationOperationId = playlistCreationOperationId;
+    }
+
+    public int getPlaylistCreationAttemptCount() {
+        return playlistCreationAttemptCount;
+    }
+
+    public void setPlaylistCreationAttemptCount(int playlistCreationAttemptCount) {
+        this.playlistCreationAttemptCount = playlistCreationAttemptCount;
+    }
+
+    public int getPlaylistCreationMaxAttempts() {
+        return playlistCreationMaxAttempts;
+    }
+
+    public void setPlaylistCreationMaxAttempts(int playlistCreationMaxAttempts) {
+        this.playlistCreationMaxAttempts = playlistCreationMaxAttempts;
+    }
+
+    public Instant getPlaylistCreationNextAttemptAt() {
+        return playlistCreationNextAttemptAt;
+    }
+
+    public void setPlaylistCreationNextAttemptAt(Instant playlistCreationNextAttemptAt) {
+        this.playlistCreationNextAttemptAt = playlistCreationNextAttemptAt;
+    }
+
+    public String getPlaylistCreationFailureCode() {
+        return playlistCreationFailureCode;
+    }
+
+    public void setPlaylistCreationFailureCode(String playlistCreationFailureCode) {
+        this.playlistCreationFailureCode = playlistCreationFailureCode;
+    }
+
+    public void incrementPlaylistCreationAttempt() {
+        this.playlistCreationAttemptCount++;
+    }
+
+    public void recordPlaylistCreationFailure(String failureCode, Instant nextAttemptAt) {
+        this.playlistCreationFailureCode = failureCode;
+        this.playlistCreationNextAttemptAt = nextAttemptAt;
+    }
+
+    public void markPlaylistCreated(String destinationPlaylistId, String destinationPlaylistUrl, MigrationExecutionStatus nextStatus) {
+        if (this.status != MigrationExecutionStatus.ALLOCATING_DESTINATION
+                && this.status != MigrationExecutionStatus.RECOVERY_REQUIRED
+                && this.status != MigrationExecutionStatus.INITIALIZED) {
+            throw new InvalidStateException("Cannot mark playlist created from status: " + this.status);
+        }
+        if (destinationPlaylistId == null || destinationPlaylistId.isBlank()) {
+            throw new IllegalArgumentException("destinationPlaylistId must not be blank");
+        }
+        this.destinationPlaylistId = destinationPlaylistId.trim();
+        this.destinationPlaylistUrl = destinationPlaylistUrl != null ? destinationPlaylistUrl.trim() : null;
+        this.status = nextStatus != null ? nextStatus : MigrationExecutionStatus.INITIALIZED;
+        this.playlistCreationFailureCode = null;
     }
 
     public MigrationExecutionStatus getStatus() {

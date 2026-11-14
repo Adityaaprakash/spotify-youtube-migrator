@@ -16,6 +16,11 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.DestinationPlaylistReconciliationService;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.PlaylistReconciliationOutcome;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.PlaylistReconciliationResult;
+
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -44,6 +49,7 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
     private final Clock clock;
     private final ObjectMapper objectMapper;
     private final IdempotencyClaimHeartbeatService claimHeartbeatService;
+    private final DestinationPlaylistReconciliationService playlistReconciliationService;
 
     public DefaultMigrationIdempotencyService(
             MigrationIdempotencyRepository repository,
@@ -52,7 +58,18 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
             Clock clock,
             ObjectMapper objectMapper
     ) {
-        this(repository, executionRepository, transactionManager, clock, objectMapper, null);
+        this(repository, executionRepository, transactionManager, clock, objectMapper, null, null);
+    }
+
+    public DefaultMigrationIdempotencyService(
+            MigrationIdempotencyRepository repository,
+            MigrationExecutionRepository executionRepository,
+            PlatformTransactionManager transactionManager,
+            Clock clock,
+            ObjectMapper objectMapper,
+            IdempotencyClaimHeartbeatService claimHeartbeatService
+    ) {
+        this(repository, executionRepository, transactionManager, clock, objectMapper, claimHeartbeatService, null);
     }
 
     @Autowired
@@ -62,7 +79,8 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
             PlatformTransactionManager transactionManager,
             @Autowired(required = false) Clock clock,
             @Autowired(required = false) ObjectMapper objectMapper,
-            @Autowired(required = false) IdempotencyClaimHeartbeatService claimHeartbeatService
+            @Autowired(required = false) IdempotencyClaimHeartbeatService claimHeartbeatService,
+            @Autowired(required = false) DestinationPlaylistReconciliationService playlistReconciliationService
     ) {
         this.repository = Objects.requireNonNull(repository, "MigrationIdempotencyRepository must not be null");
         this.executionRepository = executionRepository;
@@ -72,6 +90,7 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
         this.clock = clock != null ? clock : Clock.systemUTC();
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
         this.claimHeartbeatService = claimHeartbeatService;
+        this.playlistReconciliationService = playlistReconciliationService;
     }
 
     @Override
@@ -274,6 +293,68 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
         if (existing.getDestinationPlaylistId() != null
                 || MigrationIdempotencyRecord.STAGE_EXTERNAL_OPERATION_STARTED.equals(existing.getClaimStage())
                 || MigrationIdempotencyRecord.STAGE_PLAYLIST_CREATED.equals(existing.getClaimStage())) {
+
+            // Phase 13F: If playlistCreationOperationId is available, attempt reconciliation before failing closed
+            UUID opId = existing.getPlaylistCreationOperationId();
+            if (opId != null && playlistReconciliationService != null) {
+                log.info("State B: Reconciling external playlist creation for expired claim {} using opId {}",
+                        idempotencyKey, opId);
+                PlaylistReconciliationResult recon = playlistReconciliationService.reconcilePlaylistCreation(
+                        existing.getUserId(), opId, null
+                );
+                if (recon.isExactMatch()) {
+                    DestinationPlaylist matched = recon.matchedPlaylist();
+                    log.info("State B: Discovered matching destination playlist {} for claim {}. Recording and taking over claim.",
+                            matched.id(), idempotencyKey);
+                    requiresNewTemplate.execute(statusTx -> {
+                        repository.recordDestinationPlaylistForSession(expectedReviewSessionId, matched.id());
+                        return null;
+                    });
+                    String newOwner = UUID.randomUUID().toString();
+                    long expectedGen = existing.getClaimGeneration();
+                    Integer updated = requiresNewTemplate.execute(statusTx ->
+                            repository.takeOverClaimWithFencingDatabaseTime(
+                                    existing.getId(),
+                                    newOwner,
+                                    expectedGen,
+                                    DEFAULT_CLAIM_TIMEOUT.toSeconds()
+                            )
+                    );
+                    if (updated != null && updated > 0) {
+                        MigrationIdempotencyRecord reloaded = requiresNewTemplate.execute(statusTx ->
+                                repository.findByUserIdAndIdempotencyKey(existing.getUserId(), idempotencyKey)
+                        ).orElse(existing);
+                        return ClaimResult.acquired(reloaded, newOwner, expectedGen + 1);
+                    }
+                } else if (recon.outcome() == PlaylistReconciliationOutcome.CONCLUSIVELY_ABSENT) {
+                    log.info("State B: Playlist conclusively absent on destination for opId {}. Safe to take over claim.", opId);
+                    String newOwner = UUID.randomUUID().toString();
+                    long expectedGen = existing.getClaimGeneration();
+                    Integer updated = requiresNewTemplate.execute(statusTx ->
+                            repository.takeOverClaimWithFencingDatabaseTime(
+                                    existing.getId(),
+                                    newOwner,
+                                    expectedGen,
+                                    DEFAULT_CLAIM_TIMEOUT.toSeconds()
+                            )
+                    );
+                    if (updated != null && updated > 0) {
+                        MigrationIdempotencyRecord reloaded = requiresNewTemplate.execute(statusTx ->
+                                repository.findByUserIdAndIdempotencyKey(existing.getUserId(), idempotencyKey)
+                        ).orElse(existing);
+                        return ClaimResult.acquired(reloaded, newOwner, expectedGen + 1);
+                    }
+                } else {
+                    log.warn("State B: Reconciliation for opId {} returned {}: {}. Failing closed.",
+                            opId, recon.outcome(), recon.diagnosticMessage());
+                    return ClaimResult.reconciliationRequired(
+                            "Migration execution requires reconciliation: external playlist outcome ambiguous ("
+                                    + recon.outcome() + ": " + recon.diagnosticMessage() + ")",
+                            existing
+                    );
+                }
+            }
+
             log.warn("State B: Claim {} expired after external operation may have started (stage: {}, playlistId: {}). "
                             + "Failing closed into reconciliation required condition.",
                     idempotencyKey, existing.getClaimStage(), existing.getDestinationPlaylistId());
@@ -498,6 +579,11 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
 
     @Override
     public int markExternalOperationStartedForSession(UUID reviewSessionId) {
+        return markExternalOperationStartedForSession(reviewSessionId, null);
+    }
+
+    @Override
+    public int markExternalOperationStartedForSession(UUID reviewSessionId, UUID operationId) {
         if (reviewSessionId == null) {
             return 0;
         }
@@ -508,20 +594,30 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
                 throw new StaleClaimOwnershipException(ctx.idempotencyKey(), ctx.claimOwner(), ctx.claimGeneration());
             }
 
-            Integer updated = requiresNewTemplate.execute(status ->
-                    repository.markExternalOperationStartedWithFencing(
+            Integer updated = requiresNewTemplate.execute(status -> {
+                if (operationId != null) {
+                    return repository.markExternalOperationStartedWithFencing(
+                            ctx.claimId(), ctx.claimOwner(), ctx.claimGeneration(), operationId
+                    );
+                } else {
+                    return repository.markExternalOperationStartedWithFencing(
                             ctx.claimId(), ctx.claimOwner(), ctx.claimGeneration()
-                    )
-            );
+                    );
+                }
+            });
             if (updated == null || updated == 0) {
                 throw new StaleClaimOwnershipException(ctx.idempotencyKey(), ctx.claimOwner(), ctx.claimGeneration());
             }
             return updated;
         }
 
-        Integer updated = requiresNewTemplate.execute(status ->
-                repository.markExternalOperationStartedForSession(reviewSessionId)
-        );
+        Integer updated = requiresNewTemplate.execute(status -> {
+            if (operationId != null) {
+                return repository.markExternalOperationStartedForSession(reviewSessionId, operationId);
+            } else {
+                return repository.markExternalOperationStartedForSession(reviewSessionId);
+            }
+        });
         return updated != null ? updated : 0;
     }
 

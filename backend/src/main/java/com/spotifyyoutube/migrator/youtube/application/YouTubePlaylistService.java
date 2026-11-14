@@ -33,6 +33,7 @@ import org.springframework.web.client.RestClientException;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -449,5 +450,75 @@ public class YouTubePlaylistService {
         } catch (Exception ex) {
             return DestinationPlaylistInspection.failed(trimmedPlaylistId, "Unexpected inspection failure: " + ex.getMessage(), startedAt);
         }
+    }
+
+    /**
+     * Retrieves all destination playlists owned by the authenticated user with complete pagination (Phase 13F).
+     * Used for post-failure playlist creation reconciliation.
+     *
+     * @param userId user identifier possessing YouTube authorization
+     * @return unmodifiable list of destination playlists
+     */
+    public List<DestinationPlaylist> getUserPlaylists(UUID userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("User ID must not be null");
+        }
+
+        OAuthConnection connection = tokenLifecycleService.refreshConnectionIfNeeded(userId, OAuthProvider.GOOGLE);
+        if (connection == null || connection.getStatus() != ConnectionStatus.CONNECTED) {
+            throw new InvalidStateException("Google account is not connected or requires reauthorization.");
+        }
+
+        String accessToken = connection.getAccessToken();
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new InvalidStateException("Google access token is not available. Please reconnect your Google account.");
+        }
+
+        Set<String> seenPageTokens = new HashSet<>();
+        String currentPageToken = null;
+        List<DestinationPlaylist> allPlaylists = new ArrayList<>();
+        int pageCount = 0;
+
+        while (pageCount < MAX_INSPECTION_PAGES) {
+            pageCount++;
+            YouTubePlaylistListResponseDto responseDto = youTubeClient.getMyPlaylists(accessToken, 50, currentPageToken);
+            if (responseDto == null || responseDto.items() == null) {
+                break;
+            }
+
+            for (YouTubePlaylistDto item : responseDto.items()) {
+                if (item == null || item.id() == null || item.id().isBlank()) {
+                    continue;
+                }
+                String playlistId = item.id().trim();
+                String title = item.snippet() != null ? item.snippet().title() : null;
+                String description = item.snippet() != null ? item.snippet().description() : null;
+                String privacy = item.status() != null ? item.status().privacyStatus() : null;
+                String url = "https://www.youtube.com/playlist?list=" + playlistId;
+
+                allPlaylists.add(new DestinationPlaylist(
+                        playlistId,
+                        title,
+                        description,
+                        privacy,
+                        url,
+                        Platform.YOUTUBE
+                ));
+            }
+
+            String nextPageToken = responseDto.nextPageToken();
+            if (nextPageToken == null || nextPageToken.isBlank()) {
+                break;
+            }
+
+            if (seenPageTokens.contains(nextPageToken)) {
+                break;
+            }
+
+            seenPageTokens.add(nextPageToken);
+            currentPageToken = nextPageToken;
+        }
+
+        return Collections.unmodifiableList(allPlaylists);
     }
 }

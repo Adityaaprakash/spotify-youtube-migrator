@@ -111,23 +111,24 @@ class ApprovedMigrationOrchestratorTest {
             when(executionStateService.getExecutionByReviewSession(sessionId, userId))
                     .thenThrow(new ResourceNotFoundException("Not found"));
 
-            // Step 3: Playlist created
+            // Step 3 & 4: Intent initialized and destination playlist created (Phase 13F)
             DestinationPlaylistCreationResult playlistResult = new DestinationPlaylistCreationResult(
                     sessionId, validContext.planId(), userId,
                     Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target",
                     "Target Playlist", "Description", true, 2, Instant.now()
             );
-            when(playlistCreationService.createDestinationPlaylist(request, userId))
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
                     .thenReturn(playlistResult);
 
-            // Step 4: Durable execution initialized
             MigrationExecutionSummary initSummary = new MigrationExecutionSummary(
                     executionId, sessionId, validContext.planId(), userId,
                     Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target", "Source Playlist",
                     MigrationExecutionStatus.INITIALIZED, 2, 0, 0, 0, 0,
                     false, false, Instant.now(), null, Collections.emptyList()
             );
-            when(executionStateService.initializeExecution(any(InitializeExecutionRequest.class), eq(userId)))
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(initSummary);
+            when(executionStateService.confirmDestinationPlaylist(eq(executionId), eq("yt_pl_target"), any(), any(), eq(userId)))
                     .thenReturn(initSummary);
 
             // Step 5: Ordered track insertion completes
@@ -149,8 +150,9 @@ class ApprovedMigrationOrchestratorTest {
             assertThat(result.failedInsertions()).isEqualTo(0);
 
             verify(executionService).validateExecution(request, userId);
-            verify(playlistCreationService).createDestinationPlaylist(request, userId);
-            verify(executionStateService).initializeExecution(any(InitializeExecutionRequest.class), eq(userId));
+            verify(playlistCreationService).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId));
+            verify(executionStateService).initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId));
+            verify(executionStateService).confirmDestinationPlaylist(eq(executionId), eq("yt_pl_target"), any(), any(), eq(userId));
             verify(executionStateService).executeTrackInsertion(executionId, userId);
         }
 
@@ -473,7 +475,7 @@ class ApprovedMigrationOrchestratorTest {
                     Platform.YOUTUBE, "yt_pl_target", "https://youtube.com/playlist?list=yt_pl_target",
                     "Target Playlist", "Description", true, 2, Instant.now()
             );
-            when(playlistCreationService.createDestinationPlaylist(request, userId)).thenReturn(playlistResult);
+            when(playlistCreationService.createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId))).thenReturn(playlistResult);
 
             MigrationExecutionSummary queuedSummary = new MigrationExecutionSummary(
                     executionId, sessionId, validContext.planId(), userId,
@@ -481,7 +483,11 @@ class ApprovedMigrationOrchestratorTest {
                     MigrationExecutionStatus.QUEUED, 2, 0, 0, 0, 0,
                     false, false, null, null, Collections.emptyList()
             );
-            when(executionStateService.initializeQueuedExecution(any(InitializeExecutionRequest.class), eq(userId)))
+            when(executionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
+                    .thenReturn(queuedSummary);
+            when(executionStateService.confirmDestinationPlaylist(eq(executionId), eq("yt_pl_target"), any(), any(), eq(userId)))
+                    .thenReturn(queuedSummary);
+            when(executionStateService.getExecution(eq(executionId), eq(userId)))
                     .thenReturn(queuedSummary);
 
             MigrationExecutionSummary result = orchestrator.prepareQueuedMigration(request, userId);
@@ -491,8 +497,10 @@ class ApprovedMigrationOrchestratorTest {
             assertThat(result.executionId()).isEqualTo(executionId);
 
             verify(executionService).validateExecution(request, userId);
-            verify(playlistCreationService).createDestinationPlaylist(request, userId);
-            verify(executionStateService).initializeQueuedExecution(any(InitializeExecutionRequest.class), eq(userId));
+            verify(playlistCreationService).createDestinationPlaylist(any(ApprovedMigrationExecutionRequest.class), eq(userId));
+            verify(executionStateService).initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId));
+            verify(executionStateService).confirmDestinationPlaylist(eq(executionId), eq("yt_pl_target"), any(), any(), eq(userId));
+            verify(executionStateService).getExecution(eq(executionId), eq(userId));
         }
 
         @Test

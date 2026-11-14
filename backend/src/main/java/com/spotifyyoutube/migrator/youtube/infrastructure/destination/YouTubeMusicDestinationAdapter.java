@@ -181,4 +181,9 @@ public class YouTubeMusicDestinationAdapter implements MusicDestination {
                 Platform.YOUTUBE
         );
     }
+
+    @Override
+    public List<DestinationPlaylist> getUserPlaylists(UUID userId) {
+        return playlistService.getUserPlaylists(userId);
+    }
 }

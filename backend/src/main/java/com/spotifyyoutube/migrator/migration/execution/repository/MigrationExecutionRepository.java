@@ -24,6 +24,8 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
 
     Optional<MigrationExecution> findByReviewSessionId(UUID reviewSessionId);
 
+    Optional<MigrationExecution> findByPlaylistCreationOperationId(UUID playlistCreationOperationId);
+
     Optional<MigrationExecution> findByIdAndUserId(UUID id, UUID userId);
 
     List<MigrationExecution> findByUserIdOrderByCreatedAtDesc(UUID userId);

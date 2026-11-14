@@ -755,3 +755,31 @@ Controllers MUST NOT:
 4. **Process-Local Rate Limiter**: `InMemoryProgressPollingRateLimiter` sliding window is stored in local JVM memory. Does not synchronize quotas across horizontal application nodes; cluster-wide rate limiting belongs to Phase 19.
 5. **In-Memory Queue Volatility**: Executor queue (`LinkedBlockingQueue` capacity 50) is volatile in JVM memory. Durable queue crash recovery and reconciliation belong to Phase 13.
 6. **Delivery Protocol**: Polling-only over REST. WebSockets/SSE and frontend integration belong to Phase 15.
+
+## Reliability Engineering Layer (Phase 13F — External Operation Safety & Reconciliation)
+
+- Packages: `com.spotifyyoutube.migrator.migration.reliability.reconciliation`
+- Purpose: Prevent duplicate destination playlists and duplicate track insertions when communicating with the YouTube Data API across network timeouts, 5xx responses, and process crashes, while strictly preserving intentional duplicate tracks in source playlists.
+- Architecture Rules:
+  - **Single Execution Aggregate**: `MigrationExecution` remains the sole authoritative execution aggregate root; no secondary execution aggregate is created.
+  - **Zero Distributed Infrastructure**: Rejects Redis, RabbitMQ, and Kafka. PostgreSQL MVCC and row-level locking serve as the durable source of truth.
+  - **Out-of-Transaction Remote Mutations**: External HTTP requests to the YouTube Data API (playlist creation, playlist listing, item insertion, item inspection) and grace period thread sleeps MUST NEVER execute inside database transactions.
+  - **Pre-Allocated Intent Protocol (`ALLOCATING_DESTINATION`)**:
+    - Before calling YouTube `POST /playlists`, a `MigrationExecution` intent record MUST be persisted with `status = 'ALLOCATING_DESTINATION'`, `destination_playlist_id = NULL`, and a unique `playlist_creation_operation_id` (UUID).
+    - Enforced by partial unique index `idx_migrationexecutions_active_op_id` on `(playlist_creation_operation_id) WHERE status = 'ALLOCATING_DESTINATION'`.
+    - Once YouTube creates or reconciles the playlist, the execution transitions atomically to `INITIALIZED` or `QUEUED` with `destination_playlist_id` populated.
+  - **Deterministic Correlation Marker**:
+    - Appends machine-parseable marker `[ref: migrator-op:<playlist_creation_operation_id>]` to the playlist description.
+    - Preserves user description, bounds total description length to 5,000 characters, avoids duplicate marker application, and detects single vs multiple markers.
+  - **Bounded Two-Stage Playlist Reconciliation**:
+    - `DestinationPlaylistReconciliationService` searches the authenticated user's playlists across all pages up to 100 pages with cycle detection.
+    - Classifies outcomes into 5 deterministic cases: `EXACT_MATCH_FOUND` (Case A), `CONCLUSIVELY_ABSENT` (Case B, verified across two consecutive reads with a 3-second grace period), `TITLE_COLLISION` (Case C), `MULTIPLE_MATCHING_MARKERS` (Case D, integrity violation), and `PROVIDER_ERROR` (Case E).
+  - **Deterministic 1-to-1 Track Occurrence Matching**:
+    - `TrackOccurrenceMatcher` preserves intentional duplicate tracks by mapping multiple source occurrences sharing the same destination video ID 1-to-1 to remote playlist items ordered by targetPosition.
+    - Fails closed into `INTEGRITY_VIOLATION` if unexpected extra remote occurrences are discovered, remote playlist item IDs are duplicated, or remote item IDs were already claimed by prior tracks.
+  - **Two-Stage Track Insertion Reconciliation**:
+    - `TrackInsertionReconciliationService` enforces the mandatory sequence: initial 3-second grace period $\to$ first read $\to$ occurrence match $\to$ second 3-second grace period $\to$ second confirmation read $\to$ occurrence match $\to$ confirmed absent.
+  - **Idempotency State B Crash Recovery Integration**:
+    - When an idempotency claim expires in `EXTERNAL_OPERATION_STARTED` with `playlist_creation_operation_id`, `recoverExpiredClaim` attempts reconciliation before failing closed. On exact match, it records `destination_playlist_id` on the claim and safely takes over with a monotonic generation increment.
+  - **Eight-State Track Conservation Invariant**:
+    - The 8 track execution statuses (`PENDING`, `ADDING`, `ADDED`, `FAILED`, `UNCERTAIN`, `SKIPPED`, `ROLLING_BACK`, `ROLLED_BACK`) and progress count conservation invariant remain strictly preserved. No persistent `RETRYING` track status is permitted.

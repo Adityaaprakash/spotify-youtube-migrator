@@ -214,4 +214,52 @@ public interface MigrationExecutionStateService {
      * @return reconciliation status and eligible tracks
      */
     com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionReconciliationStatusDto getReconciliationStatus(UUID executionId, UUID authenticatedUserId);
+
+    /**
+     * Pre-allocates execution intent in ALLOCATING_DESTINATION status before external playlist creation (Phase 13F).
+     *
+     * @param reviewSessionId unique review session ID
+     * @param playlistCreationOperationId stable operation UUID
+     * @param authenticatedUserId ID of the authenticated user
+     * @return durable execution summary in ALLOCATING_DESTINATION status
+     */
+    MigrationExecutionSummary initializeExecutionIntent(
+            UUID reviewSessionId,
+            UUID playlistCreationOperationId,
+            UUID authenticatedUserId
+    );
+
+    /**
+     * Confirms the created destination playlist identity on a pre-allocated execution intent (Phase 13F).
+     *
+     * @param executionId execution identifier
+     * @param destinationPlaylistId created destination playlist ID
+     * @param destinationPlaylistUrl destination playlist URL
+     * @param nextStatus target lifecycle status (QUEUED or INITIALIZED)
+     * @param authenticatedUserId ID of the authenticated user
+     * @return updated execution summary
+     */
+    MigrationExecutionSummary confirmDestinationPlaylist(
+            UUID executionId,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus nextStatus,
+            UUID authenticatedUserId
+    );
+
+    /**
+     * Records a playlist creation failure code and transitions the execution to a target status (Phase 13F).
+     *
+     * @param executionId execution identifier
+     * @param failureCode diagnostic failure code
+     * @param nextStatus target lifecycle status (typically RECOVERY_REQUIRED)
+     * @param authenticatedUserId ID of the authenticated user
+     * @return updated execution summary
+     */
+    MigrationExecutionSummary recordPlaylistCreationFailure(
+            UUID executionId,
+            String failureCode,
+            com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus nextStatus,
+            UUID authenticatedUserId
+    );
 }

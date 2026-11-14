@@ -398,6 +398,29 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
     );
 
     /**
+     * Marks the claim stage as EXTERNAL_OPERATION_STARTED and records operationId protected by strict claim ownership,
+     * generation fencing, and active lease validity (Phase 13F).
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE migration_idempotency_keys
+            SET claim_stage = 'EXTERNAL_OPERATION_STARTED',
+                playlist_creation_operation_id = :operationId
+            WHERE id = :id
+              AND claim_owner = :claimOwner
+              AND claim_generation = :claimGeneration
+              AND status = 'PENDING'
+              AND claim_stage = 'ACQUIRED'
+              AND claim_expires_at > clock_timestamp()
+            """, nativeQuery = true)
+    int markExternalOperationStartedWithFencing(
+            @Param("id") UUID id,
+            @Param("claimOwner") String claimOwner,
+            @Param("claimGeneration") long claimGeneration,
+            @Param("operationId") UUID operationId
+    );
+
+    /**
      * Records the created destination playlist ID protected by strict claim ownership,
      * generation fencing, and active lease validity (Phase 13E).
      *
@@ -441,6 +464,24 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
               AND claim_expires_at > clock_timestamp()
             """, nativeQuery = true)
     int markExternalOperationStartedForSession(@Param("reviewSessionId") UUID reviewSessionId);
+
+    /**
+     * Records external operation started with stable operation UUID on active pending claim.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE migration_idempotency_keys
+            SET claim_stage = 'EXTERNAL_OPERATION_STARTED',
+                playlist_creation_operation_id = :operationId
+            WHERE review_session_id = :reviewSessionId
+              AND status = 'PENDING'
+              AND claim_stage = 'ACQUIRED'
+              AND claim_expires_at > clock_timestamp()
+            """, nativeQuery = true)
+    int markExternalOperationStartedForSession(
+            @Param("reviewSessionId") UUID reviewSessionId,
+            @Param("operationId") UUID operationId
+    );
 
     /**
      * Records the created destination playlist ID on any active pending claim on the review session.

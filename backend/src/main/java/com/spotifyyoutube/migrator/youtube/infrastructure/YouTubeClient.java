@@ -249,6 +249,48 @@ public class YouTubeClient {
                 .body(YouTubePlaylistListResponseDto.class);
     }
 
+    public YouTubePlaylistListResponseDto getMyPlaylists(String accessToken, int maxResults, String pageToken) {
+        if (accessToken == null || accessToken.isBlank()) {
+            throw new IllegalArgumentException("Access token must not be blank");
+        }
+        if (maxResults <= 0) {
+            throw new IllegalArgumentException("maxResults must be greater than 0");
+        }
+
+        return restClient.get()
+                .uri(uriBuilder -> {
+                    var builder = uriBuilder.path("/playlists")
+                            .queryParam("part", "snippet,status")
+                            .queryParam("mine", "true")
+                            .queryParam("maxResults", maxResults);
+                    if (pageToken != null && !pageToken.isBlank()) {
+                        builder.queryParam("pageToken", pageToken.trim());
+                    }
+                    return builder.build();
+                })
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .retrieve()
+                .onStatus(status -> status.isError(), (req, res) -> {
+                    int statusCode = res.getStatusCode().value();
+                    String retryAfter = res.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+
+                    if (statusCode == 401) {
+                        throw new ExternalProviderException("YouTube API authentication failed: invalid or expired access token", 401);
+                    }
+                    if (statusCode == 403) {
+                        throw new ExternalProviderException("YouTube API request forbidden: insufficient permissions or quota exceeded", 403, retryAfter);
+                    }
+                    if (statusCode == 429) {
+                        throw new ExternalProviderException("YouTube API rate limit exceeded", 429, retryAfter);
+                    }
+                    if (statusCode == 400) {
+                        throw new ExternalProviderException("YouTube API request invalid", 400);
+                    }
+                    throw new ExternalProviderException("Failed to retrieve user playlists from YouTube", statusCode, retryAfter);
+                })
+                .body(YouTubePlaylistListResponseDto.class);
+    }
+
     public void removeVideoFromPlaylist(String accessToken, String playlistItemId) {
         if (accessToken == null || accessToken.isBlank()) {
             throw new IllegalArgumentException("Access token must not be blank");

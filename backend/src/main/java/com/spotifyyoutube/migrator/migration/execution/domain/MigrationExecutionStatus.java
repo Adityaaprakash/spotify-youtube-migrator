@@ -6,6 +6,11 @@ package com.spotifyyoutube.migrator.migration.execution.domain;
 public enum MigrationExecutionStatus {
 
     /**
+     * Playlist creation operation intent recorded; awaiting external destination playlist creation (Phase 13F).
+     */
+    ALLOCATING_DESTINATION,
+
+    /**
      * Execution created and track records initialized as PENDING; ready to begin insertion.
      */
     INITIALIZED,
@@ -73,7 +78,7 @@ public enum MigrationExecutionStatus {
      * Returns true if this execution is eligible for a rollback operation.
      */
     public boolean canRollback() {
-        return this != RUNNING && this != QUEUED && this != ROLLED_BACK;
+        return this != RUNNING && this != QUEUED && this != ROLLED_BACK && this != ALLOCATING_DESTINATION;
     }
 
     /**

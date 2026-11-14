@@ -126,6 +126,15 @@ public interface MigrationIdempotencyService {
     int markExternalOperationStartedForSession(UUID reviewSessionId);
 
     /**
+     * Signals that an external mutation has commenced, recording the stable operation UUID (Phase 13F).
+     *
+     * @param reviewSessionId review session identifier
+     * @param operationId stable playlist creation operation UUID
+     * @return number of updated pending claims
+     */
+    int markExternalOperationStartedForSession(UUID reviewSessionId, UUID operationId);
+
+    /**
      * Persists the allocated destination playlist ID to the pending claim record before execution creation.
      *
      * @param reviewSessionId       review session identifier

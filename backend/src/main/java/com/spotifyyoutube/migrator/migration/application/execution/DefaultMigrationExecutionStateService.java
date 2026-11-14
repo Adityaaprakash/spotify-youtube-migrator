@@ -53,6 +53,9 @@ import com.spotifyyoutube.migrator.migration.reliability.policy.RetryPolicy;
 import com.spotifyyoutube.migrator.migration.reliability.idempotency.MigrationIdempotencyService;
 import com.spotifyyoutube.migrator.migration.reliability.scheduling.DurableLeaseHeartbeatService;
 import com.spotifyyoutube.migrator.migration.reliability.scheduling.DurableSchedulerProperties;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.TrackInsertionReconciliationOutcome;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.TrackInsertionReconciliationResult;
+import com.spotifyyoutube.migrator.migration.reliability.reconciliation.TrackInsertionReconciliationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -101,6 +104,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     private final DurableLeaseHeartbeatService heartbeatService;
     private final DurableSchedulerProperties schedulerProperties;
     private final MigrationIdempotencyService idempotencyService;
+    private final TrackInsertionReconciliationService trackReconciliationService;
 
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,
@@ -116,7 +120,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             RetryPolicy retryPolicy,
             DurableLeaseHeartbeatService heartbeatService,
             DurableSchedulerProperties schedulerProperties,
-            MigrationIdempotencyService idempotencyService
+            MigrationIdempotencyService idempotencyService,
+            TrackInsertionReconciliationService trackReconciliationService
     ) {
         this.executionRepository = Objects.requireNonNull(
                 executionRepository, "MigrationExecutionRepository must not be null");
@@ -140,6 +145,44 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         this.heartbeatService = heartbeatService;
         this.schedulerProperties = schedulerProperties;
         this.idempotencyService = idempotencyService;
+        this.trackReconciliationService = trackReconciliationService != null
+                ? trackReconciliationService
+                : new TrackInsertionReconciliationService(this.musicDestination);
+    }
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
+            TransactionTemplate transactionTemplate,
+            ProviderFailureClassifier providerFailureClassifier,
+            RetryPolicy retryPolicy,
+            DurableLeaseHeartbeatService heartbeatService,
+            DurableSchedulerProperties schedulerProperties,
+            MigrationIdempotencyService idempotencyService
+    ) {
+        this(
+                executionRepository,
+                trackRecordRepository,
+                rollbackRecordRepository,
+                reconciliationRecordRepository,
+                reviewSessionRepository,
+                executionService,
+                musicDestination,
+                failureClassifier,
+                transactionTemplate,
+                providerFailureClassifier,
+                retryPolicy,
+                heartbeatService,
+                schedulerProperties,
+                idempotencyService,
+                null
+        );
     }
 
     public DefaultMigrationExecutionStateService(
@@ -254,7 +297,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             @org.springframework.beans.factory.annotation.Autowired(required = false) RetryPolicy retryPolicy,
             @org.springframework.beans.factory.annotation.Autowired(required = false) DurableLeaseHeartbeatService heartbeatService,
             @org.springframework.beans.factory.annotation.Autowired(required = false) DurableSchedulerProperties schedulerProperties,
-            @org.springframework.beans.factory.annotation.Autowired(required = false) MigrationIdempotencyService idempotencyService
+            @org.springframework.beans.factory.annotation.Autowired(required = false) MigrationIdempotencyService idempotencyService,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) TrackInsertionReconciliationService trackReconciliationService
     ) {
         this(
                 executionRepository,
@@ -270,7 +314,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 retryPolicy,
                 heartbeatService,
                 schedulerProperties,
-                idempotencyService
+                idempotencyService,
+                trackReconciliationService
         );
     }
 
@@ -379,6 +424,13 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 if (!existing.getUser().getId().equals(authenticatedUserId)) {
                     throw new ResourceNotFoundException("Review session not found for authenticated user: " + request.reviewSessionId());
                 }
+                if (existing.getStatus() == MigrationExecutionStatus.ALLOCATING_DESTINATION) {
+                    existing.markPlaylistCreated(playlistId, request.destinationPlaylistUrl(), MigrationExecutionStatus.INITIALIZED);
+                    MigrationExecution saved = executionRepository.saveAndFlush(existing);
+                    log.info("Confirmed destination playlist {} on existing execution {} in status INITIALIZED",
+                            playlistId, saved.getId());
+                    return MigrationExecutionSummary.from(saved);
+                }
                 if (!existing.getDestinationPlaylistId().equals(playlistId)) {
                     throw new InvalidStateException(String.format(
                             "Review session %s is already bound to destination playlist %s, cannot reinitialize with %s",
@@ -486,6 +538,13 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 if (!existing.getUser().getId().equals(authenticatedUserId)) {
                     throw new ResourceNotFoundException("Review session not found for authenticated user: " + request.reviewSessionId());
                 }
+                if (existing.getStatus() == MigrationExecutionStatus.ALLOCATING_DESTINATION) {
+                    existing.markPlaylistCreated(playlistId, request.destinationPlaylistUrl(), MigrationExecutionStatus.QUEUED);
+                    MigrationExecution saved = executionRepository.saveAndFlush(existing);
+                    log.info("Confirmed destination playlist {} on existing execution {} in status QUEUED",
+                            playlistId, saved.getId());
+                    return MigrationExecutionSummary.from(saved);
+                }
                 if (!existing.getDestinationPlaylistId().equals(playlistId)) {
                     throw new InvalidStateException(String.format(
                             "Review session %s is already bound to destination playlist %s, cannot reinitialize with %s",
@@ -532,6 +591,120 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             log.info("Initialized durable execution {} in QUEUED status for review session {} with {} approved tracks",
                     saved.getId(), request.reviewSessionId(), saved.getTotalApprovedTracks());
 
+            return MigrationExecutionSummary.from(saved);
+        });
+    }
+
+    @Override
+    public MigrationExecutionSummary initializeExecutionIntent(
+            UUID reviewSessionId,
+            UUID playlistCreationOperationId,
+            UUID authenticatedUserId
+    ) {
+        if (reviewSessionId == null) {
+            throw new IllegalArgumentException("Review session ID must not be null");
+        }
+        if (playlistCreationOperationId == null) {
+            throw new IllegalArgumentException("Playlist creation operation ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            Optional<MigrationExecution> existingOpt = executionRepository.findByReviewSessionId(reviewSessionId);
+            if (existingOpt.isPresent()) {
+                MigrationExecution existing = existingOpt.get();
+                if (!existing.getUser().getId().equals(authenticatedUserId)) {
+                    throw new ResourceNotFoundException("Review session not found for authenticated user: " + reviewSessionId);
+                }
+                log.info("Found existing execution {} in status {} for session {}",
+                        existing.getId(), existing.getStatus(), reviewSessionId);
+                return MigrationExecutionSummary.from(existing);
+            }
+
+            ApprovedMigrationContext context = executionService.prepareExecution(reviewSessionId, authenticatedUserId);
+            ReviewSession session = reviewSessionRepository.findById(reviewSessionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Review session not found: " + reviewSessionId));
+
+            if (!session.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Review session not found for authenticated user: " + reviewSessionId);
+            }
+
+            MigrationExecution execution = new MigrationExecution(
+                    session.getUser(),
+                    session,
+                    context,
+                    playlistCreationOperationId
+            );
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            log.info("Persisted execution intent {} in status ALLOCATING_DESTINATION for session {} with opId {}",
+                    saved.getId(), reviewSessionId, playlistCreationOperationId);
+            return MigrationExecutionSummary.from(saved);
+        });
+    }
+
+    @Override
+    public MigrationExecutionSummary confirmDestinationPlaylist(
+            UUID executionId,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            MigrationExecutionStatus nextStatus,
+            UUID authenticatedUserId
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (destinationPlaylistId == null || destinationPlaylistId.isBlank()) {
+            throw new IllegalArgumentException("Destination playlist ID must not be blank");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            execution.markPlaylistCreated(destinationPlaylistId, destinationPlaylistUrl, nextStatus);
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            log.info("Confirmed destination playlist {} for execution {} in status {}",
+                    destinationPlaylistId, executionId, saved.getStatus());
+            return MigrationExecutionSummary.from(saved);
+        });
+    }
+
+    @Override
+    public MigrationExecutionSummary recordPlaylistCreationFailure(
+            UUID executionId,
+            String failureCode,
+            MigrationExecutionStatus nextStatus,
+            UUID authenticatedUserId
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            execution.recordPlaylistCreationFailure(failureCode, null);
+            execution.setStatus(nextStatus != null ? nextStatus : MigrationExecutionStatus.RECOVERY_REQUIRED);
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            log.warn("Recorded playlist creation failure '{}' on execution {}; new status: {}",
+                    failureCode, executionId, saved.getStatus());
             return MigrationExecutionSummary.from(saved);
         });
     }
@@ -764,12 +937,98 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     }
                 } catch (ResourceAccessException ex) {
                     String sanitizedMsg = sanitize(ex.getMessage());
-                    log.warn("Insertion timed out for track {} in execution {}. Remote outcome is UNCERTAIN: {}",
+                    log.warn("Insertion timed out for track {} in execution {}. Reconciling ambiguous write outcome: {}",
                             track.getDestinationTrackId(), executionId, sanitizedMsg);
-                    trackErrorMessage = "Insertion timed out; remote outcome is uncertain: " + sanitizedMsg;
-                    trackFinalStatus = ExecutionTrackStatus.UNCERTAIN;
-                    break;
+
+                    List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                    TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
+                            authenticatedUserId,
+                            playlistId,
+                            trackId,
+                            allTracks,
+                            () -> heartbeatService != null && heartbeatService.isOwnershipLost(executionId)
+                    );
+
+                    if (recon.outcome() == TrackInsertionReconciliationOutcome.VERIFIED_ADDED) {
+                        log.info("Ambiguous insertion reconciled as VERIFIED_ADDED for track {} with item ID {}",
+                                track.getDestinationTrackId(), recon.destinationPlaylistItemId());
+                        trackSuccess = true;
+                        playlistItemId = recon.destinationPlaylistItemId();
+                        trackFinalStatus = ExecutionTrackStatus.ADDED;
+                        break;
+                    } else if (recon.outcome() == TrackInsertionReconciliationOutcome.INTEGRITY_VIOLATION) {
+                        log.error("Integrity violation during reconciliation for track {}: {}",
+                                track.getDestinationTrackId(), recon.diagnosticMessage());
+                        trackErrorMessage = "Integrity violation during reconciliation: " + recon.diagnosticMessage();
+                        trackFinalStatus = ExecutionTrackStatus.UNCERTAIN;
+                        break;
+                    } else if (recon.outcome() == TrackInsertionReconciliationOutcome.CONFIRMED_ABSENT) {
+                        log.info("Track {} confirmed absent remotely; evaluating retry policy", track.getDestinationTrackId());
+                        ProviderFailureClassification classification = providerFailureClassifier.classify(ex);
+                        RetryBudget budget = RetryBudget.of(currentAttempt, maxAttempts);
+                        RetryDecision decision = retryPolicy.evaluate(classification, RetryOperationType.TRACK_INSERTION, budget);
+                        if (decision.isInFlight()) {
+                            Duration delay = decision.delayOptional().orElse(Duration.ofMillis(500));
+                            if (delay.toMillis() <= 2000) {
+                                try {
+                                    Thread.sleep(delay.toMillis());
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                    trackErrorMessage = "Thread interrupted during retry delay";
+                                    trackFinalStatus = ExecutionTrackStatus.FAILED;
+                                    break;
+                                }
+                                currentAttempt++;
+                                if (heartbeatService != null && heartbeatService.isOwnershipLost(executionId)) {
+                                    throw new StaleLeaseOwnershipException(executionId, workerId, leaseGeneration, null, "Worker lease ownership lost");
+                                }
+                                continue;
+                            }
+                        }
+                        if (decision.isDeferred() || decision.isQuotaDeferred()) {
+                            Duration delay = decision.delayOptional().orElse(Duration.ofSeconds(30));
+                            Instant nextAttempt = Instant.now().plus(delay);
+                            long backoffMs = delay.toMillis();
+                            String catName = classification.category() != null ? classification.category().name() : "DEFERRED";
+                            trackRecordRepository.scheduleTrackRetryWithFencing(trackId, executionId, leaseGeneration, nextAttempt, catName, backoffMs);
+                            trackFinalStatus = null;
+                            deferredEncountered = true;
+                            break;
+                        }
+                        trackErrorMessage = "Insertion timed out and confirmed absent; attempts exhausted: " + sanitizedMsg;
+                        trackFinalStatus = ExecutionTrackStatus.FAILED;
+                        break;
+                    } else {
+                        trackErrorMessage = "Reconciliation inspection failed: " + recon.diagnosticMessage();
+                        trackFinalStatus = ExecutionTrackStatus.UNCERTAIN;
+                        break;
+                    }
                 } catch (ExternalProviderException ex) {
+                    if (ex.getProviderStatusCode() >= 500 && ex.getProviderStatusCode() <= 504) {
+                        log.warn("Transient server error HTTP {} for track {} in execution {}. Reconciling ambiguous write outcome.",
+                                ex.getProviderStatusCode(), track.getDestinationTrackId(), executionId);
+                        List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                        TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
+                                authenticatedUserId,
+                                playlistId,
+                                trackId,
+                                allTracks,
+                                () -> heartbeatService != null && heartbeatService.isOwnershipLost(executionId)
+                        );
+                        if (recon.outcome() == TrackInsertionReconciliationOutcome.VERIFIED_ADDED) {
+                            log.info("Server error insertion reconciled as VERIFIED_ADDED for track {} with item ID {}",
+                                    track.getDestinationTrackId(), recon.destinationPlaylistItemId());
+                            trackSuccess = true;
+                            playlistItemId = recon.destinationPlaylistItemId();
+                            trackFinalStatus = ExecutionTrackStatus.ADDED;
+                            break;
+                        } else if (recon.outcome() == TrackInsertionReconciliationOutcome.INTEGRITY_VIOLATION) {
+                            trackErrorMessage = "Integrity violation during reconciliation: " + recon.diagnosticMessage();
+                            trackFinalStatus = ExecutionTrackStatus.UNCERTAIN;
+                            break;
+                        }
+                    }
+
                     ProviderFailureClassification classification = providerFailureClassifier.classify(ex);
                     RetryBudget budget = RetryBudget.of(currentAttempt, maxAttempts);
                     RetryDecision decision = retryPolicy.evaluate(
@@ -1326,22 +1585,79 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 }
             } catch (ResourceAccessException ex) {
                 // Ambiguous failure: network timeout / connection reset
-                ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_insertion");
                 String sanitizedMsg = sanitize(ex.getMessage());
-                log.warn("Insertion timed out for track {} in execution {}. Remote outcome is UNCERTAIN: {}",
+                log.warn("Insertion timed out for track {} in execution {}. Reconciling ambiguous outcome: {}",
                         track.destinationTrackId(), executionId, sanitizedMsg);
 
-                transactionTemplate.execute(status -> {
-                    ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
-                            .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
-                    record.markUncertain("Insertion timed out; remote outcome is uncertain: " + sanitizedMsg);
-                    trackRecordRepository.saveAndFlush(record);
-                    return null;
-                });
-                stopRemaining = true;
-                stopReason = "timeout (uncertain outcome)";
-                break;
+                List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
+                        authenticatedUserId,
+                        playlistId,
+                        trackId,
+                        allTracks,
+                        null
+                );
+
+                if (recon.outcome() == TrackInsertionReconciliationOutcome.VERIFIED_ADDED) {
+                    log.info("Ambiguous insertion verified added for track {} with item ID {}",
+                            track.destinationTrackId(), recon.destinationPlaylistItemId());
+                    transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                        record.markAdded(recon.destinationPlaylistItemId());
+                        trackRecordRepository.saveAndFlush(record);
+                        return null;
+                    });
+                    currentDestinationIndex++;
+                } else if (recon.outcome() == TrackInsertionReconciliationOutcome.CONFIRMED_ABSENT) {
+                    transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                        record.markFailed("Insertion timed out and confirmed absent: " + sanitizedMsg);
+                        trackRecordRepository.saveAndFlush(record);
+                        return null;
+                    });
+                    stopRemaining = true;
+                    stopReason = "timeout (confirmed absent)";
+                    break;
+                } else {
+                    transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                        record.markUncertain("Insertion timed out; reconciliation inconclusive: " + recon.diagnosticMessage());
+                        trackRecordRepository.saveAndFlush(record);
+                        return null;
+                    });
+                    stopRemaining = true;
+                    stopReason = "timeout (" + recon.outcome() + ")";
+                    break;
+                }
             } catch (ExternalProviderException ex) {
+                if (ex.getProviderStatusCode() >= 500 && ex.getProviderStatusCode() <= 504) {
+                    log.warn("Transient server error HTTP {} for track {} in execution {}. Reconciling ambiguous outcome.",
+                            ex.getProviderStatusCode(), track.destinationTrackId(), executionId);
+                    List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                    TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
+                            authenticatedUserId,
+                            playlistId,
+                            trackId,
+                            allTracks,
+                            null
+                    );
+                    if (recon.outcome() == TrackInsertionReconciliationOutcome.VERIFIED_ADDED) {
+                        log.info("Server error insertion verified added for track {} with item ID {}",
+                                track.destinationTrackId(), recon.destinationPlaylistItemId());
+                        transactionTemplate.execute(status -> {
+                            ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
+                                    .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
+                            record.markAdded(recon.destinationPlaylistItemId());
+                            trackRecordRepository.saveAndFlush(record);
+                            return null;
+                        });
+                        currentDestinationIndex++;
+                        continue;
+                    }
+                }
                 ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_insertion");
                 String sanitizedMsg = sanitize(ex.getMessage());
                 log.error("Destination provider failed for track {} in execution {}: classification={}, msg={}",

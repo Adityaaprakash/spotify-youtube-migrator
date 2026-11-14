@@ -1024,3 +1024,48 @@ Implemented and verified:
 - **Phase 4 Complete & Frozen**: Unit, Service, WebMvcTest, and MockRestServiceServer tests pass cleanly across both Spotify and YouTube feature sets. Phase 4 is **FROZEN**.
 - **Docker Dependency**: Repository and full context integration testing (e.g., `PlaylistRepositoryTest`, `UserRepositoryTest`, `MigratorApplicationTests`) via `Testcontainers` is failing strictly due to the current execution environment lacking a functional Docker daemon binding. Non-container unit tests pass 100%.
 - **Format Verification**: `mvnw checkstyle:check` is completely passing with 0 violations.
+
+### Phase 13F Testing Scope (External Operation Safety & Reconciliation)
+Implemented and statically verified (33 new unit and PostgreSQL integration test methods across 5 new test classes, plus updated orchestrator test coverage):
+- `PlaylistCorrelationMarkerTest` (9 unit tests):
+  - Deterministic tag generation: `[ref: migrator-op:<uuid>]`.
+  - Null UUID rejection with `IllegalArgumentException`.
+  - Accurate extraction of UUID from marked text.
+  - Graceful empty return on unmarked, null, blank, or malformed marker strings.
+  - Marker application preserves existing user description.
+  - Idempotent application without duplicate tag insertion.
+  - 5,000 character length limit enforcement with deterministic base description truncation.
+  - Detection and rejection of multiple correlation markers (`hasSingleMarker`, `extractAllMarkers`).
+  - `matchesOperation` validation rejecting non-matching or multiple-marked descriptions.
+- `TrackOccurrenceMatcherTest` (7 unit tests):
+  - Single track confirmed absent when remote list is empty.
+  - Single track verified added when remote item is present.
+  - Intentional duplicates preservation: when 2 identical source tracks share a destination video ID, occurrence 1 matched to remote item 1, occurrence 2 confirmed absent when remote has only 1 item.
+  - Intentional duplicates verified added: occurrence 2 matched to remote item 2 when remote contains 2 items.
+  - Intentional duplicates 3 occurrences sequentially mapped 1-to-1.
+  - Fails closed into `INTEGRITY_VIOLATION` on duplicate remote playlist item IDs.
+  - Fails closed into `INTEGRITY_VIOLATION` on unexpected extra remote occurrences.
+  - Fails closed into `INTEGRITY_VIOLATION` when remote item ID was already claimed by a prior track.
+  - Fails closed into `INTEGRITY_VIOLATION` if target track ID is missing from source track list.
+- `DestinationPlaylistReconciliationServiceTest` (6 unit tests):
+  - Case A: `EXACT_MATCH_FOUND` returns matched playlist with single inspection read.
+  - Case B: `CONCLUSIVELY_ABSENT` confirmed after two inspection reads with grace period.
+  - Case B: Eventual consistency discovery on second read after replication lag.
+  - Case C: `TITLE_COLLISION` detected when remote playlist shares title but lacks marker.
+  - Case D: `MULTIPLE_MATCHING_MARKERS` detected as integrity violation when multiple playlists share marker.
+  - Case E: `PROVIDER_ERROR` handled gracefully on destination provider exception.
+- `TrackInsertionReconciliationServiceTest` (5 unit tests):
+  - Stage 2: `VERIFIED_ADDED` returned on first read when remote item matches.
+  - Stage 2: `INTEGRITY_VIOLATION` returned on first read when duplicate remote IDs discovered.
+  - Stage 4: `VERIFIED_ADDED` returned on second confirmation read after replication lag.
+  - Stage 4: `CONFIRMED_ABSENT` returned after two consecutive empty reads.
+  - Stage 1 / 3: `INSPECTION_FAILED` returned on grace period cancellation or provider inspection failure.
+- `ExternalOperationSafetyPostgresIT` (6 integration tests):
+  - Pre-allocated execution intent persists with `ALLOCATING_DESTINATION`, null `destination_playlist_id`, and `playlist_creation_operation_id`.
+  - Clean transition to `INITIALIZED` upon calling `markPlaylistCreated`.
+  - Partial unique index on `playlist_creation_operation_id` prevents concurrent active executions with identical operation UUID.
+  - `markExternalOperationStartedForSession` records operation UUID and stage on pending claim.
+  - State B recovery: discovers remote playlist matching operation UUID and safely takes over claim with new leader generation.
+  - State B recovery: fails closed into `ClaimResult.reconciliationRequired` when remote playlist outcome is ambiguous.
+- `ApprovedMigrationOrchestratorTest`:
+  - Updated `executesSuccessfulMigration` and `prepareQueuedMigrationSuccess` to verify pre-allocated intent and confirmation flow.
