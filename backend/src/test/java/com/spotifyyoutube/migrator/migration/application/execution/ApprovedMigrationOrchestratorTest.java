@@ -22,6 +22,7 @@ import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewDecisionSource;
 import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
+import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
 import com.spotifyyoutube.migrator.migration.reliability.reconciliation.DestinationPlaylistReconciliationService;
 import com.spotifyyoutube.migrator.migration.reliability.reconciliation.PlaylistReconciliationResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -666,7 +667,7 @@ class ApprovedMigrationOrchestratorTest {
                     playlistReconciliationService
             );
 
-            when(executionService.validateExecution(any(), eq(userId))).thenReturn(ExecutionValidationResult.valid(validContext));
+            when(executionService.validateExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId))).thenReturn(ExecutionValidationResult.valid(validContext));
             when(executionStateService.getExecutionByReviewSession(sessionId, userId)).thenThrow(new ResourceNotFoundException("Not found"));
         }
 

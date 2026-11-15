@@ -52,4 +52,24 @@ public record TrackInsertionReconciliationResult(
     public Optional<String> getDestinationPlaylistItemId() {
         return Optional.ofNullable(destinationPlaylistItemId);
     }
+
+    public boolean isVerifiedAdded() {
+        return outcome == TrackInsertionReconciliationOutcome.VERIFIED_ADDED;
+    }
+
+    public String verifiedPlaylistItemId() {
+        return destinationPlaylistItemId;
+    }
+
+    public boolean isConfirmedAbsent() {
+        return outcome == TrackInsertionReconciliationOutcome.CONFIRMED_ABSENT;
+    }
+
+    public boolean isIntegrityViolation() {
+        return outcome == TrackInsertionReconciliationOutcome.INTEGRITY_VIOLATION;
+    }
+
+    public boolean isInspectionFailed() {
+        return outcome == TrackInsertionReconciliationOutcome.INSPECTION_FAILED;
+    }
 }

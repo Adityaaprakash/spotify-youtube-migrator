@@ -560,8 +560,17 @@ class ExternalOperationTransactionPropagationTest {
         UUID sessionId = UUID.randomUUID();
         ApprovedMigrationExecutionRequest request = new ApprovedMigrationExecutionRequest(sessionId, userId);
 
+        ApprovedMigrationContext mockContext = mock(ApprovedMigrationContext.class);
+        when(mockContext.hasApprovedTracks()).thenReturn(true);
+        when(mockContext.targetPlaylistTitle()).thenReturn("Orchestrated Playlist");
+        when(mockContext.targetPlaylistDescription()).thenReturn("Orchestrated Desc");
+        when(mockContext.isPrivate()).thenReturn(false);
+        when(mockContext.reviewSessionId()).thenReturn(sessionId);
+        when(mockContext.planId()).thenReturn(UUID.randomUUID());
+        when(mockContext.approvedTrackCount()).thenReturn(1);
+
         when(mockExecutionService.validateExecution(request, userId))
-                .thenReturn(ExecutionValidationResult.valid());
+                .thenReturn(ExecutionValidationResult.valid(mockContext));
 
         MigrationExecutionSummary intent = new MigrationExecutionSummary(
                 UUID.randomUUID(), userId, sessionId, UUID.randomUUID(),
@@ -571,15 +580,6 @@ class ExternalOperationTransactionPropagationTest {
 
         when(mockExecutionStateService.initializeExecutionIntent(eq(sessionId), any(UUID.class), eq(userId)))
                 .thenReturn(intent);
-
-        ApprovedMigrationContext mockContext = mock(ApprovedMigrationContext.class);
-        when(mockContext.hasApprovedTracks()).thenReturn(true);
-        when(mockContext.targetPlaylistTitle()).thenReturn("Orchestrated Playlist");
-        when(mockContext.targetPlaylistDescription()).thenReturn("Orchestrated Desc");
-        when(mockContext.isPrivate()).thenReturn(false);
-        when(mockContext.reviewSessionId()).thenReturn(sessionId);
-        when(mockContext.planId()).thenReturn(UUID.randomUUID());
-        when(mockContext.approvedTrackCount()).thenReturn(1);
 
         when(mockExecutionService.prepareExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId)))
                 .thenReturn(mockContext);

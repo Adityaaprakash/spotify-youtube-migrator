@@ -347,6 +347,11 @@ public class MigrationIdempotencyRecord {
         this.claimStage = STAGE_EXTERNAL_OPERATION_STARTED;
     }
 
+    public void markExternalOperationStarted(UUID playlistCreationOperationId) {
+        this.claimStage = STAGE_EXTERNAL_OPERATION_STARTED;
+        this.playlistCreationOperationId = playlistCreationOperationId;
+    }
+
     public void recordDestinationPlaylist(String destinationPlaylistId) {
         this.destinationPlaylistId = destinationPlaylistId;
         this.claimStage = STAGE_PLAYLIST_CREATED;

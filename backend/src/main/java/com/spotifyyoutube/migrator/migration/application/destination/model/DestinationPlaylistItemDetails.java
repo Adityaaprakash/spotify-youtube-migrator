@@ -12,4 +12,8 @@ public record DestinationPlaylistItemDetails(
         Integer position,
         Instant publishedAt,
         String title
-) {}
+) {
+    public DestinationPlaylistItemDetails(String playlistItemId, String destinationTrackId, int position) {
+        this(playlistItemId, null, destinationTrackId, position, Instant.now(), null);
+    }
+}

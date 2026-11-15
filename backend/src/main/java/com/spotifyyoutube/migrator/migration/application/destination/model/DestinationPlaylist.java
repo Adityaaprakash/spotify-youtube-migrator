@@ -9,4 +9,8 @@ public record DestinationPlaylist(
         String privacyStatus,
         String url,
         Platform platform
-) {}
+) {
+    public DestinationPlaylist(String id, String title, String description, String url, Platform platform) {
+        this(id, title, description, "PRIVATE", url, platform);
+    }
+}

@@ -107,6 +107,25 @@ public class ExecutionTrackRecord extends BaseEntity {
         this.attemptCount = 0;
     }
 
+    public ExecutionTrackRecord(
+            MigrationExecution execution,
+            int targetPosition,
+            String sourceTrackId,
+            String destinationTrackId,
+            String sourceTitle,
+            String sourceArtist
+    ) {
+        this.execution = execution;
+        this.targetPosition = targetPosition;
+        this.sourcePosition = targetPosition;
+        this.sourceTrackId = sourceTrackId;
+        this.destinationTrackId = destinationTrackId;
+        this.sourceTitle = sourceTitle;
+        this.sourceArtist = sourceArtist;
+        this.status = ExecutionTrackStatus.PENDING;
+        this.attemptCount = 0;
+    }
+
     /**
      * Claims this track for insertion immediately prior to dispatching to the external destination provider.
      */

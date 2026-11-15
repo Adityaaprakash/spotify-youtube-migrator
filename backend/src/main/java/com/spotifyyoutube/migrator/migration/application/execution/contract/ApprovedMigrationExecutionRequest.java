@@ -33,6 +33,10 @@ public record ApprovedMigrationExecutionRequest(
         Objects.requireNonNull(reviewSessionId, "reviewSessionId must not be null");
     }
 
+    public ApprovedMigrationExecutionRequest(UUID reviewSessionId, UUID userId) {
+        this(reviewSessionId, userId, null, null, null, null, true, null);
+    }
+
     public static ApprovedMigrationExecutionRequest of(UUID reviewSessionId) {
         return new ApprovedMigrationExecutionRequest(
                 reviewSessionId, null, null, null, null, null, true, null

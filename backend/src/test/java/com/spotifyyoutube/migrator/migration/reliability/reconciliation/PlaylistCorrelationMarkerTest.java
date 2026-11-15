@@ -110,6 +110,49 @@ class PlaylistCorrelationMarkerTest {
             assertThat(result).endsWith(marker);
             assertThat(PlaylistCorrelationMarker.extractMarker(result)).contains(testOpId);
         }
+
+        @Test
+        @DisplayName("applyMarker throws on null operationId")
+        void applyMarkerThrowsOnNull() {
+            assertThatThrownBy(() -> PlaylistCorrelationMarker.applyMarker("Base", null))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        @Test
+        @DisplayName("applyMarker avoids splitting surrogate pair at boundary")
+        void applyMarkerAvoidsSplittingSurrogatePair() {
+            String marker = PlaylistCorrelationMarker.formatMarker(testOpId);
+            int markerLenWithSeparators = marker.length() + 2; // "\n\n"
+            int allowedBaseLen = 5000 - markerLenWithSeparators;
+
+            // Place an emoji (2 chars: \uD83D\uDE00) right across the truncation boundary
+            String prefix = "A".repeat(allowedBaseLen - 1);
+            String emoji = "\uD83D\uDE00";
+            String base = prefix + emoji + "extra";
+
+            String result = PlaylistCorrelationMarker.applyMarker(base, testOpId);
+
+            assertThat(result.length()).isLessThanOrEqualTo(5000);
+            assertThat(result).endsWith(marker);
+            assertThat(result).startsWith(prefix);
+            assertThat(result).doesNotContain(emoji);
+            assertThat(Character.isSurrogate(result.charAt(prefix.length() - 1))).isFalse();
+        }
+
+        @Test
+        @DisplayName("applyMarker exact boundary of 5000 characters")
+        void applyMarkerExactBoundary() {
+            String marker = PlaylistCorrelationMarker.formatMarker(testOpId);
+            int markerLenWithSeparators = marker.length() + 2;
+            int allowedBaseLen = 5000 - markerLenWithSeparators;
+
+            String exactBase = "B".repeat(allowedBaseLen);
+            String result = PlaylistCorrelationMarker.applyMarker(exactBase, testOpId);
+
+            assertThat(result.length()).isEqualTo(5000);
+            assertThat(result).startsWith(exactBase);
+            assertThat(result).endsWith(marker);
+        }
     }
 
     @Nested

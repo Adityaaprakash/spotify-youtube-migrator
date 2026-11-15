@@ -940,12 +940,12 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     log.warn("Insertion timed out for track {} in execution {}. Reconciling ambiguous write outcome: {}",
                             track.getDestinationTrackId(), executionId, sanitizedMsg);
 
-                    List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                    List<ExecutionTrackRecord> reconciliationTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
                     TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
                             authenticatedUserId,
                             playlistId,
                             trackId,
-                            allTracks,
+                            reconciliationTracks,
                             () -> heartbeatService != null && heartbeatService.isOwnershipLost(executionId)
                     );
 
@@ -1007,12 +1007,12 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     if (ex.getProviderStatusCode() >= 500 && ex.getProviderStatusCode() <= 504) {
                         log.warn("Transient server error HTTP {} for track {} in execution {}. Reconciling ambiguous write outcome.",
                                 ex.getProviderStatusCode(), track.getDestinationTrackId(), executionId);
-                        List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                        List<ExecutionTrackRecord> reconciliationTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
                         TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
                                 authenticatedUserId,
                                 playlistId,
                                 trackId,
-                                allTracks,
+                                reconciliationTracks,
                                 () -> heartbeatService != null && heartbeatService.isOwnershipLost(executionId)
                         );
                         if (recon.outcome() == TrackInsertionReconciliationOutcome.VERIFIED_ADDED) {
@@ -1589,12 +1589,12 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 log.warn("Insertion timed out for track {} in execution {}. Reconciling ambiguous outcome: {}",
                         track.destinationTrackId(), executionId, sanitizedMsg);
 
-                List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                List<ExecutionTrackRecord> reconciliationTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
                 TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
                         authenticatedUserId,
                         playlistId,
                         trackId,
-                        allTracks,
+                        reconciliationTracks,
                         null
                 );
 
@@ -1636,12 +1636,12 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 if (ex.getProviderStatusCode() >= 500 && ex.getProviderStatusCode() <= 504) {
                     log.warn("Transient server error HTTP {} for track {} in execution {}. Reconciling ambiguous outcome.",
                             ex.getProviderStatusCode(), track.destinationTrackId(), executionId);
-                    List<ExecutionTrackRecord> allTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                    List<ExecutionTrackRecord> reconciliationTracks = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
                     TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
                             authenticatedUserId,
                             playlistId,
                             trackId,
-                            allTracks,
+                            reconciliationTracks,
                             null
                     );
                     if (recon.outcome() == TrackInsertionReconciliationOutcome.VERIFIED_ADDED) {

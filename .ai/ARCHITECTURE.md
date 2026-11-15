@@ -771,12 +771,14 @@ Controllers MUST NOT:
   - **Deterministic Correlation Marker**:
     - Appends machine-parseable marker `[ref: migrator-op:<playlist_creation_operation_id>]` to the playlist description.
     - Preserves user description, bounds total description length to 5,000 characters, avoids duplicate marker application, and detects single vs multiple markers.
-  - **Bounded Two-Stage Playlist Reconciliation**:
-    - `DestinationPlaylistReconciliationService` searches the authenticated user's playlists across all pages up to 100 pages with cycle detection.
+  - **Bounded Two-Stage Playlist Reconciliation & Failure Classification (Phase 13F Corrective Remediation)**:
+    - Playlist reconciliation is triggered strictly for ambiguous outcomes (network timeout, socket/connection reset, transient 5xx) via `ProviderFailureClassifier`. Definite failures (HTTP 400, 401, 403, 404, validation errors) rethrow immediately.
+    - `YouTubePlaylistService.getUserPlaylists` enforces fail-closed complete pagination across all pages up to 100 pages, throwing `ExternalProviderException` on null response, null items, cycles, or truncation so `DestinationPlaylistReconciliationService` maps incomplete inspections strictly to `PROVIDER_ERROR` and never `CONCLUSIVELY_ABSENT`.
     - Classifies outcomes into 5 deterministic cases: `EXACT_MATCH_FOUND` (Case A), `CONCLUSIVELY_ABSENT` (Case B, verified across two consecutive reads with a 3-second grace period), `TITLE_COLLISION` (Case C), `MULTIPLE_MATCHING_MARKERS` (Case D, integrity violation), and `PROVIDER_ERROR` (Case E).
-  - **Deterministic 1-to-1 Track Occurrence Matching**:
+  - **Deterministic 1-to-1 Track Occurrence Matching & Identity Verification (Phase 13F Corrective Remediation)**:
     - `TrackOccurrenceMatcher` preserves intentional duplicate tracks by mapping multiple source occurrences sharing the same destination video ID 1-to-1 to remote playlist items ordered by targetPosition.
-    - Fails closed into `INTEGRITY_VIOLATION` if unexpected extra remote occurrences are discovered, remote playlist item IDs are duplicated, or remote item IDs were already claimed by prior tracks.
+    - Validates that every previous `ADDED` occurrence participating in occurrence calculation matches its persisted `destinationPlaylistItemId` at the exact expected remote index.
+    - Fails closed into `INTEGRITY_VIOLATION` if earlier ADDED items are missing, reordered, or replaced, unexpected extra remote occurrences are discovered, remote playlist item IDs are duplicated, or remote item IDs were already claimed by prior tracks.
   - **Two-Stage Track Insertion Reconciliation**:
     - `TrackInsertionReconciliationService` enforces the mandatory sequence: initial 3-second grace period $\to$ first read $\to$ occurrence match $\to$ second 3-second grace period $\to$ second confirmation read $\to$ occurrence match $\to$ confirmed absent.
   - **Idempotency State B Crash Recovery Integration**:

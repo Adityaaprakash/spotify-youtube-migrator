@@ -99,11 +99,13 @@ YouTube Data API v3 `POST /playlists` does not support client idempotency tokens
      [ref: migrator-op:<playlist_creation_operation_id>]
      ```
    - **User-Visible Implication**: Occupies ~45 characters out of YouTube's 5,000-character limit. It appears unobtrusively at the bottom of the playlist description, establishing indisputable proof of ownership.
-3. **Reconciliation Rules**:
-   - When a creation attempt experiences a timeout or 5xx, the worker queries `GET https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true` (costs 1 quota unit, vs 50 for creation).
-   - It iterates user playlists (up to 50 items) checking for `snippet.description` containing `[ref: migrator-op:<playlist_creation_operation_id>]`.
+3. **Reconciliation Rules (Phase 13F Audit Remediation)**:
+   - **Narrowed Failure Classification**: Playlist reconciliation is invoked **only** for ambiguous outcomes where YouTube may have successfully created the playlist despite the caller receiving an error (network timeouts, socket/read timeouts, connection resets, and transient 5xx server errors).
+   - Definite client failures (HTTP 400 Bad Request), authentication failures (HTTP 401), permission denials (HTTP 403 forbidden), quota exhaustion (HTTP 403 quotaExceeded), and internal validation/programming exceptions are **never** converted into reconciliation workflows; they rethrow immediately preserving their original classification.
+   - **Fail-Closed Complete Pagination**: Remote playlist inspection in `getUserPlaylists` requires proven complete pagination. A null response, null items collection, cyclic token, or reaching `MAX_INSPECTION_PAGES` (100) while a next page exists produces an inspection failure (`ExternalProviderException`).
+   - `DestinationPlaylistReconciliationService` maps every incomplete inspection strictly to `PROVIDER_ERROR`, never `CONCLUSIVELY_ABSENT`, preventing duplicate playlist creation.
    - **Marker Found**: Conclusively proves YouTube executed the request. The backend extracts `playlist.id`, links it, and transitions to `QUEUED`. Exactly-once destination binding achieved.
-   - **Marker Absent & No Duplicate Titles**: Conclusively proves the request was never applied. The backend safely retries creation.
+   - **Marker Absent & Completed Inspection Across Two Reads**: Conclusively proves the request was never applied. The backend safely allows creation retry.
    - **Matching Title Found Without Marker**: A playlist with the identical title exists but lacks the operation marker. The system **refuses to guess**; it transitions to `RECOVERY_REQUIRED` and alerts the user.
 
 ---
@@ -336,8 +338,13 @@ Revert PENDING    Assign ID      ▼           │          disambiguate)
                                             Status -> RECOVERY_REQUIRED
 ```
 
-### 7.3 Canonical Ordering Protection
-If reconciliation cannot confirm a track outcome with 100% certainty, the execution transitions to `RECOVERY_REQUIRED` and pauses. Subsequent tracks remain `PENDING`. They are **never** skipped or inserted out of order, preserving canonical ordering and Phase 12 count conservation invariants.
+### 7.3 Canonical Ordering & Prior Occurrence Identity Protection (Phase 13F Audit Remediation)
+1. **Prior ADDED Occurrence Validation**:
+   - Every previous `ADDED` occurrence participating in occurrence calculation must match its persisted `destinationPlaylistItemId` at the exact expected remote index.
+   - If an earlier `ADDED` item is missing remotely, reordered, or replaced by another playlist item, the matcher **fails closed** immediately and returns `INTEGRITY_VIOLATION`.
+   - It **never** silently shifts occurrence identities or classifies a missing item as `CONFIRMED_ABSENT` when earlier state cannot be proven.
+2. **Canonical Ordering Protection**:
+   - If reconciliation cannot confirm a track outcome with 100% certainty, the execution transitions to `RECOVERY_REQUIRED` and pauses. Subsequent tracks remain `PENDING`. They are **never** skipped or inserted out of order, preserving canonical ordering and Phase 12 count conservation invariants.
 
 ---
 

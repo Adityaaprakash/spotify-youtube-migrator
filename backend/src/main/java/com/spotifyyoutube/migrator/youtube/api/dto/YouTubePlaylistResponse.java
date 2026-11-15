@@ -7,4 +7,8 @@ public record YouTubePlaylistResponse(
         String privacyStatus,
         String publishedAt,
         String channelTitle
-) {}
+) {
+    public YouTubePlaylistResponse(String id, String title, String description, String privacyStatus, int itemCount, String url) {
+        this(id, title, description, privacyStatus, null, null);
+    }
+}

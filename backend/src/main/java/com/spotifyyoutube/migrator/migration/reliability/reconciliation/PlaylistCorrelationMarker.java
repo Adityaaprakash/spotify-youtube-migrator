@@ -5,7 +5,6 @@ import com.spotifyyoutube.migrator.youtube.application.YouTubePlaylistService;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -46,23 +45,29 @@ public final class PlaylistCorrelationMarker {
      *
      * @param operationId stable playlist creation operation UUID
      * @return formatted correlation marker string
+     * @throws IllegalArgumentException if operationId is null
      */
     public static String formatMarker(UUID operationId) {
-        Objects.requireNonNull(operationId, "operationId must not be null");
+        if (operationId == null) {
+            throw new IllegalArgumentException("operationId must not be null");
+        }
         return MARKER_PREFIX + operationId + MARKER_SUFFIX;
     }
 
     /**
      * Appends the deterministic correlation marker to the user playlist description,
      * preserving all existing description content and validating against the provider limit.
+     * Truncates base description if necessary to guarantee the combined result does not exceed 5,000 characters.
      *
      * @param originalDescription original user description (may be null or blank)
      * @param operationId         stable playlist creation operation UUID
      * @return description with appended correlation marker
-     * @throws IllegalArgumentException if the description combined with the marker exceeds 5,000 characters
+     * @throws IllegalArgumentException if operationId is null
      */
     public static String applyMarker(String originalDescription, UUID operationId) {
-        Objects.requireNonNull(operationId, "operationId must not be null");
+        if (operationId == null) {
+            throw new IllegalArgumentException("operationId must not be null");
+        }
         String marker = formatMarker(operationId);
 
         if (originalDescription == null || originalDescription.isBlank()) {
@@ -76,16 +81,21 @@ public final class PlaylistCorrelationMarker {
             return trimmed;
         }
 
-        String combined = trimmed + "\n\n" + marker;
-        if (combined.length() > YouTubePlaylistService.MAX_DESCRIPTION_LENGTH) {
-            throw new IllegalArgumentException(String.format(
-                    "Playlist description length with correlation marker (%d) exceeds provider maximum limit (%d)",
-                    combined.length(),
-                    YouTubePlaylistService.MAX_DESCRIPTION_LENGTH
-            ));
+        int maxAllowedBase = YouTubePlaylistService.MAX_DESCRIPTION_LENGTH - 2 - marker.length();
+        if (maxAllowedBase <= 0) {
+            return marker;
         }
 
-        return combined;
+        String base = trimmed;
+        if (base.length() > maxAllowedBase) {
+            int targetEnd = maxAllowedBase;
+            if (targetEnd > 0 && Character.isHighSurrogate(base.charAt(targetEnd - 1))) {
+                targetEnd--;
+            }
+            base = base.substring(0, targetEnd);
+        }
+
+        return base + "\n\n" + marker;
     }
 
     /**
@@ -125,6 +135,18 @@ public final class PlaylistCorrelationMarker {
             return Optional.of(markers.get(0));
         }
         return Optional.empty();
+    }
+
+    public static Optional<UUID> extractMarker(String description) {
+        return extractSingleMarker(description);
+    }
+
+    public static List<UUID> extractAllMarkers(String description) {
+        return extractMarkers(description);
+    }
+
+    public static boolean hasSingleMarker(String description) {
+        return extractMarkers(description).size() == 1;
     }
 
     /**

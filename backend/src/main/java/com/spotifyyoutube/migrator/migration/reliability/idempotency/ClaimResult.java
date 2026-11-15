@@ -94,4 +94,8 @@ public record ClaimResult(
     public Optional<MigrationIdempotencyRecord> getRecord() {
         return Optional.ofNullable(record);
     }
+
+    public String errorMessage() {
+        return message;
+    }
 }

@@ -188,7 +188,8 @@ public class DestinationPlaylistReconciliationService {
                     matchingMarkerPlaylists.size(), operationId);
             return PlaylistReconciliationResult.multipleMarkersFound(
                     matchingMarkerPlaylists,
-                    "Integrity violation: multiple playlists found with marker for operation " + operationId
+                    "Integrity violation: Multiple (" + matchingMarkerPlaylists.size()
+                            + ") remote playlists found with marker for operation " + operationId
             );
         }
 

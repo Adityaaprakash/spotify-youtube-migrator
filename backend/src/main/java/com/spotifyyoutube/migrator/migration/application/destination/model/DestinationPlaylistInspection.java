@@ -28,6 +28,21 @@ public record DestinationPlaylistInspection(
         );
     }
 
+    public static DestinationPlaylistInspection complete(String playlistId, List<DestinationPlaylistItemDetails> items, int totalItemCount) {
+        return new DestinationPlaylistInspection(
+                playlistId,
+                items != null ? List.copyOf(items) : List.of(),
+                totalItemCount,
+                true,
+                Instant.now(),
+                null
+        );
+    }
+
+    public static DestinationPlaylistInspection success(String playlistId, List<DestinationPlaylistItemDetails> items, int totalItemCount) {
+        return complete(playlistId, items, totalItemCount);
+    }
+
     public static DestinationPlaylistInspection failed(String playlistId, String failureReason, Instant inspectedAt) {
         return new DestinationPlaylistInspection(
                 playlistId,
@@ -37,5 +52,17 @@ public record DestinationPlaylistInspection(
                 inspectedAt != null ? inspectedAt : Instant.now(),
                 failureReason != null ? failureReason : "Unknown inspection failure"
         );
+    }
+
+    public static DestinationPlaylistInspection failure(String playlistId, String failureReason) {
+        return failed(playlistId, failureReason, Instant.now());
+    }
+
+    public boolean isComplete() {
+        return complete;
+    }
+
+    public String errorMessage() {
+        return failureReason;
     }
 }

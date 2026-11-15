@@ -20,4 +20,15 @@ public record YouTubePlaylistListResponseDto(
     ) {
         this(kind, etag, items, pageInfo, null);
     }
+
+    public YouTubePlaylistListResponseDto(
+            String kind,
+            String etag,
+            String nextPageToken,
+            String prevPageToken,
+            YouTubePageInfoDto pageInfo,
+            List<YouTubePlaylistDto> items
+    ) {
+        this(kind, etag, items, pageInfo, nextPageToken);
+    }
 }

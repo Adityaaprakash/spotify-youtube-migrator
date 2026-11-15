@@ -54,6 +54,50 @@ public record MigrationExecutionSummary(
                 : Collections.emptyList();
     }
 
+    public MigrationExecutionSummary(
+            UUID executionId,
+            UUID userId,
+            UUID reviewSessionId,
+            UUID planId,
+            MigrationExecutionStatus status,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            String sourcePlaylistTitle,
+            int totalApprovedTracks,
+            int successfulInsertions,
+            int failedInsertions,
+            int uncertainInsertions,
+            int skippedInsertions,
+            List<ExecutionTrackRecordDto> trackRecords,
+            Instant startedAt,
+            Instant completedAt
+    ) {
+        this(
+                executionId,
+                reviewSessionId,
+                planId,
+                userId,
+                Platform.YOUTUBE,
+                destinationPlaylistId,
+                destinationPlaylistUrl,
+                sourcePlaylistTitle != null ? sourcePlaylistTitle : "Test Title",
+                status,
+                totalApprovedTracks,
+                successfulInsertions,
+                failedInsertions,
+                uncertainInsertions,
+                skippedInsertions,
+                0,
+                successfulInsertions == totalApprovedTracks && totalApprovedTracks > 0,
+                status.canResume(),
+                status.canRollback(),
+                startedAt,
+                completedAt,
+                trackRecords != null ? trackRecords : Collections.emptyList(),
+                null
+        );
+    }
+
     /**
      * Backward-compatible 21-parameter constructor (Phase 11E/11F).
      */

@@ -34,6 +34,16 @@ public record PlaylistReconciliationResult(
         );
     }
 
+    public static PlaylistReconciliationResult exactMatch(DestinationPlaylist playlist, String diagnostic) {
+        Objects.requireNonNull(playlist, "playlist must not be null for exact match");
+        return new PlaylistReconciliationResult(
+                PlaylistReconciliationOutcome.EXACT_MATCH_FOUND,
+                playlist,
+                Collections.emptyList(),
+                diagnostic != null ? diagnostic : "Found matching destination playlist: " + playlist.id()
+        );
+    }
+
     public static PlaylistReconciliationResult conclusivelyAbsent(String diagnostic) {
         return new PlaylistReconciliationResult(
                 PlaylistReconciliationOutcome.CONCLUSIVELY_ABSENT,
@@ -72,5 +82,17 @@ public record PlaylistReconciliationResult(
 
     public Optional<DestinationPlaylist> getMatchedPlaylist() {
         return Optional.ofNullable(matchedPlaylist);
+    }
+
+    public boolean isExactMatch() {
+        return outcome == PlaylistReconciliationOutcome.EXACT_MATCH_FOUND;
+    }
+
+    public boolean isAbsent() {
+        return outcome == PlaylistReconciliationOutcome.CONCLUSIVELY_ABSENT;
+    }
+
+    public boolean isCollision() {
+        return outcome == PlaylistReconciliationOutcome.TITLE_COLLISION;
     }
 }

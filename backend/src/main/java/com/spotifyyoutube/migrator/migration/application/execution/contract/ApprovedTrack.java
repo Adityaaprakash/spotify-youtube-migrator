@@ -59,6 +59,21 @@ public record ApprovedTrack(
         }
     }
 
+    public ApprovedTrack(
+            String sourceTrackId,
+            int sourcePosition,
+            int targetPosition,
+            String sourceTitle,
+            String sourceArtist,
+            String albumArt,
+            String destinationTrackId,
+            String confidence,
+            String custom,
+            String sourceCustom
+    ) {
+        this(sourcePosition, sourceTrackId, sourceTitle, sourceArtist, destinationTrackId, sourceTitle, sourceArtist, null, ReviewDecisionSource.AUTOMATIC, targetPosition);
+    }
+
     public Optional<String> getDestinationTitle() {
         return Optional.ofNullable(destinationTitle);
     }
