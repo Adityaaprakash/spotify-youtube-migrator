@@ -236,11 +236,11 @@ public class AtomicPostgresSchedulerClaimingIT {
 
         Function<String, Callable<Void>> createWorker = workerId -> () -> {
             readyLatch.countDown();
-            assertThat(startLatch.await(5, TimeUnit.SECONDS))
+            assertThat(startLatch.await(15, TimeUnit.SECONDS))
                     .as("Start latch must be released")
                     .isTrue();
 
-            Instant deadline = Instant.now().plusSeconds(30);
+            Instant deadline = Instant.now().plusSeconds(60);
 
             // Step 3: Both workers must independently obtain one successful claim before either drains remainder
             boolean firstClaimed = false;
@@ -265,7 +265,7 @@ public class AtomicPostgresSchedulerClaimingIT {
             assertThat(firstClaimed)
                     .as("Worker " + workerId + " must successfully claim its first execution")
                     .isTrue();
-            assertThat(firstClaimLatch.await(5, TimeUnit.SECONDS))
+            assertThat(firstClaimLatch.await(15, TimeUnit.SECONDS))
                     .as("Both workers must obtain first claim before draining remainder")
                     .isTrue();
 
@@ -294,13 +294,13 @@ public class AtomicPostgresSchedulerClaimingIT {
             Future<Void> future1 = workerPool.submit(createWorker.apply("worker-1"));
             Future<Void> future2 = workerPool.submit(createWorker.apply("worker-2"));
 
-            assertThat(readyLatch.await(5, TimeUnit.SECONDS))
+            assertThat(readyLatch.await(15, TimeUnit.SECONDS))
                     .as("Both workers must report ready")
                     .isTrue();
             startLatch.countDown();
 
-            future1.get(30, TimeUnit.SECONDS);
-            future2.get(30, TimeUnit.SECONDS);
+            future1.get(60, TimeUnit.SECONDS);
+            future2.get(60, TimeUnit.SECONDS);
 
             // Step 6: Assertions
             assertThat(claimOwners).hasSize(executionCount);

@@ -806,3 +806,38 @@ Controllers MUST NOT:
     - Upon terminal rollback completion (`ROLLED_BACK`), a fresh 72-hour retention TTL is assigned.
   - **Mathematical Track Conservation Validation**:
     - Invariant `totalApprovedTracks == added + failed + uncertain + skipped + rolledBack` is explicitly validated by `validateConservationInvariant()` prior to completing or releasing an execution.
+
+## Reliability Engineering Layer (Phase 13H & 13I — Fault-Injection Engineering & Reliability Freeze)
+
+- Packages: `com.spotifyyoutube.migrator.migration.reliability.faultinjection`
+- Purpose: Proves all distributed systems failure modes, worker crash boundaries, and concurrency edge cases are handled reliably without data loss, duplicate mutations, or split-brain states, establishing a formal reliability freeze for Phase 13.
+- Architecture Rules:
+  - **Comprehensive Worker Crash Resilience (14 Crash Boundaries)**:
+    1. *Claim before Dispatch*: State remains safely in `RUNNING` with active lease; expires naturally and is reclaimed by recovery without data loss.
+    2. *Dispatch before Execution*: Bounded executor saturation triggers `compensateRejection`, safely restoring execution's `preClaimStatus` with retry backoff.
+    3. *ALLOCATING_DESTINATION Intent*: Crash before external YouTube call leaves intent record with `playlist_creation_operation_id`; recovery checks YouTube via correlation marker, confirms absence, and safely creates playlist.
+    4. *Playlist Creation HTTP Timeout*: Ambiguous write triggers bounded two-stage inspection; marker is matched and playlist linked without duplicate creation.
+    5. *Remote Playlist Created before Persistence*: Crash before recording `destination_playlist_id`; recovery reconciles `[ref: migrator-op:<id>]` and adopts playlist without duplication.
+    6. *ADDING Status before HTTP*: Crash before calling YouTube; two-read reconciliation confirms item absent and safe retry proceeds.
+    7. *Remote Insertion before Persistence*: Crash after remote insertion before updating DB to `ADDED`; two-read reconciliation and `TrackOccurrenceMatcher` verify remote item at canonical index and update to `ADDED`.
+    8. *Replication Lag Tolerance*: Mandatory 3-second grace period and second read ensure eventual consistency does not misclassify in-flight items as absent.
+    9. *Rollback Intent Committed*: Rollback intent persists in PostgreSQL; recovery detects intent and dispatches exclusively to rollback.
+    10. *Partial Rollback Interruption*: Recovery resumes track deletions from recorded target positions without restarting forward insertion.
+    11. *Rollback Finalization*: Finalizes to `ROLLED_BACK` or `PARTIALLY_ROLLED_BACK` and assigns terminal 72-hour idempotency TTL.
+    12. *Heartbeat Failure & Fencing*: 3 consecutive heartbeat renewal failures or safe lease window expiry triggers immediate ownership loss, aborting worker mutations before lease expiry.
+    13. *Durable Retry Scheduling*: Rate limit 429 schedules future attempt and releases worker thread, avoiding thread-pool starvation.
+    14. *Graceful Application Shutdown*: `SmartLifecycle` waits up to `shutdownGracePeriodSeconds` (30s) for in-flight tasks to complete cleanly.
+  - **Database Authority & Fencing Guarantees**:
+    - PostgreSQL `clock_timestamp()` is the sole authoritative clock for leases and expiries.
+    - Generational fencing tokens (`lease_generation`) strictly prevent zombie workers from corrupting state after lease expiry or takeover.
+    - Immediate fencing clause `AND lease_until IS NOT NULL AND lease_until > clock_timestamp()` guarantees 0 rows updated even before successor takeover.
+  - **Preservation of Intentional Duplicates**:
+    - `TrackOccurrenceMatcher` maps source tracks 1-to-1 to remote playlist items by encounter order, allowing users to deliberately migrate identical tracks without deduplication collisions.
+  - **Idempotency Multi-State Lifecycle**:
+    - State A (pending, no external side effect): Safe takeover with generation increment.
+    - State B (external mutation started): Reconciles remote marker before taking over or fails closed into `reconciliationRequired`.
+    - State C (completed): Replays cached response without re-executing.
+    - Payload mismatch on identical key returns `409 Conflict`.
+  - **Formal Phase 13 Freeze Declaration**:
+    - All Phase 13 subsystems (13A through 13I) are complete, verified, and **FROZEN**.
+    - No further architectural or schema modifications to Phase 13 reliability components are permitted.

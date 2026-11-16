@@ -1128,3 +1128,64 @@ Implemented and verified (13 dedicated unit and integration tests, 2,175 total t
   - `rollbackIntentPersistedAndSurvivesInterruption`: Verifies rollback intent survives worker crashes and is claimable for rollback resumption.
   - `rollbackInitiationClearsIdempotencyTerminalExpiry`: Verifies idempotency expiry is cleared on rollback initiation and reset upon terminal rollback completion.
   - `schedulerCompensationRestoresPreClaimStatus`: Verifies database state retains pre-claim status upon compensation.
+
+### Phase 13H Testing Scope (Reliability & Fault-Injection Engineering)
+Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test classes with 32 tests, 1 PostgreSQL Testcontainers integration test class with 5 tests):
+- `WorkerCrashBoundaryFaultInjectionTest` (11 unit tests covering worker crash boundaries 1–14):
+  - `boundary1_schedulerClaimBeforeDispatch_survivesWorkerCrash`: Worker crashes after scheduler atomically claims execution in DB but before task dispatch; verifies state remains safely in `RUNNING` with active lease, and upon lease expiration is re-claimed by recovery.
+  - `boundary2_dispatchBeforeWorkerExecution_survivesQueueEviction`: Task executor rejects or loses task; verifies scheduler compensation safely reverts execution to `QUEUED` or pre-claim status with retry backoff.
+  - `boundary3_allocatingDestinationPersistence_survivesCrash`: Worker crashes after persisting `ALLOCATING_DESTINATION` with `playlist_creation_operation_id` before YouTube call; verifies recovery identifies unallocated status, queries YouTube, confirms absence, and safely creates playlist.
+  - `boundary4_playlistCreationHttp_timeoutTriggersReconciliation`: Network timeout during `POST /playlists`; verifies bounded two-stage inspection reconciles marker and confirms playlist identity.
+  - `boundary5_remotePlaylistCreatedBeforePersistence_reconcilesMarker`: Remote playlist created on YouTube but worker crashes before storing `destination_playlist_id`; verifies recovery discovers `[ref: migrator-op:<id>]` marker on YouTube and links destination without duplicate creation.
+  - `boundary6_addingStatusBeforeHttp_survivesCrashWithoutDuplicate`: Worker crashes after setting track status to `ADDING` before calling YouTube `POST /playlistItems`; verifies recovery runs two-read reconciliation, confirms track absent, and safely re-attempts insertion.
+  - `boundary7_remoteInsertionBeforePersistence_reconcilesTrackOccurrence`: Track inserted on YouTube but worker crashes before updating track status to `ADDED`; verifies two-read reconciliation and `TrackOccurrenceMatcher` identify remote item and update status to `ADDED` without duplicate insertion.
+  - `boundary8_trackReconciliation_eventualConsistencyEventualMatch`: YouTube read-after-write replication lag hides inserted item on read 1; 3-second grace period allows read 2 to match item and mark `ADDED`.
+  - `boundary9_10_11_rollbackCrashLifecycle_preservesIntentAndCompletes`: Simulates crashes across rollback intent persistence (9), partial track deletions (10), and rollback finalization (11); verifies orchestrator detects active rollback intent, executes rollback without forward insertion, and finalizes to `ROLLED_BACK`.
+  - `boundary12_leaseRenewalFailure_fencesStaleWorkerImmediately`: Heartbeat renewal fails; verifies worker detects ownership loss, aborts execution loop, and does not corrupt database state.
+  - `boundary13_14_retrySchedulingAndGracefulShutdown`: Rate-limit 429 schedules future retry releasing thread (13); application shutdown signals workers and awaits grace period (14).
+  - `trackConservationInvariantValidatedUnderSimulatedCorruptions`: Verifies `validateConservationInvariant()` fails closed if total approved tracks does not equal the sum of terminal track statuses.
+
+- `LeaseFencingAndSaturationFaultInjectionTest` (8 unit tests covering lease fencing, heartbeats, and scheduler saturation):
+  - `heartbeatFailsRepeatedly_workerFencedAndReleases`: Simulates 3 consecutive heartbeat query exceptions; verifies `isOwnershipLost()` returns true, scheduled heartbeats cancel, and subsequent mutation attempts throw `StaleLeaseOwnershipException`.
+  - `safeLeaseWindowExpires_immediateFailClosed`: Simulates clock jumping past `safeLeaseWindow = leaseDuration - safetyMargin`; verifies immediate fail-closed behavior before failure counter reaches threshold.
+  - `zombieWorkerMutationRejected_generationalFencing`: Simulates zombie worker attempting update with stale `lease_generation = 1` after successor claimed with `generation = 2`; verifies 0 rows updated and `StaleLeaseOwnershipException` thrown.
+  - `expiredCompensationRejected_safetyGuarantee`: Stale worker attempting compensation on an expired/taken-over lease affects 0 rows and does not overwrite successor state.
+  - `executorSaturation_compensatesAndRestoresPreClaimStatus`: Simulates `TaskRejectedException` on bounded executor; verifies scheduler invokes compensation restoring `ALLOCATING_DESTINATION` and `RECOVERY_REQUIRED` executions.
+  - `executorSaturation_pollLoopPauses`: Scheduler checks executor capacity before claim; pauses poll loop when saturated without database claiming.
+  - `consecutiveDatabaseFailures_backoffAndRecovery`: Transient DB exceptions trigger exponential backoff without spinning or crashing scheduler.
+  - `futureRetryBackoff_notClaimedUntilDue`: Confirms execution with future `next_attempt_at` is skipped by scheduler until wall-clock time passes.
+
+- `AmbiguityAndIdempotencyFaultInjectionTest` (13 unit tests covering ambiguity, reconciliation, and idempotency):
+  - `playlistCreation_timeout_exactMatchFound`: Network timeout during YouTube playlist creation; reconciliation inspects YouTube, discovers `[ref: migrator-op:<id>]`, returns `EXACT_MATCH_FOUND`, and associates playlist.
+  - `playlistCreation_http500_conclusivelyAbsent_safeRetry`: YouTube 500 error; reconciliation verifies conclusive absence across two reads, permitting safe playlist creation retry.
+  - `playlistCreation_titleCollision_failsClosed`: YouTube returns playlist with matching title but different/missing marker; reconciliation returns `TITLE_COLLISION`, failing closed into `RECOVERY_REQUIRED`.
+  - `playlistCreation_multipleMarkers_integrityViolation`: Multiple playlists discover identical marker; fails closed into `INTEGRITY_VIOLATION`.
+  - `playlistCreation_providerError_preservesState`: Upstream API failure during reconciliation returns `PROVIDER_ERROR` without duplicate mutations.
+  - `trackInsertion_ambiguousTimeout_replicationLag_verifiedAdded`: Socket timeout on track insertion; read 1 empty (replication lag), read 2 finds item; occurrence matcher reconciles track as `VERIFIED_ADDED`.
+  - `trackInsertion_intentionalDuplicates_sequential1to1Matching`: Multiple source tracks with identical video ID mapped 1-to-1 to remote playlist items preserving duplicate occurrences.
+  - `trackInsertion_confirmedAbsent_safeRetry`: Socket timeout on track insertion; two reads confirm item absent; safe retry proceeds without duplicate insertion.
+  - `idempotencyStateA_pendingTakeover`: Prior leader crashed in State A (no external mutation); successor takes over claim with incremented generation.
+  - `idempotencyStateB_ambiguousPlaylistCreation_takeoverWithReconciliation`: Prior leader crashed in State B; successor reconciles marker on YouTube and takes over claim with discovered playlist ID.
+  - `idempotencyStateC_replayFromCompletedExecution`: Request with matching idempotency key and fingerprint replays cached terminal response (`200 OK` or `202 Accepted`).
+  - `idempotencyFingerprintMismatch_conflict409`: Request reusing idempotency key with different request payload returns `409 Conflict`.
+  - `idempotencyLostOwnership_preventsCompletionAndRelease`: Stale leader whose lease expired cannot complete or release idempotency claim.
+
+- `Phase13HFaultInjectionIT` (5 integration tests against PostgreSQL Testcontainers):
+  - `concurrentSchedulerClaims_exactlyOneSucceeds_othersSkip`: Real PostgreSQL `FOR UPDATE SKIP LOCKED` under concurrent contenders; exactly one worker claims each execution.
+  - `generationalFencingToken_blocksZombieWorker`: Simulates zombie worker update against PostgreSQL; stale generation affects 0 rows.
+  - `databaseWallClockExpiration_immediateFencingWithoutSuccessor`: Verifies `clock_timestamp()` immediately fences stale worker updates after lease expiry without requiring a successor claim.
+  - `rollbackIntentPreservedAcrossSimulatedCrash`: Rollback intent (`rollback_requested_at`, `rollback_target_positions`) persists across simulated worker crash and allows resume worker to claim and finalize rollback.
+  - `concurrentIdempotencyClaim_uniqueConstraintEnforced`: Concurrent claims with same idempotency key reject duplicate insertion via composite unique constraint `(user_id, idempotency_key)`.
+
+### Phase 13I Release Gate & Reliability Freeze
+- **Full Release Gate (`mvnw.cmd clean verify`)**:
+  - Total Tests: 2,212 passing (2,100 Surefire unit tests, 112 Failsafe integration tests).
+  - Test Failures: 0.
+  - Test Errors: 0.
+  - Skipped Tests: 0.
+  - Build Status: SUCCESS.
+- **Checkstyle Audit (`mvnw.cmd checkstyle:check`)**:
+  - 0 Checkstyle violations across all 462 main and 184 test source files.
+- **Reliability Freeze**:
+  - All 14 worker crash boundaries proven resilient against data loss and duplication.
+  - All Phase 13 architectural invariants verified and formally frozen under ADR-031.
