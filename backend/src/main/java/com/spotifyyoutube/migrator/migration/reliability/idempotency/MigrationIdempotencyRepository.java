@@ -143,6 +143,52 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
             @Param("timeoutSeconds") long timeoutSeconds
     );
 
+    @Modifying
+    @Query(value = """
+            UPDATE migration_idempotency_keys
+            SET claim_owner = :newClaimOwner,
+                claim_generation = claim_generation + 1,
+                claim_expires_at = clock_timestamp() + (:timeoutSeconds * INTERVAL '1 second'),
+                heartbeat_at = clock_timestamp()
+            WHERE id = :id
+              AND status = 'PENDING'
+              AND claim_generation = :expectedGeneration
+              AND claim_expires_at <= clock_timestamp()
+            """, nativeQuery = true)
+    int takeOverExpiredClaimWithFencingDatabaseTime(
+            @Param("id") UUID id,
+            @Param("newClaimOwner") String newClaimOwner,
+            @Param("expectedGeneration") long expectedGeneration,
+            @Param("timeoutSeconds") long timeoutSeconds
+    );
+
+    /**
+     * Atomically takes over an expired claim in State B where external reconciliation discovered
+     * an already created destination playlist, advancing generation, setting destination_playlist_id,
+     * advancing stage to PLAYLIST_CREATED, and renewing the claim lease using database time.
+     */
+    @Modifying
+    @Query(value = """
+            UPDATE migration_idempotency_keys
+            SET claim_owner = :newClaimOwner,
+                claim_generation = claim_generation + 1,
+                destination_playlist_id = :destinationPlaylistId,
+                claim_stage = 'PLAYLIST_CREATED',
+                claim_expires_at = clock_timestamp() + (:timeoutSeconds * INTERVAL '1 second'),
+                heartbeat_at = clock_timestamp()
+            WHERE id = :id
+              AND status = 'PENDING'
+              AND claim_generation = :expectedGeneration
+              AND claim_expires_at <= clock_timestamp()
+            """, nativeQuery = true)
+    int takeOverStateBClaimWithFencingDatabaseTime(
+            @Param("id") UUID id,
+            @Param("newClaimOwner") String newClaimOwner,
+            @Param("expectedGeneration") long expectedGeneration,
+            @Param("destinationPlaylistId") String destinationPlaylistId,
+            @Param("timeoutSeconds") long timeoutSeconds
+    );
+
     /**
      * Atomically creates a new PENDING claim with lease expiration and heartbeat timestamps
      * computed directly using PostgreSQL database wall-clock time (Phase 13E).

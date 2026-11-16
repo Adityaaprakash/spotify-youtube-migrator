@@ -254,10 +254,12 @@ class IdempotencyClaimHeartbeatServiceTest {
 
         clockHeartbeatService.registerClaim(claimId, userId, idempotencyKey, claimOwner, claimGeneration, Duration.ofSeconds(60));
 
-        // Simulate 46 seconds elapsed when task finally runs and throws exception
-        clock.advance(Duration.ofSeconds(46));
+        // Simulate slow query: query starts within safe window, but takes 46 seconds before timing out
         when(repository.renewClaimDatabaseTime(eq(claimId), eq(claimOwner), eq(claimGeneration), anyLong()))
-                .thenThrow(new DataAccessResourceFailureException("Query timeout after long delay"));
+                .thenAnswer(inv -> {
+                    clock.advance(Duration.ofSeconds(46));
+                    throw new DataAccessResourceFailureException("Query timeout after long delay");
+                });
 
         boolean renewed = clockHeartbeatService.renewClaimDirectly(claimId);
 

@@ -10,8 +10,8 @@ ALTER TABLE migration_executions ADD COLUMN playlist_creation_max_attempts INT N
 ALTER TABLE migration_executions ADD COLUMN playlist_creation_next_attempt_at TIMESTAMP WITH TIME ZONE;
 ALTER TABLE migration_executions ADD COLUMN playlist_creation_failure_code VARCHAR(50);
 
--- Partial index for fast operation ID lookups
-CREATE INDEX idx_migrationexecutions_playlist_op ON migration_executions(playlist_creation_operation_id)
+-- Partial unique index for fast operation ID lookups and uniqueness enforcement
+CREATE UNIQUE INDEX idx_migrationexecutions_playlist_op ON migration_executions(playlist_creation_operation_id)
     WHERE playlist_creation_operation_id IS NOT NULL;
 
 -- 3. Add playlist_creation_operation_id to migration_idempotency_keys for State B recovery correlation

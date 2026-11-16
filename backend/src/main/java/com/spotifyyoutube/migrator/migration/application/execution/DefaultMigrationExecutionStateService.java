@@ -1624,7 +1624,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     transactionTemplate.execute(status -> {
                         ExecutionTrackRecord record = trackRecordRepository.findById(trackId)
                                 .orElseThrow(() -> new IllegalStateException("Track record missing: " + trackId));
-                        record.markUncertain("Insertion timed out; reconciliation inconclusive: " + recon.diagnosticMessage());
+                        record.markUncertain("Insertion timed out; reconciliation inconclusive: " + recon.diagnosticMessage() + " (" + sanitizedMsg + ")");
                         trackRecordRepository.saveAndFlush(record);
                         return null;
                     });

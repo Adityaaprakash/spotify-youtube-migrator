@@ -1,7 +1,7 @@
 package com.spotifyyoutube.migrator.common.config;
 
 import com.spotifyyoutube.migrator.migration.reliability.idempotency.ApiIdempotencyFilter;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -14,6 +14,8 @@ import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.util.matcher.AnyRequestMatcher;
 
 @Configuration
 @EnableWebSecurity
@@ -27,7 +29,7 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
-            @Autowired(required = false) ApiIdempotencyFilter apiIdempotencyFilter
+            ObjectProvider<ApiIdempotencyFilter> apiIdempotencyFilterProvider
     ) throws Exception {
         http
             // Use CookieCsrfTokenRepository for SPA architecture (React). 
@@ -44,9 +46,17 @@ public class SecurityConfig {
                 .anyRequest().authenticated()
             )
             .exceptionHandling(exceptions -> exceptions
-                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                .defaultAuthenticationEntryPointFor(
+                    new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
+                    new AntPathRequestMatcher("/api/migrations/submit")
+                )
+                .defaultAuthenticationEntryPointFor(
+                    new HttpStatusEntryPoint(HttpStatus.FORBIDDEN),
+                    AnyRequestMatcher.INSTANCE
+                )
             );
 
+        ApiIdempotencyFilter apiIdempotencyFilter = apiIdempotencyFilterProvider.getIfAvailable();
         if (apiIdempotencyFilter != null) {
             http.addFilterAfter(apiIdempotencyFilter, AuthorizationFilter.class);
         }

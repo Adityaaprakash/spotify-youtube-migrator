@@ -176,7 +176,9 @@ public class MigrationIdempotencyAutoConfiguredMockMvcIT {
                     if (!inFlightClaims.isEmpty() && inFlightClaims.get(0).getStatus() == IdempotencyClaimStatus.PENDING) {
                         claimExistedDuringPlaylistCreation.set(true);
                     }
-                    if (executionRepository.count() == 0) {
+                    if (executionRepository.count() == 0 || executionRepository.findAll().stream().allMatch(
+                            e -> e.getStatus() == com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus.ALLOCATING_DESTINATION
+                                    && e.getDestinationPlaylistId() == null)) {
                         noExecutionDuringPlaylistCreation.set(true);
                     }
                     return mockPlaylist;

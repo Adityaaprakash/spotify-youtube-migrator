@@ -306,17 +306,14 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
                     DestinationPlaylist matched = recon.matchedPlaylist();
                     log.info("State B: Discovered matching destination playlist {} for claim {}. Recording and taking over claim.",
                             matched.id(), idempotencyKey);
-                    requiresNewTemplate.execute(statusTx -> {
-                        repository.recordDestinationPlaylistForSession(expectedReviewSessionId, matched.id());
-                        return null;
-                    });
                     String newOwner = UUID.randomUUID().toString();
                     long expectedGen = existing.getClaimGeneration();
                     Integer updated = requiresNewTemplate.execute(statusTx ->
-                            repository.takeOverClaimWithFencingDatabaseTime(
+                            repository.takeOverStateBClaimWithFencingDatabaseTime(
                                     existing.getId(),
                                     newOwner,
                                     expectedGen,
+                                    matched.id(),
                                     DEFAULT_CLAIM_TIMEOUT.toSeconds()
                             )
                     );
@@ -331,7 +328,7 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
                     String newOwner = UUID.randomUUID().toString();
                     long expectedGen = existing.getClaimGeneration();
                     Integer updated = requiresNewTemplate.execute(statusTx ->
-                            repository.takeOverClaimWithFencingDatabaseTime(
+                            repository.takeOverExpiredClaimWithFencingDatabaseTime(
                                     existing.getId(),
                                     newOwner,
                                     expectedGen,

@@ -667,8 +667,8 @@ class ApprovedMigrationOrchestratorTest {
                     playlistReconciliationService
             );
 
-            when(executionService.validateExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId))).thenReturn(ExecutionValidationResult.valid(validContext));
-            when(executionStateService.getExecutionByReviewSession(sessionId, userId)).thenThrow(new ResourceNotFoundException("Not found"));
+            Mockito.lenient().when(executionService.validateExecution(any(ApprovedMigrationExecutionRequest.class), eq(userId))).thenReturn(ExecutionValidationResult.valid(validContext));
+            Mockito.lenient().when(executionStateService.getExecutionByReviewSession(sessionId, userId)).thenThrow(new ResourceNotFoundException("Not found"));
         }
 
         @Test

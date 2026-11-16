@@ -44,7 +44,8 @@ public record MigrationExecutionSummary(
         Objects.requireNonNull(reviewSessionId, "reviewSessionId must not be null");
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(destinationPlatform, "destinationPlatform must not be null");
-        if (status != MigrationExecutionStatus.ALLOCATING_DESTINATION) {
+        if (status != MigrationExecutionStatus.ALLOCATING_DESTINATION
+                && status != MigrationExecutionStatus.INITIALIZED) {
             Objects.requireNonNull(destinationPlaylistId, "destinationPlaylistId must not be null");
         }
         Objects.requireNonNull(status, "status must not be null");

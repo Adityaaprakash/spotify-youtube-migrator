@@ -159,7 +159,12 @@ public class CanonicalRequestFingerprinter {
             }
 
             if (sessionId != null && reviewSessionRepository != null) {
-                Optional<ReviewSession> sessionOpt = reviewSessionRepository.findById(sessionId);
+                Optional<ReviewSession> sessionOpt;
+                try {
+                    sessionOpt = reviewSessionRepository.findByIdWithTracks(sessionId);
+                } catch (Exception ex) {
+                    sessionOpt = reviewSessionRepository.findById(sessionId);
+                }
                 if (sessionOpt.isPresent()) {
                     ReviewSession session = sessionOpt.get();
                     String sourceId = session.getSourcePlaylistId();
@@ -168,15 +173,20 @@ public class CanonicalRequestFingerprinter {
                             ? payload.get("targetPlaylistTitle").asText().trim()
                             : session.getSourcePlaylistTitle();
 
-                    List<String> trackHashes = session.getTracks().stream()
-                            .filter(t -> !t.isExcluded())
-                            .map(t -> {
-                                String dest = t.getSelectedCandidateId() != null
-                                        ? t.getSelectedCandidateId()
-                                        : (t.getOriginalCandidateId() != null ? t.getOriginalCandidateId() : "");
-                                return t.getSourceTrackId() + ":" + dest;
-                            })
-                            .toList();
+                    List<String> trackHashes;
+                    try {
+                        trackHashes = session.getTracks().stream()
+                                .filter(t -> !t.isExcluded())
+                                .map(t -> {
+                                    String dest = t.getSelectedCandidateId() != null
+                                            ? t.getSelectedCandidateId()
+                                            : (t.getOriginalCandidateId() != null ? t.getOriginalCandidateId() : "");
+                                    return t.getSourceTrackId() + ":" + dest;
+                                })
+                                .toList();
+                    } catch (Exception ex) {
+                        trackHashes = List.of(sessionStr);
+                    }
 
                     return new CanonicalMigrationRequest(userId, sourceId, targetTitle, trackHashes);
                 }

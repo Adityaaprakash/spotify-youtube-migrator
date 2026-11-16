@@ -18,6 +18,7 @@ import com.spotifyyoutube.migrator.migration.application.execution.DestinationPl
 import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationContext;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedTrack;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.DestinationPlaylistCreationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionValidationResult;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
@@ -473,14 +474,12 @@ class ExternalOperationTransactionPropagationTest {
         UUID sessionId = UUID.randomUUID();
         ApprovedMigrationExecutionRequest request = new ApprovedMigrationExecutionRequest(sessionId, userId);
 
-        ApprovedMigrationContext mockContext = mock(ApprovedMigrationContext.class);
-        when(mockContext.hasApprovedTracks()).thenReturn(true);
-        when(mockContext.targetPlaylistTitle()).thenReturn("Target Playlist");
-        when(mockContext.targetPlaylistDescription()).thenReturn("Description");
-        when(mockContext.isPrivate()).thenReturn(false);
-        when(mockContext.reviewSessionId()).thenReturn(sessionId);
-        when(mockContext.planId()).thenReturn(UUID.randomUUID());
-        when(mockContext.approvedTrackCount()).thenReturn(5);
+        ApprovedTrack sampleTrack = new ApprovedTrack(0, 0, "sp_1", "yt_1", "Song", "Artist");
+        ApprovedMigrationContext mockContext = new ApprovedMigrationContext(
+                sessionId, UUID.randomUUID(), userId, "sp_playlist", "Source Playlist",
+                "Target Playlist", "Description", false, List.of(sampleTrack),
+                1, 1, 0, Instant.now()
+        );
 
         when(mockExecutionService.prepareExecution(request, userId)).thenReturn(mockContext);
 
@@ -560,14 +559,12 @@ class ExternalOperationTransactionPropagationTest {
         UUID sessionId = UUID.randomUUID();
         ApprovedMigrationExecutionRequest request = new ApprovedMigrationExecutionRequest(sessionId, userId);
 
-        ApprovedMigrationContext mockContext = mock(ApprovedMigrationContext.class);
-        when(mockContext.hasApprovedTracks()).thenReturn(true);
-        when(mockContext.targetPlaylistTitle()).thenReturn("Orchestrated Playlist");
-        when(mockContext.targetPlaylistDescription()).thenReturn("Orchestrated Desc");
-        when(mockContext.isPrivate()).thenReturn(false);
-        when(mockContext.reviewSessionId()).thenReturn(sessionId);
-        when(mockContext.planId()).thenReturn(UUID.randomUUID());
-        when(mockContext.approvedTrackCount()).thenReturn(1);
+        ApprovedTrack sampleTrack = new ApprovedTrack(0, 0, "sp_1", "yt_1", "Song", "Artist");
+        ApprovedMigrationContext mockContext = new ApprovedMigrationContext(
+                sessionId, UUID.randomUUID(), userId, "sp_playlist", "Source Playlist",
+                "Orchestrated Playlist", "Orchestrated Desc", false, List.of(sampleTrack),
+                1, 1, 0, Instant.now()
+        );
 
         when(mockExecutionService.validateExecution(request, userId))
                 .thenReturn(ExecutionValidationResult.valid(mockContext));
@@ -764,7 +761,7 @@ class ExternalOperationTransactionPropagationTest {
                 com.spotifyyoutube.migrator.migration.api.dto.CreateDestinationPlaylistRequest.class, Principal.class);
         assertMethodNotTransactional(MigrationExecutionController.class, "reconcileExecution", UUID.class, ReconcileExecutionApiRequest.class, Principal.class);
         assertMethodNotTransactional(MigrationController.class, "submitMigrationDirect", RunMigrationApiRequest.class, Principal.class);
-        assertMethodNotTransactional(MigrationController.class, "createMigration", JsonNode.class);
+        assertMethodNotTransactional(MigrationController.class, "submitOrProcessMigration", JsonNode.class, Principal.class);
         assertMethodNotTransactional(MigrationJobDispatcher.class, "dispatchMigration", ApprovedMigrationExecutionRequest.class, UUID.class);
         assertMethodNotTransactional(MigrationBackgroundWorker.class, "processMigration", UUID.class, UUID.class);
         assertMethodNotTransactional(MigrationBackgroundWorker.class, "processExecution", UUID.class, UUID.class, long.class);
@@ -785,12 +782,19 @@ class ExternalOperationTransactionPropagationTest {
     }
 
     private static void setField(Object target, String fieldName, Object value) {
-        try {
-            java.lang.reflect.Field field = target.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            field.set(target, value);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        Class<?> current = target.getClass();
+        while (current != null && current != Object.class) {
+            try {
+                java.lang.reflect.Field field = current.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                field.set(target, value);
+                return;
+            } catch (NoSuchFieldException e) {
+                current = current.getSuperclass();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
+        throw new RuntimeException("Field " + fieldName + " not found on " + target.getClass().getName());
     }
 }

@@ -60,6 +60,17 @@ public record ApprovedTrack(
     }
 
     public ApprovedTrack(
+            int sourcePosition,
+            int targetPosition,
+            String sourceTrackId,
+            String destinationTrackId,
+            String sourceTitle,
+            String sourceArtist
+    ) {
+        this(sourcePosition, sourceTrackId, sourceTitle, sourceArtist, destinationTrackId, sourceTitle, sourceArtist, null, ReviewDecisionSource.AUTOMATIC, targetPosition);
+    }
+
+    public ApprovedTrack(
             String sourceTrackId,
             int sourcePosition,
             int targetPosition,

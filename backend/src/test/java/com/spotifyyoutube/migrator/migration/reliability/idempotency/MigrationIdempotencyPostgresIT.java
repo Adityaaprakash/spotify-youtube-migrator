@@ -906,7 +906,7 @@ public class MigrationIdempotencyPostgresIT {
         // Claim belongs to session A
         MigrationIdempotencyRecord expiredClaim = new MigrationIdempotencyRecord(
                 testUser1.getId(), key, fp, IdempotencyClaimStatus.PENDING,
-                null, null, null, null, sessionA.getId(),
+                execB.getId(), null, null, null, sessionA.getId(),
                 "owner-j3", 1L, Instant.now().minusSeconds(100), null,
                 MigrationIdempotencyRecord.STAGE_ACQUIRED,
                 Instant.now().minusSeconds(100),
@@ -932,7 +932,8 @@ public class MigrationIdempotencyPostgresIT {
 
         MigrationIdempotencyRecord recordInDb = idempotencyRepository.findById(claimId).orElseThrow();
         assertThat(recordInDb.getStatus()).isEqualTo(IdempotencyClaimStatus.PENDING);
-        assertThat(recordInDb.getExecutionId()).isNull();
+        assertThat(recordInDb.getExecutionId()).isEqualTo(execB.getId());
+        assertThat(recordInDb.getResponsePayload()).isNull();
     }
 
     @Test

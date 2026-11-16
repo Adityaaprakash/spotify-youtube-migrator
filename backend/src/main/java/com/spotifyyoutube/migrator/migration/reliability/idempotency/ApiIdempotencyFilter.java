@@ -117,7 +117,6 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             FilterChain filterChain
     ) throws ServletException, IOException {
-
         String rawKey = request.getHeader(IDEMPOTENCY_KEY_HEADER);
         boolean isTypedSubmit = isTypedSubmitEndpoint(request.getRequestURI());
 
@@ -191,6 +190,7 @@ public class ApiIdempotencyFilter extends OncePerRequestFilter {
             );
             fingerprint = fingerprinter.calculateFingerprint(canonicalReq);
         } catch (Exception ex) {
+            log.debug("Exception during request fingerprinting; passing to downstream: {}", ex.getMessage());
             // Malformed JSON; pass to downstream controller/validator
             filterChain.doFilter(wrappedRequest, response);
             return;

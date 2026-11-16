@@ -1,7 +1,10 @@
 package com.spotifyyoutube.migrator.migration.review.repository;
 
 import com.spotifyyoutube.migrator.migration.review.domain.ReviewSession;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -16,4 +19,8 @@ public interface ReviewSessionRepository extends JpaRepository<ReviewSession, UU
     List<ReviewSession> findByUserIdOrderByCreatedAtDesc(UUID userId);
 
     Optional<ReviewSession> findByPlanId(UUID planId);
+
+    @EntityGraph(attributePaths = {"tracks"})
+    @Query("SELECT s FROM ReviewSession s WHERE s.id = :id")
+    Optional<ReviewSession> findByIdWithTracks(@Param("id") UUID id);
 }
