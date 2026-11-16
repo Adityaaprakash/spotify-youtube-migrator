@@ -1109,4 +1109,22 @@ Implemented, audited, remediated, and statically verified (60 unit test methods 
   - Non-transactional caller: all external operations and grace periods execute cleanly without active transaction.
   - Ambient transaction retains database connection during suspension: proves `NOT_SUPPORTED` alone does NOT release the database connection or locks (connection remains checked out in `SuspendedResourcesHolder` until outer transaction commits).
   - Canonical production execution path: holds zero connections and zero locks during external calls and reconciliation sleeps (discrete persistence operations check out and release immediately via `TransactionTemplate`).
-  - Architectural invariant: Canonical production entry points (`MigrationExecutionController`, `MigrationController`, `MigrationJobDispatcher`, `MigrationBackgroundWorker`, `DurableMigrationScheduler`, `DefaultMigrationIdempotencyService`, `ApiIdempotencyFilter`) are strictly non-transactional.
+  - Architectural invariant: Canonical production entry points (`MigrationExecutionController`, `MigrationController`, `MigrationJobDispatcher`, `MigrationBackgroundWorker`, `DurableMigrationScheduler`, `DefaultMigrationIdempotencyService`, `ApiIdempotencyFilter`) are strictly non-transactional.
+
+### Phase 13G Testing Scope (Migration Recovery & Resume Integration)
+Implemented and verified (13 dedicated unit and integration tests, 2,175 total tests passing across full suite):
+- `Phase13GRecoveryWorkflowTest` (4 unit tests):
+  - `orchestratorResumesRollbackWhenRollbackIntentPresent`: Verifies orchestrator identifies `rollback_requested_at` and dispatches directly to `executeClaimedRollback`, skipping forward track insertion.
+  - `orchestratorReconcilesUnallocatedDestination`: Verifies orchestrator discovers unallocated destination playlist and reconciles before proceeding with track insertions.
+  - `trackConservationInvariantEnforced`: Validates that `validateConservationInvariant()` prevents completion if total approved tracks does not match the sum of terminal track statuses.
+  - `schedulerCompensatesRejectionPreservingPreClaimStatus`: Verifies scheduler restores `ALLOCATING_DESTINATION` or `RECOVERY_REQUIRED` pre-claim status instead of blindly resetting to `QUEUED`.
+- `Phase13GRecoveryIntegrationIT` (9 integration tests against PostgreSQL Testcontainers):
+  - `flywayV14MigrationAppliedSuccessfully`: Confirms schema migration adds rollback intent columns and partial index.
+  - `atomicClaimIncludesEligibleStatuses`: Verifies atomic CTE claims `QUEUED`, `ALLOCATING_DESTINATION`, expired `RUNNING`, `RECOVERY_REQUIRED`, and `PARTIALLY_ROLLED_BACK` with intent.
+  - `atomicClaimExcludesTerminalStatuses`: Confirms `COMPLETED`, `FAILED`, and `ROLLED_BACK` are never claimed by recovery.
+  - `atomicClaimExcludesActiveLeases`: Confirms active unexpired leases are protected against concurrent theft.
+  - `immediateFencingRejectsMutationsAfterLeaseExpiry`: Proves `updateTrackStatusWithFencing` immediately affects 0 rows when `lease_until <= clock_timestamp()`.
+  - `immediateFencingRejectsRetrySchedulingAfterLeaseExpiry`: Proves `scheduleTrackRetryWithFencing` immediately affects 0 rows when lease expires.
+  - `rollbackIntentPersistedAndSurvivesInterruption`: Verifies rollback intent survives worker crashes and is claimable for rollback resumption.
+  - `rollbackInitiationClearsIdempotencyTerminalExpiry`: Verifies idempotency expiry is cleared on rollback initiation and reset upon terminal rollback completion.
+  - `schedulerCompensationRestoresPreClaimStatus`: Verifies database state retains pre-claim status upon compensation.

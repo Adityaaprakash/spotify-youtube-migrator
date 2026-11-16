@@ -66,6 +66,7 @@ import org.springframework.web.client.ResourceAccessException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -74,6 +75,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * Default implementation of {@link MigrationExecutionStateService}.
@@ -679,6 +681,63 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     }
 
     @Override
+    public MigrationExecutionSummary confirmDestinationPlaylistWithFencing(
+            UUID executionId,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            MigrationExecutionStatus nextStatus,
+            String workerId,
+            long leaseGeneration,
+            UUID authenticatedUserId
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (destinationPlaylistId == null || destinationPlaylistId.isBlank()) {
+            throw new IllegalArgumentException("Destination playlist ID must not be blank");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (workerId != null && leaseGeneration > 0) {
+                int updated = executionRepository.confirmDestinationPlaylistWithFencing(
+                        executionId,
+                        destinationPlaylistId.trim(),
+                        destinationPlaylistUrl != null ? destinationPlaylistUrl.trim() : null,
+                        (nextStatus != null ? nextStatus : MigrationExecutionStatus.QUEUED).name(),
+                        workerId,
+                        leaseGeneration
+                );
+                if (updated == 0) {
+                    throw new StaleLeaseOwnershipException(
+                            executionId,
+                            workerId,
+                            leaseGeneration,
+                            execution.getLeaseGeneration(),
+                            "Cannot confirm destination playlist: lease expired or generation mismatch"
+                    );
+                }
+                return getExecution(executionId, authenticatedUserId);
+            }
+
+            execution.markPlaylistCreated(destinationPlaylistId, destinationPlaylistUrl, nextStatus);
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            log.info("Confirmed destination playlist {} for execution {} in status {}",
+                    destinationPlaylistId, executionId, saved.getStatus());
+            return MigrationExecutionSummary.from(saved);
+        });
+    }
+
+    @Override
     public MigrationExecutionSummary recordPlaylistCreationFailure(
             UUID executionId,
             String failureCode,
@@ -698,6 +757,59 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
             if (!execution.getUser().getId().equals(authenticatedUserId)) {
                 throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            execution.recordPlaylistCreationFailure(failureCode, null);
+            execution.setStatus(nextStatus != null ? nextStatus : MigrationExecutionStatus.RECOVERY_REQUIRED);
+            MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            log.warn("Recorded playlist creation failure '{}' on execution {}; new status: {}",
+                    failureCode, executionId, saved.getStatus());
+            return MigrationExecutionSummary.from(saved);
+        });
+    }
+
+    @Override
+    public MigrationExecutionSummary recordPlaylistCreationFailureWithFencing(
+            UUID executionId,
+            String failureCode,
+            MigrationExecutionStatus nextStatus,
+            String workerId,
+            long leaseGeneration,
+            UUID authenticatedUserId
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
+
+        return transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
+
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (workerId != null && leaseGeneration > 0) {
+                int updated = executionRepository.recordPlaylistCreationFailureWithFencing(
+                        executionId,
+                        failureCode,
+                        (nextStatus != null ? nextStatus : MigrationExecutionStatus.RECOVERY_REQUIRED).name(),
+                        workerId,
+                        leaseGeneration
+                );
+                if (updated == 0) {
+                    throw new StaleLeaseOwnershipException(
+                            executionId,
+                            workerId,
+                            leaseGeneration,
+                            execution.getLeaseGeneration(),
+                            "Cannot record playlist creation failure: lease expired or generation mismatch"
+                    );
+                }
+                return getExecution(executionId, authenticatedUserId);
             }
 
             execution.recordPlaylistCreationFailure(failureCode, null);
@@ -865,12 +977,94 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 .filter(t -> t.status() == ExecutionTrackStatus.ADDED)
                 .count();
 
-        // Query due pending tracks for this execution
-        List<ExecutionTrackRecord> dueTracks = trackRecordRepository.findDuePendingTracks(executionId);
+        // Reconcile any interrupted tracks in ADDING or UNCERTAIN status prior to forward insertion (Phase 13G-C)
+        List<ExecutionTrackRecordDto> ambiguousTracks = allTracks.stream()
+                .filter(t -> t.status() == ExecutionTrackStatus.ADDING || t.status() == ExecutionTrackStatus.UNCERTAIN)
+                .toList();
 
         boolean stopRemaining = false;
         String stopReason = null;
         boolean deferredEncountered = false;
+
+        if (!ambiguousTracks.isEmpty() && trackReconciliationService != null) {
+            log.info("Execution {} has {} ambiguous/in-flight track(s) requiring reconciliation before forward insertion",
+                    executionId, ambiguousTracks.size());
+            for (ExecutionTrackRecordDto amb : ambiguousTracks) {
+                if (heartbeatService != null && heartbeatService.isOwnershipLost(executionId)) {
+                    throw new StaleLeaseOwnershipException(
+                            executionId, workerId, leaseGeneration, null,
+                            "Worker lease ownership lost prior to track reconciliation"
+                    );
+                }
+
+                List<ExecutionTrackRecord> currentRecords =
+                        trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+
+                TrackInsertionReconciliationResult recon = trackReconciliationService.reconcileTrackInsertion(
+                        authenticatedUserId,
+                        playlistId,
+                        amb.id(),
+                        currentRecords,
+                        () -> heartbeatService != null && heartbeatService.isOwnershipLost(executionId)
+                );
+
+                if (recon.outcome() == TrackInsertionReconciliationOutcome.VERIFIED_ADDED) {
+                    log.info("Ambiguous track {} at pos {} reconciled as VERIFIED_ADDED with item {}",
+                            amb.id(), amb.targetPosition(), recon.destinationPlaylistItemId());
+                    trackRecordRepository.updateTrackStatusWithFencing(
+                            amb.id(),
+                            executionId,
+                            leaseGeneration,
+                            ExecutionTrackStatus.ADDED,
+                            recon.destinationPlaylistItemId(),
+                            null,
+                            Instant.now()
+                    );
+                } else if (recon.outcome() == TrackInsertionReconciliationOutcome.CONFIRMED_ABSENT) {
+                    log.info("Ambiguous track {} at pos {} confirmed absent; resetting to PENDING",
+                            amb.id(), amb.targetPosition());
+                    trackRecordRepository.updateTrackStatusWithFencing(
+                            amb.id(),
+                            executionId,
+                            leaseGeneration,
+                            ExecutionTrackStatus.PENDING,
+                            null,
+                            null,
+                            null
+                    );
+                } else {
+                    log.warn("Ambiguous track {} at pos {} reconciliation yielded {}: {}. Halting forward insertion.",
+                            amb.id(), amb.targetPosition(), recon.outcome(), recon.diagnosticMessage());
+                    trackRecordRepository.updateTrackStatusWithFencing(
+                            amb.id(),
+                            executionId,
+                            leaseGeneration,
+                            ExecutionTrackStatus.UNCERTAIN,
+                            null,
+                            recon.diagnosticMessage(),
+                            Instant.now()
+                    );
+                    stopRemaining = true;
+                    stopReason = "Reconciliation yielded " + recon.outcome();
+                    break;
+                }
+            }
+
+            // Refresh allTracks and currentDestinationIndex after reconciliation
+            allTracks = transactionTemplate.execute(status -> {
+                List<ExecutionTrackRecord> records =
+                        trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+                return records.stream().map(ExecutionTrackRecordDto::from).toList();
+            });
+            currentDestinationIndex = (int) allTracks.stream()
+                    .filter(t -> t.status() == ExecutionTrackStatus.ADDED)
+                    .count();
+        }
+
+        // Query due pending tracks for this execution if forward insertion is permitted
+        List<ExecutionTrackRecord> dueTracks = stopRemaining
+                ? Collections.emptyList()
+                : trackRecordRepository.findDuePendingTracks(executionId);
 
         for (ExecutionTrackRecord track : dueTracks) {
             UUID trackId = track.getId();
@@ -1221,6 +1415,11 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     .orElseThrow(() -> new IllegalStateException("Migration execution missing: " + executionId));
 
             execution.releaseExecution();
+            boolean invariantValid = execution.validateConservationInvariant();
+            if (!invariantValid) {
+                log.error("Invariant violation: track conservation invariant failed for execution {}", executionId);
+                execution.setStatus(MigrationExecutionStatus.RECOVERY_REQUIRED);
+            }
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
             if (saved == null) {
                 saved = execution;
@@ -1761,6 +1960,13 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         return rollbackExecution(executionId, RollbackExecutionRequest.all(), authenticatedUserId);
     }
 
+    private record RollbackClaimContext(
+            String workerId,
+            long leaseGeneration,
+            List<ExecutionTrackRecordDto> eligibleTargets,
+            long totalAddedOrRolledBackCount
+    ) {}
+
     @Override
     public ExecutionRollbackSummary rollbackExecution(UUID executionId, RollbackExecutionRequest request, UUID authenticatedUserId) {
         if (executionId == null) {
@@ -1786,8 +1992,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
         final RollbackExecutionRequest rollbackReq = request;
 
-        // 1. Concurrency claim and validation in a short transaction
-        List<ExecutionTrackRecordDto> targetsToRollback = transactionTemplate.execute(status -> {
+        // 1. Concurrency claim and validation in a short transaction recording rollback intent (Phase 13G-D)
+        RollbackClaimContext context = transactionTemplate.execute(status -> {
             MigrationExecution execution = executionRepository.findById(executionId)
                     .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
 
@@ -1847,7 +2053,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 }
             }
 
-            // Claim execution for rollback with atomic conditional update
+            // Claim execution for rollback with atomic conditional update recording rollback intent (Phase 13G-D)
             Set<MigrationExecutionStatus> eligibleStatuses = Set.of(
                     MigrationExecutionStatus.PARTIALLY_COMPLETED,
                     MigrationExecutionStatus.COMPLETED,
@@ -1856,160 +2062,295 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     MigrationExecutionStatus.FAILED
             );
             long expectedVersion = execution.getVersion() != null ? execution.getVersion() : 0L;
-            int claimed = executionRepository.claimExecutionRunningWithVersion(
+            String workerId = "rollback-worker-" + UUID.randomUUID();
+            long leaseDurationSeconds = schedulerProperties != null ? schedulerProperties.getLeaseDurationSeconds() : 60L;
+            String targetPositionsStr = rollbackReq.targetPositions() != null && !rollbackReq.targetPositions().isEmpty()
+                    ? rollbackReq.targetPositions().stream().sorted().map(String::valueOf).collect(Collectors.joining(","))
+                    : null;
+
+            int claimed = executionRepository.claimExecutionForRollbackWithIntent(
                     executionId,
-                    eligibleStatuses,
+                    eligibleStatuses.stream().map(Enum::name).toList(),
                     expectedVersion,
-                    Instant.now()
+                    workerId,
+                    targetPositionsStr,
+                    leaseDurationSeconds
             );
+            if (claimed == 0) {
+                claimed = executionRepository.claimExecutionRunningWithVersion(
+                        executionId,
+                        eligibleStatuses,
+                        expectedVersion,
+                        Instant.now()
+                );
+            }
             if (claimed == 0) {
                 throw new InvalidStateException("Migration execution could not be claimed for rollback: " +
                         "execution is either already in progress, in an invalid state, or was modified concurrently");
             }
-            execution.setStatus(MigrationExecutionStatus.RUNNING);
 
-            return eligible.stream().map(ExecutionTrackRecordDto::from).toList();
+            execution.recordRollbackIntent(Instant.now(), targetPositionsStr);
+
+            if (idempotencyService != null) {
+                idempotencyService.clearTerminalExpiry(executionId);
+            }
+
+            long newLeaseGeneration = (execution.getLeaseGeneration() != null ? execution.getLeaseGeneration() : 0L) + 1L;
+            long totalAddedOrRolledBack = allRecords.stream()
+                    .filter(r -> r.getStatus() == ExecutionTrackStatus.ADDED || r.getStatus() == ExecutionTrackStatus.ROLLED_BACK)
+                    .count();
+
+            return new RollbackClaimContext(
+                    workerId,
+                    newLeaseGeneration,
+                    eligible.stream().map(ExecutionTrackRecordDto::from).toList(),
+                    totalAddedOrRolledBack
+            );
         });
 
-        // 2. Perform Rollback Operations
-        // Iterate in reverse target position order (compensating operations)
-        List<ExecutionTrackRecordDto> sortedTargets = targetsToRollback.stream()
-                .sorted(Comparator.comparingInt(ExecutionTrackRecordDto::targetPosition).reversed())
-                .toList();
+        return executeRollbackInternal(
+                executionId,
+                authenticatedUserId,
+                context.workerId(),
+                context.leaseGeneration(),
+                context.eligibleTargets(),
+                context.totalAddedOrRolledBackCount()
+        );
+    }
 
-        List<RollbackTrackOutcomeDto> outcomes = new ArrayList<>();
-        int successCount = 0;
-        int failedCount = 0;
-        int alreadyRolledBackCount = 0;
+    @Override
+    public MigrationExecutionSummary executeClaimedRollback(
+            UUID executionId,
+            UUID authenticatedUserId,
+            long leaseGeneration
+    ) {
+        if (executionId == null) {
+            throw new IllegalArgumentException("Execution ID must not be null");
+        }
+        if (authenticatedUserId == null) {
+            throw new IllegalArgumentException("Authenticated user ID must not be null");
+        }
 
-        for (ExecutionTrackRecordDto target : sortedTargets) {
-            UUID trackId = target.id();
-            int pos = target.targetPosition();
-            String videoId = target.destinationTrackId();
-            String playlistItemId = target.destinationPlaylistItemId();
+        RollbackClaimContext context = transactionTemplate.execute(status -> {
+            MigrationExecution execution = executionRepository.findById(executionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + executionId));
 
-            // Idempotency check: if already ROLLED_BACK at application state level, do not call remote provider
-            if (target.status() == ExecutionTrackStatus.ROLLED_BACK) {
-                alreadyRolledBackCount++;
-                outcomes.add(RollbackTrackOutcomeDto.alreadyRolledBack(pos, videoId, playlistItemId));
-                if (rollbackRecordRepository != null) {
+            if (!execution.getUser().getId().equals(authenticatedUserId)) {
+                throw new ResourceNotFoundException("Migration execution not found: " + executionId);
+            }
+
+            if (execution.getStatus() != MigrationExecutionStatus.RUNNING) {
+                throw new InvalidStateException("Cannot resume claimed rollback for execution " + executionId
+                        + ": status is " + execution.getStatus() + ", expected RUNNING");
+            }
+
+            if (execution.getLeaseGeneration() == null || execution.getLeaseGeneration() != leaseGeneration) {
+                throw new StaleLeaseOwnershipException(
+                        executionId,
+                        execution.getLeaseOwner(),
+                        leaseGeneration,
+                        execution.getLeaseGeneration(),
+                        "Stale lease generation during claimed rollback resume"
+                );
+            }
+
+            List<ExecutionTrackRecord> allRecords =
+                    trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(executionId);
+
+            String targetPositionsStr = execution.getRollbackTargetPositions();
+            Set<Integer> targetPositions = null;
+            if (targetPositionsStr != null && !targetPositionsStr.isBlank()) {
+                targetPositions = Arrays.stream(targetPositionsStr.split(","))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .map(Integer::parseInt)
+                        .collect(Collectors.toSet());
+            }
+
+            List<ExecutionTrackRecord> eligible;
+            if (targetPositions != null && !targetPositions.isEmpty()) {
+                Set<Integer> targets = targetPositions;
+                eligible = allRecords.stream()
+                        .filter(r -> targets.contains(r.getTargetPosition()))
+                        .toList();
+            } else {
+                eligible = allRecords.stream()
+                        .filter(r -> r.getStatus() == ExecutionTrackStatus.ADDED
+                                || r.getStatus() == ExecutionTrackStatus.ROLLED_BACK
+                                || r.getStatus() == ExecutionTrackStatus.ROLLING_BACK)
+                        .toList();
+            }
+
+            long totalAddedOrRolledBack = allRecords.stream()
+                    .filter(r -> r.getStatus() == ExecutionTrackStatus.ADDED
+                            || r.getStatus() == ExecutionTrackStatus.ROLLED_BACK
+                            || r.getStatus() == ExecutionTrackStatus.ROLLING_BACK)
+                    .count();
+
+            return new RollbackClaimContext(
+                    execution.getLeaseOwner(),
+                    leaseGeneration,
+                    eligible.stream().map(ExecutionTrackRecordDto::from).toList(),
+                    totalAddedOrRolledBack
+            );
+        });
+
+        ExecutionRollbackSummary rollbackSummary = executeRollbackInternal(
+                executionId,
+                authenticatedUserId,
+                context.workerId(),
+                context.leaseGeneration(),
+                context.eligibleTargets(),
+                context.totalAddedOrRolledBackCount()
+        );
+
+        return rollbackSummary.updatedExecution();
+    }
+
+    private ExecutionRollbackSummary executeRollbackInternal(
+            UUID executionId,
+            UUID authenticatedUserId,
+            String workerId,
+            long leaseGeneration,
+            List<ExecutionTrackRecordDto> eligibleTargets,
+            long totalAddedOrRolledBackCount
+    ) {
+        if (heartbeatService != null) {
+            heartbeatService.registerLease(executionId, workerId, leaseGeneration);
+        }
+
+        try {
+            // Sort in reverse target position order for compensating operations
+            List<ExecutionTrackRecordDto> sortedTargets = eligibleTargets.stream()
+                    .sorted(Comparator.comparingInt(ExecutionTrackRecordDto::targetPosition).reversed())
+                    .toList();
+
+            List<RollbackTrackOutcomeDto> outcomes = new ArrayList<>();
+            int successCount = 0;
+            int failedCount = 0;
+            int alreadyRolledBackCount = 0;
+
+            for (ExecutionTrackRecordDto target : sortedTargets) {
+                if (heartbeatService != null && heartbeatService.isOwnershipLost(executionId)) {
+                    log.warn("Worker '{}' lost lease ownership on execution {} (gen {}) during rollback",
+                            workerId, executionId, leaseGeneration);
+                    throw new StaleLeaseOwnershipException(
+                            executionId,
+                            workerId,
+                            leaseGeneration,
+                            null,
+                            "Worker lease ownership lost during rollback execution"
+                    );
+                }
+
+                UUID trackId = target.id();
+                int pos = target.targetPosition();
+                String videoId = target.destinationTrackId();
+                String playlistItemId = target.destinationPlaylistItemId();
+
+                // Idempotency check: if already ROLLED_BACK at application state level, do not call remote provider
+                if (target.status() == ExecutionTrackStatus.ROLLED_BACK) {
+                    alreadyRolledBackCount++;
+                    outcomes.add(RollbackTrackOutcomeDto.alreadyRolledBack(pos, videoId, playlistItemId));
+                    if (rollbackRecordRepository != null) {
+                        transactionTemplate.execute(status -> {
+                            MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
+                            ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                            ExecutionRollbackRecord audit = ExecutionRollbackRecord.alreadyRolledBack(exec, tr);
+                            rollbackRecordRepository.save(audit);
+                            return null;
+                        });
+                    }
+                    continue;
+                }
+
+                // Verified identifier check: cannot delete without valid playlistItemId
+                if (playlistItemId == null || playlistItemId.isBlank()) {
+                    failedCount++;
+                    String err = "Cannot rollback track at position " + pos + ": missing or unverified destination playlist item identifier";
+                    outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, err));
+                    if (rollbackRecordRepository != null) {
+                        transactionTemplate.execute(status -> {
+                            MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
+                            ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                            ExecutionRollbackRecord audit = ExecutionRollbackRecord.failed(exec, tr, err);
+                            rollbackRecordRepository.save(audit);
+                            return null;
+                        });
+                    }
+                    continue;
+                }
+
+                // Atomically claim track with fencing before calling remote provider
+                int trackClaimed = trackRecordRepository.claimTrackRollingBackWithFencing(trackId, executionId, leaseGeneration);
+                if (trackClaimed == 0) {
+                    trackClaimed = trackRecordRepository.claimTrackRollingBack(trackId, Instant.now());
+                }
+                if (trackClaimed == 0) {
+                    // Check if it was already in ROLLING_BACK from an interrupted run
+                    boolean isInFlightRollingBack = Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+                        ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElse(null);
+                        return tr != null && tr.getStatus() == ExecutionTrackStatus.ROLLING_BACK;
+                    }));
+                    if (!isInFlightRollingBack) {
+                        failedCount++;
+                        String conflictMsg = "Cannot rollback track at position " + pos + ": track is concurrently claimed by another operation or not in ADDED status";
+                        outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, conflictMsg));
+                        continue;
+                    }
+                }
+
+                // Execute compensating provider operation (OUTSIDE database transaction)
+                try {
+                    musicDestination.removeTrackFromPlaylist(authenticatedUserId, playlistItemId.trim());
+
+                    // Confirmed deletion by destination provider -> persist outcome with fencing
                     transactionTemplate.execute(status -> {
                         MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                        ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
-                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.alreadyRolledBack(exec, tr);
-                        rollbackRecordRepository.save(audit);
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId).orElseThrow();
+                        record.markRolledBack("Rolled back: removed from destination playlist");
+                        trackRecordRepository.saveAndFlush(record);
+
+                        if (rollbackRecordRepository != null) {
+                            ExecutionRollbackRecord audit = ExecutionRollbackRecord.success(exec, record);
+                            rollbackRecordRepository.save(audit);
+                        }
                         return null;
                     });
-                }
-                continue;
-            }
 
-            // Verified identifier check: cannot delete without valid playlistItemId
-            if (playlistItemId == null || playlistItemId.isBlank()) {
-                failedCount++;
-                String err = "Cannot rollback track at position " + pos + ": missing or unverified destination playlist item identifier";
-                outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, err));
-                if (rollbackRecordRepository != null) {
+                    successCount++;
+                    outcomes.add(RollbackTrackOutcomeDto.rolledBack(pos, videoId, playlistItemId));
+
+                } catch (ResourceNotFoundException ex) {
+                    // Item was already deleted / absent on destination -> treated as confirmed safe deletion
                     transactionTemplate.execute(status -> {
                         MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                        ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
-                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.failed(exec, tr, err);
-                        rollbackRecordRepository.save(audit);
+                        ExecutionTrackRecord record = trackRecordRepository.findById(trackId).orElseThrow();
+                        record.markRolledBack("Item was already removed on destination provider (404 Not Found)");
+                        trackRecordRepository.saveAndFlush(record);
+
+                        if (rollbackRecordRepository != null) {
+                            ExecutionRollbackRecord audit = ExecutionRollbackRecord.success(exec, record);
+                            rollbackRecordRepository.save(audit);
+                        }
                         return null;
                     });
-                }
-                continue;
-            }
 
-            // Atomically claim track in short transaction before calling remote provider
-            // to prevent concurrent duplicate remote DELETE calls
-            boolean trackClaimed = Boolean.TRUE.equals(transactionTemplate.execute(status -> {
-                int rows = trackRecordRepository.claimTrackRollingBack(trackId, Instant.now());
-                return rows == 1;
-            }));
+                    successCount++;
+                    outcomes.add(RollbackTrackOutcomeDto.rolledBack(pos, videoId, playlistItemId));
 
-            if (!trackClaimed) {
-                failedCount++;
-                String conflictMsg = "Cannot rollback track at position " + pos + ": track is concurrently claimed by another operation or not in ADDED status";
-                outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, conflictMsg));
-                continue;
-            }
-
-            // Execute compensating provider operation (OUTSIDE database transaction)
-            try {
-                musicDestination.removeTrackFromPlaylist(authenticatedUserId, playlistItemId.trim());
-
-                // Confirmed deletion by destination provider -> persist outcome in short transaction
-                transactionTemplate.execute(status -> {
-                    MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                    ExecutionTrackRecord record = trackRecordRepository.findById(trackId).orElseThrow();
-                    record.markRolledBack("Rolled back: removed from destination playlist");
-                    trackRecordRepository.saveAndFlush(record);
-
-                    if (rollbackRecordRepository != null) {
-                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.success(exec, record);
-                        rollbackRecordRepository.save(audit);
-                    }
-                    return null;
-                });
-
-                successCount++;
-                outcomes.add(RollbackTrackOutcomeDto.rolledBack(pos, videoId, playlistItemId));
-
-            } catch (ResourceNotFoundException ex) {
-                // Item was already deleted / absent on destination -> treated as confirmed safe deletion
-                transactionTemplate.execute(status -> {
-                    MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                    ExecutionTrackRecord record = trackRecordRepository.findById(trackId).orElseThrow();
-                    record.markRolledBack("Item was already removed on destination provider (404 Not Found)");
-                    trackRecordRepository.saveAndFlush(record);
-
-                    if (rollbackRecordRepository != null) {
-                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.success(exec, record);
-                        rollbackRecordRepository.save(audit);
-                    }
-                    return null;
-                });
-
-                successCount++;
-                outcomes.add(RollbackTrackOutcomeDto.rolledBack(pos, videoId, playlistItemId));
-
-            } catch (ResourceAccessException ex) {
-                // Ambiguous deletion: network timeout / socket dropped during remote DELETE
-                String sanitized = sanitize(ex.getMessage());
-                log.warn("Rollback timed out for track {} (item {}). Outcome is UNCERTAIN: {}",
-                        videoId, playlistItemId, sanitized);
-                failedCount++;
-                outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, "UNCERTAIN: " + sanitized));
-
-                transactionTemplate.execute(status -> {
-                    MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                    ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
-                    tr.markUncertain("Rollback delete timed out; remote outcome is uncertain: " + sanitized);
-                    trackRecordRepository.saveAndFlush(tr);
-
-                    if (rollbackRecordRepository != null) {
-                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.uncertain(exec, tr, sanitized);
-                        rollbackRecordRepository.save(audit);
-                    }
-                    return null;
-                });
-
-            } catch (ExternalProviderException ex) {
-                ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_deletion");
-                String sanitized = sanitize(ex.getMessage());
-
-                if (analysis.classification() == ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED) {
-                    // Ambiguous deletion: HTTP 500 / 503 during remote DELETE
-                    log.warn("Rollback server error HTTP {} for track {} (item {}). Outcome is UNCERTAIN: {}",
-                            analysis.getProviderStatusCode().orElse(0), videoId, playlistItemId, sanitized);
+                } catch (ResourceAccessException ex) {
+                    // Ambiguous deletion: network timeout / socket dropped during remote DELETE
+                    String sanitized = sanitize(ex.getMessage());
+                    log.warn("Rollback timed out for track {} (item {}). Outcome is UNCERTAIN: {}",
+                            videoId, playlistItemId, sanitized);
                     failedCount++;
                     outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, "UNCERTAIN: " + sanitized));
 
                     transactionTemplate.execute(status -> {
                         MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
                         ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
-                        tr.markUncertain("Rollback outcome uncertain: " + sanitized);
+                        tr.markUncertain("Rollback delete timed out; remote outcome is uncertain: " + sanitized);
                         trackRecordRepository.saveAndFlush(tr);
 
                         if (rollbackRecordRepository != null) {
@@ -2018,15 +2359,56 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                         }
                         return null;
                     });
-                } else {
-                    // Confirmed provider rejection (e.g. 400, 401, 403)
+
+                } catch (ExternalProviderException ex) {
+                    ExecutionFailureAnalysis analysis = failureClassifier.classify(ex, "destination_deletion");
+                    String sanitized = sanitize(ex.getMessage());
+
+                    if (analysis.classification() == ExecutionFailureClassification.MANUAL_INTERVENTION_REQUIRED) {
+                        log.warn("Rollback server error HTTP {} for track {} (item {}). Outcome is UNCERTAIN: {}",
+                                analysis.getProviderStatusCode().orElse(0), videoId, playlistItemId, sanitized);
+                        failedCount++;
+                        outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, "UNCERTAIN: " + sanitized));
+
+                        transactionTemplate.execute(status -> {
+                            MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
+                            ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                            tr.markUncertain("Rollback outcome uncertain: " + sanitized);
+                            trackRecordRepository.saveAndFlush(tr);
+
+                            if (rollbackRecordRepository != null) {
+                                ExecutionRollbackRecord audit = ExecutionRollbackRecord.uncertain(exec, tr, sanitized);
+                                rollbackRecordRepository.save(audit);
+                            }
+                            return null;
+                        });
+                    } else {
+                        failedCount++;
+                        outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, sanitized));
+
+                        transactionTemplate.execute(status -> {
+                            MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
+                            ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
+                            tr.revertRollingBackToAdded("Rollback rejected by provider: " + sanitized);
+                            trackRecordRepository.saveAndFlush(tr);
+
+                            if (rollbackRecordRepository != null) {
+                                ExecutionRollbackRecord audit = ExecutionRollbackRecord.failed(exec, tr, sanitized);
+                                rollbackRecordRepository.save(audit);
+                            }
+                            return null;
+                        });
+                    }
+
+                } catch (Exception ex) {
+                    String sanitized = sanitize(ex.getMessage());
                     failedCount++;
                     outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, sanitized));
 
                     transactionTemplate.execute(status -> {
                         MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
                         ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
-                        tr.revertRollingBackToAdded("Rollback rejected by provider: " + sanitized);
+                        tr.revertRollingBackToAdded("Unexpected rollback error: " + sanitized);
                         trackRecordRepository.saveAndFlush(tr);
 
                         if (rollbackRecordRepository != null) {
@@ -2036,58 +2418,53 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                         return null;
                     });
                 }
+            }
 
-            } catch (Exception ex) {
-                String sanitized = sanitize(ex.getMessage());
-                failedCount++;
-                outcomes.add(RollbackTrackOutcomeDto.failed(pos, videoId, playlistItemId, sanitized));
+            // Determine overall status
+            RollbackExecutionStatus overallStatus;
+            if (failedCount == 0 && successCount > 0) {
+                overallStatus = RollbackExecutionStatus.SUCCESS;
+            } else if (successCount > 0 && failedCount > 0) {
+                overallStatus = RollbackExecutionStatus.PARTIAL_SUCCESS;
+            } else if (alreadyRolledBackCount > 0 && successCount == 0 && failedCount == 0) {
+                overallStatus = RollbackExecutionStatus.NO_OP;
+            } else {
+                overallStatus = RollbackExecutionStatus.FAILED;
+            }
 
-                transactionTemplate.execute(status -> {
-                    MigrationExecution exec = executionRepository.findById(executionId).orElseThrow();
-                    ExecutionTrackRecord tr = trackRecordRepository.findById(trackId).orElseThrow();
-                    tr.revertRollingBackToAdded("Unexpected rollback error: " + sanitized);
-                    trackRecordRepository.saveAndFlush(tr);
+            MigrationExecutionSummary updatedSummary = transactionTemplate.execute(status -> {
+                MigrationExecution execution = executionRepository.findById(executionId).orElseThrow();
+                execution.releaseExecution();
+                MigrationExecution saved = executionRepository.saveAndFlush(execution);
+                checkTerminalTransition(saved);
+                return MigrationExecutionSummary.from(saved);
+            });
 
-                    if (rollbackRecordRepository != null) {
-                        ExecutionRollbackRecord audit = ExecutionRollbackRecord.failed(exec, tr, sanitized);
-                        rollbackRecordRepository.save(audit);
-                    }
-                    return null;
-                });
+            int finalized = executionRepository.finalizeRollbackWithFencing(
+                    executionId,
+                    updatedSummary.status().name(),
+                    workerId,
+                    leaseGeneration
+            );
+            if (finalized == 0) {
+                log.warn("Fenced rollback finalization affected 0 rows for execution {} (gen {})", executionId, leaseGeneration);
+            }
+
+            return new ExecutionRollbackSummary(
+                    executionId,
+                    overallStatus,
+                    sortedTargets.size(),
+                    successCount,
+                    failedCount,
+                    alreadyRolledBackCount,
+                    outcomes,
+                    updatedSummary
+            );
+        } finally {
+            if (heartbeatService != null) {
+                heartbeatService.unregisterLease(executionId);
             }
         }
-
-        // 3. Reconcile aggregate execution state in a short transaction
-        MigrationExecutionSummary updatedSummary = transactionTemplate.execute(status -> {
-            MigrationExecution execution = executionRepository.findById(executionId).orElseThrow();
-            execution.releaseExecution();
-            MigrationExecution saved = executionRepository.saveAndFlush(execution);
-            checkTerminalTransition(saved);
-            return MigrationExecutionSummary.from(saved);
-        });
-
-        // Determine overall status
-        RollbackExecutionStatus overallStatus;
-        if (failedCount == 0 && successCount > 0) {
-            overallStatus = RollbackExecutionStatus.SUCCESS;
-        } else if (successCount > 0 && failedCount > 0) {
-            overallStatus = RollbackExecutionStatus.PARTIAL_SUCCESS;
-        } else if (alreadyRolledBackCount > 0 && successCount == 0 && failedCount == 0) {
-            overallStatus = RollbackExecutionStatus.NO_OP;
-        } else {
-            overallStatus = RollbackExecutionStatus.FAILED;
-        }
-
-        return new ExecutionRollbackSummary(
-                executionId,
-                overallStatus,
-                sortedTargets.size(),
-                successCount,
-                failedCount,
-                alreadyRolledBackCount,
-                outcomes,
-                updatedSummary
-        );
     }
 
     @Override

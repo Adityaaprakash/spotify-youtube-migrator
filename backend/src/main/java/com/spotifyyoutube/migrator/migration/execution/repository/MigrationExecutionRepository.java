@@ -139,7 +139,9 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
            "    updated_at = clock_timestamp() " +
            "WHERE id = :id " +
            "  AND lease_owner = :workerId " +
-           "  AND lease_generation = :leaseGeneration",
+           "  AND lease_generation = :leaseGeneration " +
+           "  AND lease_until IS NOT NULL " +
+           "  AND lease_until > clock_timestamp()",
            nativeQuery = true)
     int updateStatusWithFencing(
             @Param("id") UUID id,
@@ -156,4 +158,115 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
     ) {
         return updateStatusWithFencing(id, workerId, leaseGeneration, newStatus != null ? newStatus.name() : null);
     }
+
+    /**
+     * Atomically confirms created destination playlist with fencing verification and unexpired lease check (Phase 13G).
+     */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE migration_executions " +
+           "SET destination_playlist_id = :destinationPlaylistId, " +
+           "    destination_playlist_url = :destinationPlaylistUrl, " +
+           "    status = :nextStatus, " +
+           "    updated_at = clock_timestamp(), " +
+           "    version = version + 1 " +
+           "WHERE id = :executionId " +
+           "  AND status IN ('ALLOCATING_DESTINATION', 'RUNNING') " +
+           "  AND lease_owner = :workerId " +
+           "  AND lease_generation = :leaseGeneration " +
+           "  AND lease_until IS NOT NULL " +
+           "  AND lease_until > clock_timestamp()",
+           nativeQuery = true)
+    int confirmDestinationPlaylistWithFencing(
+            @Param("executionId") UUID executionId,
+            @Param("destinationPlaylistId") String destinationPlaylistId,
+            @Param("destinationPlaylistUrl") String destinationPlaylistUrl,
+            @Param("nextStatus") String nextStatus,
+            @Param("workerId") String workerId,
+            @Param("leaseGeneration") long leaseGeneration
+    );
+
+    /**
+     * Records a destination playlist creation failure code with fencing verification and unexpired lease check (Phase 13G).
+     */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE migration_executions " +
+           "SET playlist_creation_failure_code = :failureCode, " +
+           "    status = :nextStatus, " +
+           "    updated_at = clock_timestamp(), " +
+           "    version = version + 1 " +
+           "WHERE id = :executionId " +
+           "  AND status IN ('ALLOCATING_DESTINATION', 'RUNNING') " +
+           "  AND lease_owner = :workerId " +
+           "  AND lease_generation = :leaseGeneration " +
+           "  AND lease_until IS NOT NULL " +
+           "  AND lease_until > clock_timestamp()",
+           nativeQuery = true)
+    int recordPlaylistCreationFailureWithFencing(
+            @Param("executionId") UUID executionId,
+            @Param("failureCode") String failureCode,
+            @Param("nextStatus") String nextStatus,
+            @Param("workerId") String workerId,
+            @Param("leaseGeneration") long leaseGeneration
+    );
+
+    /**
+     * Atomically claims an execution for rollback, recording durable rollback intent,
+     * assigning worker lease ownership, incrementing fencing generation, and setting parent status to RUNNING (Phase 13G-D).
+     */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE migration_executions " +
+           "SET status = 'RUNNING', " +
+           "    rollback_requested_at = clock_timestamp(), " +
+           "    rollback_target_positions = :targetPositions, " +
+           "    lease_owner = :workerId, " +
+           "    lease_generation = lease_generation + 1, " +
+           "    lease_until = clock_timestamp() + (:leaseDurationSeconds * INTERVAL '1 second'), " +
+           "    heartbeat_at = clock_timestamp(), " +
+           "    updated_at = clock_timestamp(), " +
+           "    version = version + 1 " +
+           "WHERE id = :id " +
+           "  AND status IN :eligibleStatuses " +
+           "  AND version = :expectedVersion",
+           nativeQuery = true)
+    int claimExecutionForRollbackWithIntent(
+            @Param("id") UUID id,
+            @Param("eligibleStatuses") Collection<String> eligibleStatuses,
+            @Param("expectedVersion") long expectedVersion,
+            @Param("workerId") String workerId,
+            @Param("targetPositions") String targetPositions,
+            @Param("leaseDurationSeconds") long leaseDurationSeconds
+    );
+
+    /**
+     * Atomically finalizes rollback completion with fencing verification, revoking worker lease ownership,
+     * clearing active rollback intent, and recording completion timestamp (Phase 13G-D).
+     */
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = "UPDATE migration_executions " +
+           "SET status = :finalStatus, " +
+           "    rollback_requested_at = NULL, " +
+           "    rollback_target_positions = NULL, " +
+           "    rollback_completed_at = clock_timestamp(), " +
+           "    lease_owner = NULL, " +
+           "    lease_until = NULL, " +
+           "    completed_at = CASE WHEN :finalStatus = 'ROLLED_BACK' THEN clock_timestamp() ELSE completed_at END, " +
+           "    updated_at = clock_timestamp(), " +
+           "    version = version + 1 " +
+           "WHERE id = :id " +
+           "  AND status = 'RUNNING' " +
+           "  AND lease_owner = :workerId " +
+           "  AND lease_generation = :leaseGeneration " +
+           "  AND lease_until IS NOT NULL " +
+           "  AND lease_until > clock_timestamp()",
+           nativeQuery = true)
+    int finalizeRollbackWithFencing(
+            @Param("id") UUID id,
+            @Param("finalStatus") String finalStatus,
+            @Param("workerId") String workerId,
+            @Param("leaseGeneration") long leaseGeneration
+    );
 }

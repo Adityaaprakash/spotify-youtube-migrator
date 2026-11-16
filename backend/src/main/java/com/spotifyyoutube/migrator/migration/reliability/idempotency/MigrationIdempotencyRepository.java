@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -54,6 +55,7 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
      * @param expiresAt   calculated expiry timestamp (terminal transition time + 72 hours)
      * @return number of records updated
      */
+    @Transactional
     @Modifying
     @Query("UPDATE MigrationIdempotencyRecord r SET r.expiresAt = :expiresAt "
             + "WHERE r.executionId = :executionId AND r.expiresAt IS NULL")
@@ -61,6 +63,19 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
             @Param("executionId") UUID executionId,
             @Param("expiresAt") Instant expiresAt
     );
+
+    /**
+     * Clears terminal retention expiration timestamp for all idempotency records associated with an execution
+     * when an execution leaves terminal status for rollback or recovery (Phase 13G-D).
+     *
+     * @param executionId execution aggregate identifier
+     * @return number of records updated
+     */
+    @Transactional
+    @Modifying
+    @Query("UPDATE MigrationIdempotencyRecord r SET r.expiresAt = NULL "
+            + "WHERE r.executionId = :executionId")
+    int clearTerminalExpiry(@Param("executionId") UUID executionId);
 
     /**
      * Deletes expired idempotency records whose {@code expires_at} timestamp is strictly before the given cutoff.
@@ -86,6 +101,7 @@ public interface MigrationIdempotencyRepository extends JpaRepository<MigrationI
                 SELECT id FROM migration_idempotency_keys
                 WHERE expires_at IS NOT NULL AND expires_at < clock_timestamp()
                 LIMIT :limit
+                FOR UPDATE SKIP LOCKED
             )
             DELETE FROM migration_idempotency_keys m
             USING to_delete

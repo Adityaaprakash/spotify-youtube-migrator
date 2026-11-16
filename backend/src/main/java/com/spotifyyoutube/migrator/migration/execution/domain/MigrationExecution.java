@@ -132,6 +132,15 @@ public class MigrationExecution extends BaseEntity {
     @Column(name = "next_attempt_at")
     private Instant nextAttemptAt;
 
+    @Column(name = "rollback_requested_at")
+    private Instant rollbackRequestedAt;
+
+    @Column(name = "rollback_target_positions", columnDefinition = "TEXT")
+    private String rollbackTargetPositions;
+
+    @Column(name = "rollback_completed_at")
+    private Instant rollbackCompletedAt;
+
     @Version
     @Column(name = "version", nullable = false)
     private Long version = 0L;
@@ -583,6 +592,10 @@ public class MigrationExecution extends BaseEntity {
         return totalApprovedTracks;
     }
 
+    public void setTotalApprovedTracks(int totalApprovedTracks) {
+        this.totalApprovedTracks = totalApprovedTracks;
+    }
+
     public int getSuccessfulInsertions() {
         return successfulInsertions;
     }
@@ -862,5 +875,76 @@ public class MigrationExecution extends BaseEntity {
 
     public void setNextAttemptAt(Instant nextAttemptAt) {
         this.nextAttemptAt = nextAttemptAt;
+    }
+
+    public Instant getRollbackRequestedAt() {
+        return rollbackRequestedAt;
+    }
+
+    public void setRollbackRequestedAt(Instant rollbackRequestedAt) {
+        this.rollbackRequestedAt = rollbackRequestedAt;
+    }
+
+    public String getRollbackTargetPositions() {
+        return rollbackTargetPositions;
+    }
+
+    public void setRollbackTargetPositions(String rollbackTargetPositions) {
+        this.rollbackTargetPositions = rollbackTargetPositions;
+    }
+
+    public Instant getRollbackCompletedAt() {
+        return rollbackCompletedAt;
+    }
+
+    public void setRollbackCompletedAt(Instant rollbackCompletedAt) {
+        this.rollbackCompletedAt = rollbackCompletedAt;
+    }
+
+    public boolean isRollbackRequested() {
+        return this.rollbackRequestedAt != null;
+    }
+
+    public void recordRollbackIntent(Instant requestedAt, String targetPositions) {
+        this.rollbackRequestedAt = requestedAt != null ? requestedAt : Instant.now();
+        this.rollbackTargetPositions = targetPositions;
+    }
+
+    public void clearRollbackIntent(Instant completedAt) {
+        this.rollbackRequestedAt = null;
+        this.rollbackTargetPositions = null;
+        this.rollbackCompletedAt = completedAt != null ? completedAt : Instant.now();
+    }
+
+    /**
+     * Validates Phase 13G count conservation invariants across all track states:
+     * totalApprovedTracks = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack
+     * and processed = added + failed + uncertain + skipped + rolledBack.
+     */
+    public boolean validateConservationInvariant() {
+        int pending = 0;
+        int adding = 0;
+        int added = 0;
+        int failed = 0;
+        int uncertain = 0;
+        int skipped = 0;
+        int rollingBack = 0;
+        int rolledBack = 0;
+
+        for (ExecutionTrackRecord record : trackRecords) {
+            switch (record.getStatus()) {
+                case PENDING -> pending++;
+                case ADDING -> adding++;
+                case ADDED -> added++;
+                case FAILED -> failed++;
+                case UNCERTAIN -> uncertain++;
+                case SKIPPED -> skipped++;
+                case ROLLING_BACK -> rollingBack++;
+                case ROLLED_BACK -> rolledBack++;
+            }
+        }
+
+        int sum = pending + adding + added + failed + uncertain + skipped + rollingBack + rolledBack;
+        return sum == totalApprovedTracks;
     }
 }

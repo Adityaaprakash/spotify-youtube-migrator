@@ -107,6 +107,8 @@ public interface ExecutionTrackRecordRepository extends JpaRepository<ExecutionT
            "    SELECT id, lease_generation " +
            "    FROM migration_executions " +
            "    WHERE id = :executionId " +
+           "      AND lease_until IS NOT NULL " +
+           "      AND lease_until > clock_timestamp() " +
            "    FOR SHARE" +
            ") " +
            "UPDATE execution_track_records t " +
@@ -172,6 +174,8 @@ public interface ExecutionTrackRecordRepository extends JpaRepository<ExecutionT
            "    SELECT id, lease_generation " +
            "    FROM migration_executions " +
            "    WHERE id = :executionId " +
+           "      AND lease_until IS NOT NULL " +
+           "      AND lease_until > clock_timestamp() " +
            "    FOR SHARE" +
            ") " +
            "UPDATE execution_track_records t " +

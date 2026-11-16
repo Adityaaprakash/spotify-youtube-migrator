@@ -785,3 +785,24 @@ Controllers MUST NOT:
     - When an idempotency claim expires in `EXTERNAL_OPERATION_STARTED` with `playlist_creation_operation_id`, `recoverExpiredClaim` attempts reconciliation before failing closed. On exact match, it records `destination_playlist_id` on the claim and safely takes over with a monotonic generation increment.
   - **Eight-State Track Conservation Invariant**:
     - The 8 track execution statuses (`PENDING`, `ADDING`, `ADDED`, `FAILED`, `UNCERTAIN`, `SKIPPED`, `ROLLING_BACK`, `ROLLED_BACK`) and progress count conservation invariant remain strictly preserved. No persistent `RETRYING` track status is permitted.
+
+## Reliability Engineering Layer (Phase 13G — Recovery & Resume Integration)
+
+- Packages: `com.spotifyyoutube.migrator.migration.reliability.scheduling`, `com.spotifyyoutube.migrator.migration.application.execution`, `com.spotifyyoutube.migrator.migration.execution.domain`
+- Purpose: Integrates durable scheduling, lease management, API idempotency, and external-operation reconciliation into one unified, crash-resilient recovery workflow.
+- Architecture Rules:
+  - **Single Execution Authority**: `MigrationExecution` remains the sole execution aggregate root and state machine authority.
+  - **Immediate Database Wall-Clock Lease Fencing**:
+    - All updating operations verify that the worker's lease is currently active (`lease_until IS NOT NULL AND lease_until > clock_timestamp()`).
+    - Stale workers whose lease duration elapsed immediately update 0 rows and are safely fenced out, even before any newer worker acquires a lease or increments the generational token.
+  - **Pre-Claim Status Preservation & Compensation**:
+    - Atomic PostgreSQL claim CTE selects `status AS pre_claim_status` alongside execution identity.
+    - If executor dispatch is rejected (e.g. pool saturation or shutdown), `DurableMigrationScheduler.compensateRejection` restores the execution's original pre-claim status (e.g. `ALLOCATING_DESTINATION`, `RECOVERY_REQUIRED`), avoiding improper state loss to `QUEUED`.
+  - **Durable Rollback Intent & Crash Safety**:
+    - Rollback intent (`rollback_requested_at`, `rollback_target_positions`) is atomically committed to `migration_executions` before remote track deletion begins via `claimExecutionForRollbackWithIntent`.
+    - If a worker crashes mid-rollback, the execution retains active rollback intent; upon recovery, `ApprovedMigrationOrchestrator` detects intent and dispatches exclusively to `executeClaimedRollback`, strictly preventing forward track insertion.
+  - **Idempotency Lifecycle During Rollback**:
+    - Rollback initiation invokes `clearTerminalExpiry(executionId)`, setting `expires_at = NULL` to prevent premature purging of idempotency records by background sweepers.
+    - Upon terminal rollback completion (`ROLLED_BACK`), a fresh 72-hour retention TTL is assigned.
+  - **Mathematical Track Conservation Validation**:
+    - Invariant `totalApprovedTracks == added + failed + uncertain + skipped + rolledBack` is explicitly validated by `validateConservationInvariant()` prior to completing or releasing an execution.

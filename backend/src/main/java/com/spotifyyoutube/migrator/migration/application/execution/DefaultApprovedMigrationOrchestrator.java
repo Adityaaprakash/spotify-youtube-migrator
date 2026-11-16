@@ -466,7 +466,85 @@ public class DefaultApprovedMigrationOrchestrator implements ApprovedMigrationOr
 
         log.info("Orchestrator executing claimed migration {} under generation {} for user {}",
                 executionId, leaseGeneration, authenticatedUserId);
+
+        MigrationExecutionSummary summary = null;
+        try {
+            summary = executionStateService.getExecution(executionId, authenticatedUserId);
+        } catch (ResourceNotFoundException e) {
+            // let executeClaimedTrackInsertion handle not found
+        }
+
+        // 1. Recover rollback intent if present (Phase 13G-D)
+        if (summary != null && summary.isRollbackRequested()) {
+            log.info("Execution {} has pending rollback intent. Executing claimed rollback under generation {}.",
+                    executionId, leaseGeneration);
+            return executionStateService.executeClaimedRollback(executionId, authenticatedUserId, leaseGeneration);
+        }
+
+        // 2. Recover destination playlist allocation if unallocated (Phase 13G-B)
+        if (summary != null && summary.destinationPlaylistId() == null) {
+            log.info("Execution {} destination playlist unallocated. Reconciling destination playlist under generation {}.",
+                    executionId, leaseGeneration);
+            summary = resolveClaimedAllocatingDestination(summary, authenticatedUserId, leaseGeneration);
+            if (summary != null && summary.status() == MigrationExecutionStatus.RECOVERY_REQUIRED) {
+                return summary;
+            }
+        }
+
+        // 3. Delegate to claimed track insertion
         return executionStateService.executeClaimedTrackInsertion(executionId, authenticatedUserId, leaseGeneration);
+    }
+
+    private MigrationExecutionSummary resolveClaimedAllocatingDestination(
+            MigrationExecutionSummary existing,
+            UUID authenticatedUserId,
+            long leaseGeneration
+    ) {
+        UUID opId = existing.playlistCreationOperationId();
+        if (opId == null) {
+            throw new InvalidStateException("Execution " + existing.executionId() + " has unallocated destination but is missing operation ID");
+        }
+
+        if (playlistReconciliationService != null) {
+            PlaylistReconciliationResult recon = playlistReconciliationService.reconcilePlaylistCreation(
+                    authenticatedUserId, opId, existing.sourcePlaylistTitle()
+            );
+            if (recon.isExactMatch()) {
+                DestinationPlaylist p = recon.matchedPlaylist();
+                log.info("Reconciled existing unallocated execution {}: found playlist {}",
+                        existing.executionId(), p.id());
+                MigrationExecutionSummary confirmed = executionStateService.confirmDestinationPlaylist(
+                        existing.executionId(), p.id(), p.url(), MigrationExecutionStatus.RUNNING, authenticatedUserId
+                );
+                if (idempotencyService != null) {
+                    idempotencyService.recordDestinationPlaylistForSession(existing.reviewSessionId(), p.id());
+                }
+                return confirmed;
+            } else if (recon.outcome() == PlaylistReconciliationOutcome.CONCLUSIVELY_ABSENT) {
+                log.info("Reconciliation confirmed playlist is CONCLUSIVELY_ABSENT for opId {}. Attempting creation retry under claim.", opId);
+                ApprovedMigrationExecutionRequest retryRequest = new ApprovedMigrationExecutionRequest(
+                        existing.reviewSessionId(),
+                        authenticatedUserId,
+                        null,
+                        existing.planId(),
+                        existing.sourcePlaylistTitle(),
+                        "Migrated from Spotify",
+                        false,
+                        null
+                );
+                createOrReconcileDestinationPlaylist(
+                        existing.executionId(), opId, retryRequest, authenticatedUserId, MigrationExecutionStatus.RUNNING
+                );
+                return executionStateService.getExecution(existing.executionId(), authenticatedUserId);
+            } else {
+                executionStateService.recordPlaylistCreationFailure(
+                        existing.executionId(), recon.outcome().name(), MigrationExecutionStatus.RECOVERY_REQUIRED, authenticatedUserId
+                );
+                return executionStateService.getExecution(existing.executionId(), authenticatedUserId);
+            }
+        }
+
+        throw new InvalidStateException("Cannot reconcile unallocated destination execution without reconciliation service");
     }
 
     @Override

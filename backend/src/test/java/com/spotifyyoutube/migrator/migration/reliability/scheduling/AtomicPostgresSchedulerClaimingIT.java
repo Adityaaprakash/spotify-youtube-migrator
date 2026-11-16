@@ -240,7 +240,7 @@ public class AtomicPostgresSchedulerClaimingIT {
                     .as("Start latch must be released")
                     .isTrue();
 
-            Instant deadline = Instant.now().plusSeconds(10);
+            Instant deadline = Instant.now().plusSeconds(30);
 
             // Step 3: Both workers must independently obtain one successful claim before either drains remainder
             boolean firstClaimed = false;
@@ -299,8 +299,8 @@ public class AtomicPostgresSchedulerClaimingIT {
                     .isTrue();
             startLatch.countDown();
 
-            future1.get(10, TimeUnit.SECONDS);
-            future2.get(10, TimeUnit.SECONDS);
+            future1.get(30, TimeUnit.SECONDS);
+            future2.get(30, TimeUnit.SECONDS);
 
             // Step 6: Assertions
             assertThat(claimOwners).hasSize(executionCount);

@@ -719,6 +719,19 @@ public class DefaultMigrationIdempotencyService implements MigrationIdempotencyS
 
     @Override
     @Transactional
+    public int clearTerminalExpiry(UUID executionId) {
+        if (executionId == null) {
+            return 0;
+        }
+        int updated = repository.clearTerminalExpiry(executionId);
+        if (updated > 0) {
+            log.info("Cleared terminal retention for {} idempotency records on execution {}", updated, executionId);
+        }
+        return updated;
+    }
+
+    @Override
+    @Transactional
     @Scheduled(fixedDelayString = "${migration.idempotency.cleanup-interval-ms:3600000}")
     public int cleanupExpiredRecords() {
         try {

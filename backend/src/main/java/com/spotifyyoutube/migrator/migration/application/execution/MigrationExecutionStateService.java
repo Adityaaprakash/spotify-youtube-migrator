@@ -164,6 +164,20 @@ public interface MigrationExecutionStateService {
     com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionRollbackSummary rollbackExecution(UUID executionId, UUID authenticatedUserId);
 
     /**
+     * Executes or resumes a previously claimed rollback under the acquired fencing generation (Phase 13G-D).
+     *
+     * @param executionId execution identifier
+     * @param authenticatedUserId ID of the authenticated user
+     * @param leaseGeneration acquired fencing generation
+     * @return updated durable execution summary
+     */
+    MigrationExecutionSummary executeClaimedRollback(
+            UUID executionId,
+            UUID authenticatedUserId,
+            long leaseGeneration
+    );
+
+    /**
      * Retrieves the audit history of rollback operations for an execution (Phase 11F).
      *
      * @param executionId execution identifier
@@ -248,6 +262,19 @@ public interface MigrationExecutionStateService {
     );
 
     /**
+     * Confirms destination playlist identity with fencing generation and lease validity verification (Phase 13G).
+     */
+    MigrationExecutionSummary confirmDestinationPlaylistWithFencing(
+            UUID executionId,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus nextStatus,
+            String workerId,
+            long leaseGeneration,
+            UUID authenticatedUserId
+    );
+
+    /**
      * Records a playlist creation failure code and transitions the execution to a target status (Phase 13F).
      *
      * @param executionId execution identifier
@@ -260,6 +287,18 @@ public interface MigrationExecutionStateService {
             UUID executionId,
             String failureCode,
             com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus nextStatus,
+            UUID authenticatedUserId
+    );
+
+    /**
+     * Records a playlist creation failure code with fencing generation and lease validity verification (Phase 13G).
+     */
+    MigrationExecutionSummary recordPlaylistCreationFailureWithFencing(
+            UUID executionId,
+            String failureCode,
+            com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus nextStatus,
+            String workerId,
+            long leaseGeneration,
             UUID authenticatedUserId
     );
 }

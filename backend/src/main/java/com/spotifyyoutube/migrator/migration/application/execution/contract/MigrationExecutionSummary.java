@@ -36,7 +36,8 @@ public record MigrationExecutionSummary(
         Instant startedAt,
         Instant completedAt,
         List<ExecutionTrackRecordDto> trackRecords,
-        UUID playlistCreationOperationId
+        UUID playlistCreationOperationId,
+        Instant rollbackRequestedAt
 ) {
 
     public MigrationExecutionSummary {
@@ -53,6 +54,57 @@ public record MigrationExecutionSummary(
         trackRecords = trackRecords != null
                 ? Collections.unmodifiableList(trackRecords)
                 : Collections.emptyList();
+    }
+
+    public MigrationExecutionSummary(
+            UUID executionId,
+            UUID reviewSessionId,
+            UUID planId,
+            UUID userId,
+            Platform destinationPlatform,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            String sourcePlaylistTitle,
+            MigrationExecutionStatus status,
+            int totalApprovedTracks,
+            int successfulInsertions,
+            int failedInsertions,
+            int uncertainInsertions,
+            int skippedInsertions,
+            int rolledBackInsertions,
+            boolean fullySuccessful,
+            boolean canResume,
+            boolean canRollback,
+            Instant startedAt,
+            Instant completedAt,
+            List<ExecutionTrackRecordDto> trackRecords,
+            UUID playlistCreationOperationId
+    ) {
+        this(
+                executionId,
+                reviewSessionId,
+                planId,
+                userId,
+                destinationPlatform,
+                destinationPlaylistId,
+                destinationPlaylistUrl,
+                sourcePlaylistTitle,
+                status,
+                totalApprovedTracks,
+                successfulInsertions,
+                failedInsertions,
+                uncertainInsertions,
+                skippedInsertions,
+                rolledBackInsertions,
+                fullySuccessful,
+                canResume,
+                canRollback,
+                startedAt,
+                completedAt,
+                trackRecords,
+                playlistCreationOperationId,
+                null
+        );
     }
 
     public MigrationExecutionSummary(
@@ -352,6 +404,14 @@ public record MigrationExecutionSummary(
         return Optional.ofNullable(playlistCreationOperationId);
     }
 
+    public Optional<Instant> getRollbackRequestedAt() {
+        return Optional.ofNullable(rollbackRequestedAt);
+    }
+
+    public boolean isRollbackRequested() {
+        return rollbackRequestedAt != null;
+    }
+
     public static MigrationExecutionSummary from(MigrationExecution execution) {
         if (execution == null) {
             return null;
@@ -386,7 +446,8 @@ public record MigrationExecutionSummary(
                 execution.getStartedAt(),
                 execution.getCompletedAt(),
                 trackDtos,
-                execution.getPlaylistCreationOperationId()
+                execution.getPlaylistCreationOperationId(),
+                execution.getRollbackRequestedAt()
         );
     }
 }

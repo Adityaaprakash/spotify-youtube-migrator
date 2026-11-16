@@ -1,5 +1,6 @@
 package com.spotifyyoutube.migrator.migration.execution.repository;
 
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.reliability.scheduling.ClaimedExecution;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
@@ -121,12 +122,18 @@ public class MigrationExecutionRepositoryImpl implements MigrationExecutionRepos
 
         String sql =
                 "WITH claimable AS (" +
-                "    SELECT id " +
+                "    SELECT id, status AS pre_claim_status " +
                 "    FROM migration_executions " +
                 "    WHERE (" +
                 "        (status = 'QUEUED' AND (lease_until IS NULL OR lease_until < clock_timestamp())) " +
                 "        OR " +
-                "        (status = 'RUNNING' AND lease_until IS NOT NULL AND lease_until < clock_timestamp())" +
+                "        (status = 'ALLOCATING_DESTINATION' AND (lease_until IS NULL OR lease_until < clock_timestamp())) " +
+                "        OR " +
+                "        (status = 'RUNNING' AND lease_until IS NOT NULL AND lease_until < clock_timestamp()) " +
+                "        OR " +
+                "        (status = 'RECOVERY_REQUIRED' AND (lease_until IS NULL OR lease_until < clock_timestamp())) " +
+                "        OR " +
+                "        (status = 'PARTIALLY_ROLLED_BACK' AND rollback_requested_at IS NOT NULL AND (lease_until IS NULL OR lease_until < clock_timestamp()))" +
                 "    ) " +
                 "    AND (next_attempt_at IS NULL OR next_attempt_at <= clock_timestamp()) " +
                 "    ORDER BY next_attempt_at ASC NULLS FIRST, created_at ASC " +
@@ -144,7 +151,7 @@ public class MigrationExecutionRepositoryImpl implements MigrationExecutionRepos
                 "    version = m.version + 1 " +
                 "FROM claimable " +
                 "WHERE m.id = claimable.id " +
-                "RETURNING m.id, m.user_id, m.lease_generation, m.lease_until, m.lease_owner";
+                "RETURNING m.id, m.user_id, m.lease_generation, m.lease_until, m.lease_owner, claimable.pre_claim_status";
 
         Query query = entityManager.createNativeQuery(sql);
         query.setParameter("workerId", workerId.trim());
@@ -174,8 +181,9 @@ public class MigrationExecutionRepositoryImpl implements MigrationExecutionRepos
         }
 
         String owner = (String) row[4];
+        MigrationExecutionStatus preClaimStatus = MigrationExecutionStatus.valueOf((String) row[5]);
 
-        return Optional.of(new ClaimedExecution(executionId, userId, generation, leaseUntil, owner));
+        return Optional.of(new ClaimedExecution(executionId, userId, generation, leaseUntil, owner, preClaimStatus));
     }
 
     @Override
@@ -186,13 +194,26 @@ public class MigrationExecutionRepositoryImpl implements MigrationExecutionRepos
             long leaseGeneration,
             Instant nextAttemptAt
     ) {
+        return compensateClaimRejection(id, workerId, leaseGeneration, nextAttemptAt, MigrationExecutionStatus.QUEUED);
+    }
+
+    @Override
+    @Transactional
+    public int compensateClaimRejection(
+            UUID id,
+            String workerId,
+            long leaseGeneration,
+            Instant nextAttemptAt,
+            MigrationExecutionStatus revertStatus
+    ) {
         if (id == null || workerId == null || workerId.isBlank()) {
             return 0;
         }
 
+        String targetStatus = (revertStatus != null ? revertStatus : MigrationExecutionStatus.QUEUED).name();
         String sql =
                 "UPDATE migration_executions " +
-                "SET status = 'QUEUED', " +
+                "SET status = :targetStatus, " +
                 "    lease_owner = NULL, " +
                 "    lease_until = NULL, " +
                 "    next_attempt_at = CAST(:nextAttemptAt AS TIMESTAMP WITH TIME ZONE), " +
@@ -206,6 +227,7 @@ public class MigrationExecutionRepositoryImpl implements MigrationExecutionRepos
                 "  AND lease_until > clock_timestamp()";
 
         return entityManager.createNativeQuery(sql)
+                .setParameter("targetStatus", targetStatus)
                 .setParameter("id", id)
                 .setParameter("workerId", workerId.trim())
                 .setParameter("leaseGeneration", leaseGeneration)

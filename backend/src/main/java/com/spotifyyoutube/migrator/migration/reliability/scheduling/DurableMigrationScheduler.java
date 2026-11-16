@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.reliability.scheduling;
 
 import com.spotifyyoutube.migrator.migration.async.AsyncMigrationConfig;
 import com.spotifyyoutube.migrator.migration.async.MigrationBackgroundWorker;
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -235,14 +236,24 @@ public class DurableMigrationScheduler implements SmartLifecycle {
             TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
             txTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
-            Integer rowsUpdated = txTemplate.execute(status ->
-                    migrationExecutionRepository.compensateClaimRejection(
+            Integer rowsUpdated = txTemplate.execute(status -> {
+                if (claim.preClaimStatus() != null && claim.preClaimStatus() != MigrationExecutionStatus.QUEUED) {
+                    return migrationExecutionRepository.compensateClaimRejection(
+                            claim.executionId(),
+                            claim.workerId(),
+                            claim.leaseGeneration(),
+                            nextAttemptAt,
+                            claim.preClaimStatus()
+                    );
+                } else {
+                    return migrationExecutionRepository.compensateClaimRejection(
                             claim.executionId(),
                             claim.workerId(),
                             claim.leaseGeneration(),
                             nextAttemptAt
-                    )
-            );
+                    );
+                }
+            });
 
             if (rowsUpdated != null && rowsUpdated == 1) {
                 log.info("Successfully compensated rejected claim for execution {} (gen {}). Next attempt at {}",

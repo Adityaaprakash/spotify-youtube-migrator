@@ -77,5 +77,24 @@ public interface MigrationExecutionRepositoryCustom {
             long leaseGeneration,
             Instant nextAttemptAt
     );
+
+    /**
+     * Safely compensates an executor dispatch rejection (e.g. saturation or shutdown) by releasing
+     * the worker lease and resetting the execution to a specified revert status (Phase 13G-A).
+     *
+     * @param id execution ID
+     * @param workerId original claiming worker identity
+     * @param leaseGeneration original acquired fencing generation
+     * @param nextAttemptAt earliest timestamp when this execution becomes eligible again
+     * @param revertStatus status to restore (defaults to QUEUED if null)
+     * @return 1 if compensated successfully, 0 if ownership or generation no longer matches
+     */
+    int compensateClaimRejection(
+            UUID id,
+            String workerId,
+            long leaseGeneration,
+            Instant nextAttemptAt,
+            MigrationExecutionStatus revertStatus
+    );
 }
 

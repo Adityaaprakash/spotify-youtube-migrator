@@ -174,6 +174,15 @@ public interface MigrationIdempotencyService {
     int markExecutionTerminal(UUID executionId, Instant terminalTransitionTime);
 
     /**
+     * Clears terminal retention expiration timestamp for all idempotency records associated with an execution
+     * when the execution leaves a terminal state for rollback or recovery (Phase 13G-D).
+     *
+     * @param executionId execution aggregate identifier
+     * @return count of updated records
+     */
+    int clearTerminalExpiry(UUID executionId);
+
+    /**
      * Performs scheduled cleanup of expired terminal idempotency records using database clock time.
      *
      * @return count of deleted records
