@@ -1215,3 +1215,49 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 
 ### 3. Checkstyle & Code Hygiene
 - `mvnw.cmd checkstyle:check`: 0 Checkstyle violations across all 462 main source files and 186 test source files.
+
+---
+
+## Phase 14 Testing Scope: Migration History APIs & Audit Logging (Phase 14C & 14D)
+
+### 1. Phase 14D Unit Tests (`ExecutionAuditServiceTest`)
+- **Suite**: `ExecutionAuditServiceTest` (9 unit tests, 0 failures, 0 errors, 0 skipped).
+- **Coverage**:
+  - `recordStateTransitionRecordsAuditEvent`: Validates state transition event creation with previous/new state, actor, reason, and correlation ID.
+  - `recordRetryScheduledRecordsAuditEvent`: Validates retry event creation capturing attempt count, backoff duration, and failure classification.
+  - `recordWorkerLeaseRecordsAuditEvent`: Validates worker lease acquisition and expiration event recording.
+  - `recordRollbackRecordsAuditEvent`: Validates rollback event recording with foreign key link to `ExecutionRollbackRecord`.
+  - `recordReconciliationRecordsAuditEvent`: Validates reconciliation event recording with foreign key link to `ExecutionReconciliationRecord`.
+  - `getExecutionHistoryReturnsTimeline`: Validates chronological audit event timeline retrieval (`createdAt ASC`) using `Pageable`.
+  - `verifyExecutionOwnershipSuccessful`: Validates ownership check passes for the owning user.
+  - `verifyExecutionOwnershipForeignUserThrowsNotFound`: Validates anti-IDOR protection throws `ResourceNotFoundException` (404) on foreign user access.
+  - `recordStateTransitionThrowsOnNullExecution`: Validates null defense across service methods.
+
+### 2. Phase 14C & 14D WebMvc Tests (`MigrationHistoryControllerTest`)
+- **Suite**: `MigrationHistoryControllerTest` (12 WebMvc tests, 0 failures, 0 errors, 0 skipped).
+- **Coverage**:
+  - `getUserMigrationHistoryReturnsPagedList`: Validates `GET /api/migrations/history` returns 200 OK with `PagedResponse<MigrationHistoryItemResponse>`.
+  - `getUserMigrationHistoryWithStatusFilter`: Validates status query parameter filtering (`?status=COMPLETED`).
+  - `getUserMigrationHistoryUnauthenticatedForbidden`: Validates unauthenticated request rejected with HTTP 403 Forbidden.
+  - `getMigrationDetailReturnsFullResponse`: Validates `GET /api/migrations/{id}` returns 200 OK with track records, candidate details, match scores, and decision provenance.
+  - `getMigrationDetailNotFound`: Validates non-existent execution returns HTTP 404 Not Found.
+  - `getMigrationDetailCrossUserForbidden`: Validates anti-IDOR: accessing another user's execution returns HTTP 404 Not Found (non-disclosure).
+  - `getMigrationDetailInvalidUuidBadRequest`: Validates malformed UUID path variable returns HTTP 400 Bad Request with `ErrorCode.INVALID_REQUEST`.
+  - `getMigrationDetailUnauthenticatedForbidden`: Validates unauthenticated detail request rejected with HTTP 403 Forbidden.
+  - `getAuditTimelineReturnsPagedList`: Validates `GET /api/migrations/{id}/history` returns 200 OK with chronological `PagedResponse<MigrationAuditEventResponse>`.
+  - `getAuditTimelineCrossUserForbidden`: Validates anti-IDOR: accessing another user's timeline returns HTTP 404 Not Found.
+  - `getAuditTimelineInvalidUuidBadRequest`: Validates malformed UUID returns HTTP 400 Bad Request.
+  - `getAuditTimelineUnauthenticatedForbidden`: Validates unauthenticated audit request rejected with HTTP 403 Forbidden.
+
+### 3. Phase 14C & 14D PostgreSQL Integration Tests (`Phase14CDPersistentHistoryAndAuditIT`)
+- **Suite**: `Phase14CDPersistentHistoryAndAuditIT` (5 integration tests executed against Testcontainers PostgreSQL 16, 0 failures, 0 errors, 0 skipped).
+- **Coverage**:
+  - `testFlywayV16SchemaObjects`: Validates Flyway V16 schema migration applying `execution_audit_events` table, columns, foreign keys (`ON DELETE CASCADE`, `ON DELETE SET NULL`), and indexes (`idx_audit_events_execution_created`, `idx_audit_events_type`, `idx_migrationexecutions_user_status_created`) in real PostgreSQL.
+  - `testAuditEventsPersistenceAndOrdering`: Validates durable persistence of multiple lifecycle audit events and verified chronological retrieval ordered by `created_at ASC`.
+  - `testAuditRollbackLink`: Validates relational foreign key integrity between `ExecutionAuditEvent` and `ExecutionRollbackRecord`.
+  - `testUserScopedHistoryWithStatusFilter`: Validates composite index-backed status-filtered query `findByUserIdAndStatusOrderByCreatedAtDesc` returning reverse-chronological pages matching filter.
+  - `testUserScopedHistoryWithoutStatusFilter`: Validates index-backed query `findByUserIdOrderByCreatedAtDesc` returning all user executions reverse-chronologically.
+
+### 4. Combined Regression Verification
+- **Suites Executed**: `Phase14BPersistentMigrationRecordIT`, `Phase14BPersistentMigrationRecordTest`, `MigrationExecutionDomainTest`, `MigrationControllerTest` (40 regression tests run, 0 failures, 0 errors, 0 skipped).
+- **Checkstyle**: 0 Checkstyle violations across all modified and newly created source and test files.

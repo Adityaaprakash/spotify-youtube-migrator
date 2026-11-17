@@ -249,6 +249,15 @@ public final class MigrationExecutionApiMapper {
         );
     }
 
+    public static MigrationExecutionResponse toExecutionResponse(
+            com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution execution
+    ) {
+        if (execution == null) {
+            return null;
+        }
+        return toExecutionResponse(MigrationExecutionSummary.from(execution));
+    }
+
     public static MigrationExecutionResponse toExecutionResponse(MigrationExecutionSummary summary) {
         if (summary == null) {
             return null;
@@ -511,6 +520,59 @@ public final class MigrationExecutionApiMapper {
                 dto.staleInFlightCount(),
                 dto.reconciliationRequired(),
                 trackResponses
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.MigrationHistoryItemResponse toHistoryItemResponse(
+            com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution execution
+    ) {
+        if (execution == null) {
+            return null;
+        }
+        return new com.spotifyyoutube.migrator.migration.api.dto.MigrationHistoryItemResponse(
+                execution.getId(),
+                execution.getSourcePlaylistId(),
+                execution.getSourcePlaylistTitle(),
+                execution.getDestinationPlatform(),
+                execution.getDestinationPlaylistId(),
+                execution.getDestinationPlaylistUrl(),
+                execution.getStatus() != null ? execution.getStatus().name() : null,
+                execution.getTotalSourceTracks(),
+                execution.getMatchedTracks(),
+                execution.getTotalApprovedTracks(),
+                execution.getSuccessfulInsertions(),
+                execution.getFailedInsertions(),
+                execution.getUncertainInsertions(),
+                execution.getSkippedInsertions(),
+                execution.getRolledBackInsertions(),
+                execution.getCreatedAt(),
+                execution.getStartedAt(),
+                execution.getCompletedAt(),
+                execution.getFailureSummary()
+        );
+    }
+
+    public static com.spotifyyoutube.migrator.migration.api.dto.MigrationAuditEventResponse toAuditEventResponse(
+            com.spotifyyoutube.migrator.migration.execution.domain.ExecutionAuditEvent event
+    ) {
+        if (event == null) {
+            return null;
+        }
+        UUID rollbackId = event.getRollbackRecord() != null ? event.getRollbackRecord().getId() : null;
+        UUID reconciliationId = event.getReconciliationRecord() != null ? event.getReconciliationRecord().getId() : null;
+        return new com.spotifyyoutube.migrator.migration.api.dto.MigrationAuditEventResponse(
+                event.getId(),
+                event.getExecution() != null ? event.getExecution().getId() : null,
+                event.getEventType() != null ? event.getEventType().name() : null,
+                event.getPreviousState(),
+                event.getNewState(),
+                event.getReason(),
+                event.getActor(),
+                event.getCorrelationId(),
+                event.getDetails(),
+                rollbackId,
+                reconciliationId,
+                event.getCreatedAt()
         );
     }
 }

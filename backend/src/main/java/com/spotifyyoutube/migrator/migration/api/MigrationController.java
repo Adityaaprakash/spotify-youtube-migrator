@@ -6,18 +6,25 @@ import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateMigrationRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.MigrationAuditEventResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.MigrationHistoryItemResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationJobResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationProgressResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationSubmissionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationTaskResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.PagedResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.RunMigrationApiRequest;
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationExecutionApiMapper;
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationMapper;
 import com.spotifyyoutube.migrator.migration.application.MigrationService;
+import com.spotifyyoutube.migrator.migration.application.execution.ExecutionAuditService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionAuditEvent;
+import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
 import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
 import com.spotifyyoutube.migrator.migration.progress.domain.MigrationProgressSnapshot;
@@ -27,6 +34,11 @@ import jakarta.validation.Validator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -37,12 +49,15 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.security.Principal;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -66,6 +81,8 @@ public class MigrationController {
     private final UserService userService;
     private final ObjectMapper objectMapper;
     private final Validator validator;
+    private final MigrationExecutionRepository executionRepository;
+    private final ExecutionAuditService auditService;
 
     @Autowired
     public MigrationController(
@@ -75,7 +92,9 @@ public class MigrationController {
             ProgressPollingRateLimiter rateLimiter,
             UserService userService,
             ObjectMapper objectMapper,
-            Validator validator
+            Validator validator,
+            @Autowired(required = false) MigrationExecutionRepository executionRepository,
+            @Autowired(required = false) ExecutionAuditService auditService
     ) {
         this.migrationService = Objects.requireNonNull(migrationService, "MigrationService must not be null");
         this.jobDispatcher = Objects.requireNonNull(jobDispatcher, "MigrationJobDispatcher must not be null");
@@ -84,6 +103,20 @@ public class MigrationController {
         this.userService = Objects.requireNonNull(userService, "UserService must not be null");
         this.objectMapper = objectMapper != null ? objectMapper : new ObjectMapper();
         this.validator = validator;
+        this.executionRepository = executionRepository;
+        this.auditService = auditService;
+    }
+
+    public MigrationController(
+            MigrationService migrationService,
+            MigrationJobDispatcher jobDispatcher,
+            MigrationProgressService progressService,
+            ProgressPollingRateLimiter rateLimiter,
+            UserService userService,
+            ObjectMapper objectMapper,
+            Validator validator
+    ) {
+        this(migrationService, jobDispatcher, progressService, rateLimiter, userService, objectMapper, validator, null, null);
     }
 
     /**
@@ -192,10 +225,119 @@ public class MigrationController {
                 .body(MigrationProgressResponse.from(snapshot));
     }
 
+    /**
+     * Retrieves paginated persistent migration history for the authenticated user (Phase 14C.1).
+     * Ordered newest first (createdAt DESC), with optional lifecycle status filtering.
+     *
+     * @param status optional status filter
+     * @param pageable pagination parameters (defaults to createdAt DESC)
+     * @param principal authenticated principal
+     * @return paginated migration summary history envelope
+     */
+    @GetMapping("/history")
+    public ResponseEntity<PagedResponse<MigrationHistoryItemResponse>> getMigrationHistory(
+            @RequestParam(required = false) MigrationExecutionStatus status,
+            @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
+            Principal principal
+    ) {
+        UUID userId = resolveUserId(null, principal);
+        if (executionRepository == null) {
+            return ResponseEntity.ok(new PagedResponse<>(Collections.emptyList(), 0, 0, 0L, 0, true, true));
+        }
+
+        Pageable effectivePageable = pageable;
+        if (pageable.getSort().isUnsorted()) {
+            effectivePageable = PageRequest.of(
+                    pageable.getPageNumber(),
+                    pageable.getPageSize(),
+                    Sort.by(Sort.Direction.DESC, "createdAt")
+            );
+        }
+
+        Page<MigrationExecution> page;
+        if (status != null) {
+            page = executionRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status, effectivePageable);
+        } else {
+            page = executionRepository.findByUserIdOrderByCreatedAtDesc(userId, effectivePageable);
+        }
+
+        PagedResponse<MigrationHistoryItemResponse> response = PagedResponse.from(
+                page,
+                MigrationExecutionApiMapper::toHistoryItemResponse
+        );
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Retrieves detailed migration execution record or legacy migration job by ID (Phase 14C.2).
+     * Enforces strict anti-IDOR security: returns 404 NOT FOUND if nonexistent or belonging to another user.
+     *
+     * @param id execution or job identifier
+     * @param principal authenticated principal
+     * @return detailed execution response or legacy job response
+     */
     @GetMapping("/{id}")
-    public ResponseEntity<MigrationJobResponse> getMigration(@PathVariable UUID id) {
-        var job = migrationService.getMigrationJobById(id);
-        return ResponseEntity.ok(MigrationMapper.toJobResponse(job));
+    public ResponseEntity<?> getMigration(
+            @PathVariable UUID id,
+            Principal principal
+    ) {
+        UUID userId = resolveUserId(null, principal);
+
+        // 1. Authoritative MigrationExecution aggregate (Phases 11-14)
+        if (executionRepository != null) {
+            Optional<MigrationExecution> executionOpt = executionRepository.findById(id);
+            if (executionOpt.isPresent()) {
+                MigrationExecution execution = executionOpt.get();
+                if (!execution.getUser().getId().equals(userId)) {
+                    // Anti-IDOR: Prevent disclosure of foreign migration existence
+                    throw new ResourceNotFoundException("Migration execution not found: " + id);
+                }
+                return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(execution));
+            }
+        }
+
+        // 2. Legacy MigrationJob fallback (Phases 1-8)
+        try {
+            var job = migrationService.getMigrationJobById(id);
+            if (job != null) {
+                if (job.getUser() != null && job.getUser().getId() != null && !job.getUser().getId().equals(userId)) {
+                    throw new ResourceNotFoundException("Migration not found: " + id);
+                }
+                return ResponseEntity.ok(MigrationMapper.toJobResponse(job));
+            }
+        } catch (ResourceNotFoundException e) {
+            // Fall through to 404
+        }
+
+        throw new ResourceNotFoundException("Migration execution not found: " + id);
+    }
+
+    /**
+     * Retrieves the chronological audit timeline for a migration execution (Phase 14C.3 & 14D).
+     * Enforces strict anti-IDOR security: returns 404 NOT FOUND if nonexistent or belonging to another user.
+     *
+     * @param id execution identifier
+     * @param pageable pagination parameters (defaults to createdAt ASC)
+     * @param principal authenticated principal
+     * @return paginated chronological audit event timeline
+     */
+    @GetMapping("/{id}/history")
+    public ResponseEntity<PagedResponse<MigrationAuditEventResponse>> getMigrationAuditHistory(
+            @PathVariable UUID id,
+            @PageableDefault(sort = "createdAt", direction = Sort.Direction.ASC) Pageable pageable,
+            Principal principal
+    ) {
+        UUID userId = resolveUserId(null, principal);
+        if (auditService == null) {
+            throw new ResourceNotFoundException("Execution audit service is not configured");
+        }
+
+        Page<ExecutionAuditEvent> page = auditService.getAuditTimeline(id, userId, pageable);
+        PagedResponse<MigrationAuditEventResponse> response = PagedResponse.from(
+                page,
+                MigrationExecutionApiMapper::toAuditEventResponse
+        );
+        return ResponseEntity.ok(response);
     }
 
     @GetMapping("/{id}/tasks")

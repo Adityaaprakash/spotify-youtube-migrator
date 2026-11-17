@@ -107,6 +107,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     private final DurableSchedulerProperties schedulerProperties;
     private final MigrationIdempotencyService idempotencyService;
     private final TrackInsertionReconciliationService trackReconciliationService;
+    private final ExecutionAuditService auditService;
 
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,
@@ -123,7 +124,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             DurableLeaseHeartbeatService heartbeatService,
             DurableSchedulerProperties schedulerProperties,
             MigrationIdempotencyService idempotencyService,
-            TrackInsertionReconciliationService trackReconciliationService
+            TrackInsertionReconciliationService trackReconciliationService,
+            ExecutionAuditService auditService
     ) {
         this.executionRepository = Objects.requireNonNull(
                 executionRepository, "MigrationExecutionRepository must not be null");
@@ -150,6 +152,44 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         this.trackReconciliationService = trackReconciliationService != null
                 ? trackReconciliationService
                 : new TrackInsertionReconciliationService(this.musicDestination);
+        this.auditService = auditService;
+    }
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
+            TransactionTemplate transactionTemplate,
+            ProviderFailureClassifier providerFailureClassifier,
+            RetryPolicy retryPolicy,
+            DurableLeaseHeartbeatService heartbeatService,
+            DurableSchedulerProperties schedulerProperties,
+            MigrationIdempotencyService idempotencyService,
+            TrackInsertionReconciliationService trackReconciliationService
+    ) {
+        this(
+                executionRepository,
+                trackRecordRepository,
+                rollbackRecordRepository,
+                reconciliationRecordRepository,
+                reviewSessionRepository,
+                executionService,
+                musicDestination,
+                failureClassifier,
+                transactionTemplate,
+                providerFailureClassifier,
+                retryPolicy,
+                heartbeatService,
+                schedulerProperties,
+                idempotencyService,
+                trackReconciliationService,
+                null
+        );
     }
 
     public DefaultMigrationExecutionStateService(
@@ -300,7 +340,8 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             @org.springframework.beans.factory.annotation.Autowired(required = false) DurableLeaseHeartbeatService heartbeatService,
             @org.springframework.beans.factory.annotation.Autowired(required = false) DurableSchedulerProperties schedulerProperties,
             @org.springframework.beans.factory.annotation.Autowired(required = false) MigrationIdempotencyService idempotencyService,
-            @org.springframework.beans.factory.annotation.Autowired(required = false) TrackInsertionReconciliationService trackReconciliationService
+            @org.springframework.beans.factory.annotation.Autowired(required = false) TrackInsertionReconciliationService trackReconciliationService,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) ExecutionAuditService auditService
     ) {
         this(
                 executionRepository,
@@ -317,7 +358,45 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 heartbeatService,
                 schedulerProperties,
                 idempotencyService,
-                trackReconciliationService
+                trackReconciliationService,
+                auditService
+        );
+    }
+
+    public DefaultMigrationExecutionStateService(
+            MigrationExecutionRepository executionRepository,
+            ExecutionTrackRecordRepository trackRecordRepository,
+            ExecutionRollbackRecordRepository rollbackRecordRepository,
+            ExecutionReconciliationRecordRepository reconciliationRecordRepository,
+            ReviewSessionRepository reviewSessionRepository,
+            ApprovedMigrationExecutionService executionService,
+            MusicDestination musicDestination,
+            ExecutionFailureClassifier failureClassifier,
+            PlatformTransactionManager transactionManager,
+            ProviderFailureClassifier providerFailureClassifier,
+            RetryPolicy retryPolicy,
+            DurableLeaseHeartbeatService heartbeatService,
+            DurableSchedulerProperties schedulerProperties,
+            MigrationIdempotencyService idempotencyService,
+            TrackInsertionReconciliationService trackReconciliationService
+    ) {
+        this(
+                executionRepository,
+                trackRecordRepository,
+                rollbackRecordRepository,
+                reconciliationRecordRepository,
+                reviewSessionRepository,
+                executionService,
+                musicDestination,
+                failureClassifier,
+                transactionManager,
+                providerFailureClassifier,
+                retryPolicy,
+                heartbeatService,
+                schedulerProperties,
+                idempotencyService,
+                trackReconciliationService,
+                null
         );
     }
 
@@ -466,6 +545,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
             MigrationExecution execution = new MigrationExecution(user, session, context, playlistId, playlistUrl);
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            recordAuditStateTransition(saved, null, saved.getStatus(), "Execution initialized", "USER", null);
 
             log.info("Initialized durable execution {} for review session {} with {} approved tracks",
                     saved.getId(), request.reviewSessionId(), saved.getTotalApprovedTracks());
@@ -505,6 +585,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
 
             execution.markQueued();
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            recordAuditStateTransition(saved, MigrationExecutionStatus.INITIALIZED, MigrationExecutionStatus.QUEUED, "Execution queued", "USER", null);
             log.info("Transitioned execution {} to QUEUED status", executionId);
             return MigrationExecutionSummary.from(saved);
         });
@@ -589,6 +670,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             MigrationExecution execution = new MigrationExecution(user, session, context, playlistId, playlistUrl);
             execution.markQueued();
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
+            recordAuditStateTransition(saved, null, MigrationExecutionStatus.QUEUED, "Execution initialized in queued status", "USER", null);
 
             log.info("Initialized durable execution {} in QUEUED status for review session {} with {} approved tracks",
                     saved.getId(), request.reviewSessionId(), saved.getTotalApprovedTracks());
@@ -2922,12 +3004,91 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     }
 
     private void checkTerminalTransition(MigrationExecution execution) {
-        if (execution != null && execution.getStatus() != null && execution.getStatus().isTerminal()
-                && idempotencyService != null) {
-            Instant terminalTime = execution.getCompletedAt() != null
-                    ? execution.getCompletedAt()
-                    : Instant.now();
-            idempotencyService.markExecutionTerminal(execution.getId(), terminalTime);
+        if (execution != null && execution.getStatus() != null && execution.getStatus().isTerminal()) {
+            if (idempotencyService != null) {
+                Instant terminalTime = execution.getCompletedAt() != null
+                        ? execution.getCompletedAt()
+                        : Instant.now();
+                idempotencyService.markExecutionTerminal(execution.getId(), terminalTime);
+            }
+            recordAuditStateTransition(
+                    execution,
+                    MigrationExecutionStatus.RUNNING,
+                    execution.getStatus(),
+                    execution.getFailureSummary() != null
+                            ? execution.getFailureSummary()
+                            : "Execution finalized with status " + execution.getStatus(),
+                    "WORKER",
+                    null
+            );
+        }
+    }
+
+    private void recordAuditStateTransition(
+            MigrationExecution execution,
+            MigrationExecutionStatus previousState,
+            MigrationExecutionStatus newState,
+            String reason,
+            String actor,
+            String correlationId
+    ) {
+        if (auditService != null && execution != null && newState != null) {
+            try {
+                auditService.recordStateTransition(
+                        execution,
+                        previousState,
+                        newState,
+                        reason != null ? reason : "State transition to " + newState,
+                        actor != null ? actor : "SYSTEM",
+                        correlationId
+                );
+            } catch (Exception ex) {
+                log.warn("Failed to record state transition audit event for execution {}: {}",
+                        execution.getId(), ex.getMessage());
+            }
+        }
+    }
+
+    private void recordAuditRollback(
+            MigrationExecution execution,
+            ExecutionRollbackRecord rollbackRecord,
+            String reason,
+            String actor
+    ) {
+        if (auditService != null && execution != null && rollbackRecord != null) {
+            try {
+                auditService.recordRollbackEvent(
+                        execution,
+                        com.spotifyyoutube.migrator.migration.execution.domain.ExecutionAuditEventType.ROLLBACK_COMPLETED,
+                        rollbackRecord,
+                        reason != null ? reason : "Rollback completed",
+                        actor != null ? actor : "SYSTEM"
+                );
+            } catch (Exception ex) {
+                log.warn("Failed to record rollback audit event for execution {}: {}",
+                        execution.getId(), ex.getMessage());
+            }
+        }
+    }
+
+    private void recordAuditReconciliation(
+            MigrationExecution execution,
+            ExecutionReconciliationRecord reconciliationRecord,
+            String reason,
+            String actor
+    ) {
+        if (auditService != null && execution != null && reconciliationRecord != null) {
+            try {
+                auditService.recordReconciliationEvent(
+                        execution,
+                        reconciliationRecord,
+                        reason != null ? reason : "Reconciliation completed",
+                        actor != null ? actor : "SYSTEM"
+                );
+            } catch (Exception ex) {
+                log.warn("Failed to record reconciliation audit event for execution {}: {}",
+                        execution.getId(), ex.getMessage());
+            }
         }
     }
 }

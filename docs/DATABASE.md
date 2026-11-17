@@ -33,6 +33,7 @@ PostgreSQL (version 16 in production and Testcontainers) is the authoritative pr
 | **V13** | `V13__phase13f_destination_safety.sql` | `ALLOCATING_DESTINATION` support, nullable destination playlist ID, and playlist creation operation tracking. |
 | **V14** | `V14__phase13g_recovery_and_rollback_intent.sql` | Rollback intent columns (`rollback_requested_at`, `rollback_target_positions`, `rollback_completed_at`) and partial index. |
 | **V15** | `V15__phase14b_persistent_migration_history.sql` | **Phase 14B Persistent Migration History**: Adds total source track count, matched track count, top-level failure summary, composite user history index, destination candidate metadata, match score, match decision, and decision source to execution track records. |
+| **V16** | `V16__phase14d_execution_audit_events.sql` | **Phase 14D Execution Audit Events & History Index**: Creates append-only `execution_audit_events` table with execution cascade and optional rollback/reconciliation links, chronological index `idx_audit_events_execution_created`, event type index `idx_audit_events_type`, and composite index `idx_migrationexecutions_user_status_created` on `migration_executions(user_id, status, created_at DESC)`. |
 
 ---
 
@@ -71,3 +72,53 @@ ALTER TABLE execution_track_records
 - **Non-Destructive**: All added columns use defaults or are nullable; existing rows are preserved without breaking changes.
 - **Index Optimization**: `idx_migrationexecutions_user_created` powers high-performance paginated queries (`PageRequest.of(page, size)`) for user migration history without table scans.
 - **Data Integrity**: Track counts (`total_source_tracks`, `matched_tracks`, `total_approved_tracks`) reflect accurate playlist pre-flight and review statistics.
+
+---
+
+## Phase 14D Schema Enhancements (`V16`)
+
+### 1. `execution_audit_events` Table
+```sql
+CREATE TABLE IF NOT EXISTS execution_audit_events (
+    id UUID PRIMARY KEY,
+    execution_id UUID NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    previous_state VARCHAR(50),
+    new_state VARCHAR(50),
+    reason VARCHAR(500),
+    details TEXT,
+    actor VARCHAR(100),
+    correlation_id VARCHAR(100),
+    rollback_record_id UUID,
+    reconciliation_record_id UUID,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL,
+    CONSTRAINT fk_audit_events_execution FOREIGN KEY (execution_id)
+        REFERENCES migration_executions (id) ON DELETE CASCADE,
+    CONSTRAINT fk_audit_events_rollback FOREIGN KEY (rollback_record_id)
+        REFERENCES execution_rollback_records (id) ON DELETE SET NULL,
+    CONSTRAINT fk_audit_events_reconciliation FOREIGN KEY (reconciliation_record_id)
+        REFERENCES execution_reconciliation_records (id) ON DELETE SET NULL
+);
+```
+
+### 2. Indexes & Performance Optimization
+```sql
+-- Chronological event timeline per execution
+CREATE INDEX IF NOT EXISTS idx_audit_events_execution_created
+    ON execution_audit_events (execution_id, created_at ASC);
+
+-- Event type filtering
+CREATE INDEX IF NOT EXISTS idx_audit_events_type
+    ON execution_audit_events (event_type);
+
+-- Status-filtered user migration history
+CREATE INDEX IF NOT EXISTS idx_migrationexecutions_user_status_created
+    ON migration_executions (user_id, status, created_at DESC);
+```
+
+### 3. Integrity & Retention Guarantees
+- **Cascade on Parent Deletion**: If a test or administrative action purges a `migration_executions` record, audit events cascade cleanly.
+- **Set Null on Compensating Action Purge**: Foreign keys to `execution_rollback_records` and `execution_reconciliation_records` use `ON DELETE SET NULL`, ensuring the audit event is never accidentally deleted if compensating records are archived.
+- **Index-Only Timeline Scans**: `idx_audit_events_execution_created` covers `(execution_id, created_at ASC)` allowing fast timeline fetches without sort buffers.
+- **Composite Index for Status Queries**: `idx_migrationexecutions_user_status_created` enables zero-sort queries when users filter migration history by execution status (`COMPLETED`, `FAILED`, etc.).

@@ -3,17 +3,21 @@
 Last Updated: 2026-11-17
 
 Current Phase: Phase 14 — Migration History, Analytics & Auditability [IN PROGRESS]
-Current Subphase: Phase 14A & 14B — Architecture Audit & Persistent Migration Records [COMPLETE & VERIFIED] -> Phase 14C — Migration History & Detail APIs [READY TO START]
-Latest Pushed Commit: 2904c8a20b22ce2c6be7bbf07ab96b12565942c5
+Current Subphase: Phase 14C & 14D — Migration History APIs & Audit Logging [COMPLETE & VERIFIED] -> Phase 14E — Analytics & Metric Summaries [READY TO START]
+Latest Pushed Commit: c78bd896b20fd790a4772697ec3b1b9785bc1870
 
 ## Verification Status & Release Gate
-- **Phase 14A & 14B Verification Status**: COMPLETE & VERIFIED.
-  - Audit document generated: `docs/PHASE_14_AUDIT.md` covering all 10 architecture and existing-system audit requirements.
-  - Schema migration: `V15__phase14b_persistent_migration_history.sql` applied cleanly in PostgreSQL 16 Testcontainers with zero downtime backfill and composite index `idx_migrationexecutions_user_created`.
-  - Unit tests: `Phase14BPersistentMigrationRecordTest` (6 tests passing, 0 failures, 0 errors).
-  - Integration tests: `Phase14BPersistentMigrationRecordIT` (5 Testcontainers PostgreSQL tests passing, 0 failures, 0 errors).
-  - Regression tests: `MigrationExecutionDomainTest`, `MigrationExecutionStateMachineTest`, `ExecutionTrackRecordRepositoryTest`, `Phase13GRecoveryWorkflowTest`, `WorkerCrashBoundaryFaultInjectionTest` (65 regression tests passing, 0 failures, 0 errors).
-  - Checkstyle hygiene: 0 Checkstyle violations across all 462 main source files and 186 test source files.
+- **Phase 14C & 14D Verification Status**: COMPLETE & VERIFIED.
+  - Audit document: `docs/PHASE_14_CD_AUDIT.md` covering all existing components, gaps, and architecture constraints.
+  - Implementation report: `docs/PHASE_14_CD_IMPLEMENTATION_REPORT.md` covering all 11 implementation, schema, security, and verification sections.
+  - Schema migration: `V16__phase14d_execution_audit_events.sql` applied cleanly in PostgreSQL 16 Testcontainers (`execution_audit_events` table, indexes `idx_audit_events_execution_created`, `idx_audit_events_type`, and composite index `idx_migrationexecutions_user_status_created`).
+  - Unit tests: `ExecutionAuditServiceTest` (9 tests passing, 0 failures, 0 errors).
+  - WebMvc tests: `MigrationHistoryControllerTest` (12 tests passing, 0 failures, 0 errors).
+  - Integration tests: `Phase14CDPersistentHistoryAndAuditIT` (5 Testcontainers PostgreSQL tests passing, 0 failures, 0 errors).
+  - Combined Phase 14C & 14D tests: 26 tests passing, 0 failures, 0 errors.
+  - Regression tests: `Phase14BPersistentMigrationRecordIT`, `Phase14BPersistentMigrationRecordTest`, `MigrationExecutionDomainTest`, `MigrationControllerTest` (40 regression tests passing, 0 failures, 0 errors).
+  - Checkstyle hygiene: 0 Checkstyle violations across the entire project.
+- **Phase 14A & 14B Verification Status**: COMPLETE & VERIFIED (Committed and pushed in `c78bd89`).
 - **Phase 13H & 13I Verification Status**: COMPLETE & FROZEN (`mvn clean verify` passing with 2,212 total tests: 2,100 Surefire unit tests, 112 Failsafe integration tests, 0 failures, 0 errors, 0 skipped, 0 Checkstyle violations).
 - **Phase 13H Fault-Injection Test Suites (37 tests across 4 suites)**:
   - `WorkerCrashBoundaryFaultInjectionTest` (11 unit tests covering all 14 worker crash boundaries).

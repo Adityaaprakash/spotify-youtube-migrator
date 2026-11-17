@@ -1,7 +1,9 @@
 package com.spotifyyoutube.migrator.migration.reliability.scheduling;
 
+import com.spotifyyoutube.migrator.migration.application.execution.ExecutionAuditService;
 import com.spotifyyoutube.migrator.migration.async.AsyncMigrationConfig;
 import com.spotifyyoutube.migrator.migration.async.MigrationBackgroundWorker;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionAuditEventType;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import org.slf4j.Logger;
@@ -48,6 +50,7 @@ public class DurableMigrationScheduler implements SmartLifecycle {
     private final PlatformTransactionManager transactionManager;
     private final DurableSchedulerProperties properties;
     private final DurableLeaseHeartbeatService heartbeatService;
+    private final ExecutionAuditService auditService;
     private final String workerId;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -62,7 +65,8 @@ public class DurableMigrationScheduler implements SmartLifecycle {
             @Qualifier(AsyncMigrationConfig.MIGRATION_TASK_EXECUTOR_BEAN) TaskExecutor taskExecutor,
             PlatformTransactionManager transactionManager,
             DurableSchedulerProperties properties,
-            @Autowired(required = false) DurableLeaseHeartbeatService heartbeatService
+            @Autowired(required = false) DurableLeaseHeartbeatService heartbeatService,
+            @Autowired(required = false) ExecutionAuditService auditService
     ) {
         this.migrationExecutionRepository = Objects.requireNonNull(
                 migrationExecutionRepository, "MigrationExecutionRepository must not be null");
@@ -75,8 +79,28 @@ public class DurableMigrationScheduler implements SmartLifecycle {
         this.properties = Objects.requireNonNull(
                 properties, "DurableSchedulerProperties must not be null");
         this.heartbeatService = heartbeatService;
+        this.auditService = auditService;
         this.workerId = (properties.getWorkerIdPrefix() != null ? properties.getWorkerIdPrefix() : "scheduler-node-")
                 + UUID.randomUUID();
+    }
+
+    public DurableMigrationScheduler(
+            MigrationExecutionRepository migrationExecutionRepository,
+            MigrationBackgroundWorker migrationBackgroundWorker,
+            @Qualifier(AsyncMigrationConfig.MIGRATION_TASK_EXECUTOR_BEAN) TaskExecutor taskExecutor,
+            PlatformTransactionManager transactionManager,
+            DurableSchedulerProperties properties,
+            DurableLeaseHeartbeatService heartbeatService
+    ) {
+        this(
+                migrationExecutionRepository,
+                migrationBackgroundWorker,
+                taskExecutor,
+                transactionManager,
+                properties,
+                heartbeatService,
+                null
+        );
     }
 
     public DurableMigrationScheduler(
@@ -92,6 +116,7 @@ public class DurableMigrationScheduler implements SmartLifecycle {
                 taskExecutor,
                 transactionManager,
                 properties,
+                null,
                 null
         );
     }
@@ -175,8 +200,24 @@ public class DurableMigrationScheduler implements SmartLifecycle {
                     workerId,
                     properties.getLeaseDurationSeconds()
             );
-            claim.ifPresent(c -> log.info("Worker '{}' claimed execution {} with lease generation {}",
-                    workerId, c.executionId(), c.leaseGeneration()));
+            claim.ifPresent(c -> {
+                log.info("Worker '{}' claimed execution {} with lease generation {}",
+                        workerId, c.executionId(), c.leaseGeneration());
+                if (auditService != null) {
+                    try {
+                        auditService.recordLeaseEvent(
+                                c.executionId(),
+                                ExecutionAuditEventType.LEASE_ACQUIRED,
+                                workerId,
+                                c.leaseGeneration(),
+                                "Worker claimed execution lease"
+                        );
+                    } catch (Exception ex) {
+                        log.warn("Failed to record lease acquisition audit event for execution {}: {}",
+                                c.executionId(), ex.getMessage());
+                    }
+                }
+            });
             return claim;
         });
     }
@@ -258,6 +299,20 @@ public class DurableMigrationScheduler implements SmartLifecycle {
             if (rowsUpdated != null && rowsUpdated == 1) {
                 log.info("Successfully compensated rejected claim for execution {} (gen {}). Next attempt at {}",
                         claim.executionId(), claim.leaseGeneration(), nextAttemptAt);
+                if (auditService != null) {
+                    try {
+                        auditService.recordLeaseEvent(
+                                claim.executionId(),
+                                ExecutionAuditEventType.LEASE_RELEASED,
+                                claim.workerId(),
+                                claim.leaseGeneration(),
+                                "Lease released due to dispatcher rejection compensation"
+                        );
+                    } catch (Exception ex) {
+                        log.warn("Failed to record lease rejection compensation audit event for execution {}: {}",
+                                claim.executionId(), ex.getMessage());
+                    }
+                }
                 return true;
             } else {
                 log.warn("Compensation affected 0 rows for execution {} (gen {}). "

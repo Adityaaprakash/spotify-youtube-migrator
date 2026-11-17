@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.time.Instant;
 
@@ -73,6 +74,18 @@ public class GlobalExceptionHandler {
         ApiError apiError = new ApiError(
                 ErrorCode.INVALID_REQUEST,
                 "Validation failed",
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.BAD_REQUEST);
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException ex, HttpServletRequest request) {
+        String paramName = ex.getName() != null ? ex.getName() : "parameter";
+        ApiError apiError = new ApiError(
+                ErrorCode.INVALID_REQUEST,
+                "Invalid parameter value for: " + paramName,
                 Instant.now().toString(),
                 request.getRequestURI()
         );

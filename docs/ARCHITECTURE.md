@@ -50,4 +50,16 @@ Phase 14B leverages `MigrationExecution` as the persistent migration history rec
 - **Timestamps**: `started_at`, `completed_at`, `created_at`, `updated_at`.
 
 ### 3. Querying & Pagination
-History retrieval queries `MigrationExecutionRepository.findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable)` utilizing the composite index `(user_id, created_at DESC)` for efficient, bounded pagination without memory overhead.
+History retrieval queries `MigrationExecutionRepository.findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable)` utilizing the composite index `(user_id, created_at DESC)` for efficient, bounded pagination without memory overhead. Status filtering is powered by `findByUserIdAndStatusOrderByCreatedAtDesc(UUID userId, MigrationExecutionStatus status, Pageable pageable)` backed by the composite index `(user_id, status, created_at DESC)`.
+
+### 4. Phase 14C History & Detail APIs
+History and execution detail endpoints are strictly decoupled from internal JPA entities:
+- **`GET /api/migrations/history`**: User-scoped paginated history list returning `PagedResponse<MigrationHistoryItemResponse>`. Newest migrations first (`createdAt DESC`), supporting optional status filtering.
+- **`GET /api/migrations/{id}`**: Detailed view of a single migration execution returning `MigrationExecutionResponse` including track-level execution records (`ExecutionTrackRecordSummary`), candidate metadata, match scores, match decisions, and decision provenance.
+- **Anti-IDOR Protection**: All access is verified against the authenticated user (`user.getId()`). Accessing a migration belonging to another user returns HTTP 404 Not Found (non-disclosure of resource existence).
+
+### 5. Phase 14D Audit Logging & State Transition History
+A durable, append-only audit tracking subsystem captures execution lifecycle events, retries, worker leases, and compensating actions:
+- **`execution_audit_events`**: Append-only table linked to `migration_executions(id)` with `ON DELETE CASCADE`. Optional links to `execution_rollback_records` and `execution_reconciliation_records` with `ON DELETE SET NULL`.
+- **`ExecutionAuditEvent` & `ExecutionAuditService`**: Captured events include `STATE_TRANSITION`, `LEASE_ACQUIRED`, `LEASE_RELEASED`, `LEASE_EXPIRED`, `RETRY_SCHEDULED`, `RETRY_EXECUTION`, `RETRY_EXHAUSTED`, `ROLLBACK_REQUESTED`, `ROLLBACK_COMPLETED`, and `RECONCILIATION_COMPLETED`.
+- **`GET /api/migrations/{id}/history`**: Chronological audit timeline returning `PagedResponse<MigrationAuditEventResponse>` ordered by `createdAt ASC`. Protected by anti-IDOR checks (404 Not Found on unowned executions).

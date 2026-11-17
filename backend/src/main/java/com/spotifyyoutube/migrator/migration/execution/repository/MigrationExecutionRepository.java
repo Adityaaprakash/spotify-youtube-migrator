@@ -34,6 +34,8 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
 
     Page<MigrationExecution> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
+    Page<MigrationExecution> findByUserIdAndStatusOrderByCreatedAtDesc(UUID userId, MigrationExecutionStatus status, Pageable pageable);
+
     long countByUserId(UUID userId);
 
     boolean existsByReviewSessionId(UUID reviewSessionId);
