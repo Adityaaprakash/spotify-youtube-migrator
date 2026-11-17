@@ -1676,3 +1676,72 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 ### 5. Git Whitespace Hygiene
 - **Command**: `git diff --check`
 - **Outcome**: **PASSED** with 0 trailing whitespace violations and 0 newline warnings.
+
+
+## Phase 16A & 16B Security Testing Scope (Complete & Verified)
+
+Implemented and verified (46 dedicated security test cases across 4 new test classes and updated controller suite, 80 total identity/security tests, 2,186 total backend tests across all modules):
+
+### 1. OAuth State Security Suite (`OAuthStateSecurityTest`)
+- 11 dedicated test methods:
+  - `generateState_Generates256BitCryptographicallyRandomUniqueTokens`: Verifies 256 bits of cryptographic entropy (`SecureRandom` 32 bytes Base64 URL-safe), uniqueness across 50 iterations, user ID and provider binding, valid timestamps (`expiresAt` 15 min in future).
+  - `generateState_RejectsNullInputs`: Rejects null user ID or null provider with `IllegalArgumentException`.
+  - `validateAndConsumeState_ValidState_ConsumesSuccessfully`: Atomic deletion via single query returning 1 row affected.
+  - `validateAndConsumeState_RejectsMismatchedUser_AntiAccountLinkingAttack`: Cross-account attack rejected with `InvalidStateException` when User B attempts to consume User A's OAuth state.
+  - `validateAndConsumeState_RejectsMismatchedProvider`: Rejects state when claimed provider does not match initiating provider.
+  - `validateAndConsumeState_RejectsBlankOrNullInputs`: Validates state token, user ID, and provider are non-null and non-blank.
+  - `validateAndConsumeState_RejectsNonExistentState`: Rejects state tokens not found in database with `ResourceNotFoundException`.
+  - `validateAndConsumeState_RejectsExpiredState`: Rejects states after 15-minute TTL, purging the expired record from database.
+  - `validateAndConsumeState_RejectsReplayAttack_SingleUseEnforced`: Atomic check ensures state cannot be consumed more than once (0 rows affected throws `InvalidStateException`).
+  - `invalidateState_ConsumesState`: Verifies cancellation or error callbacks invalidate state.
+  - `purgeExpiredStates_CallsRepository`: Validates database cleanup query `deleteExpiredStates`.
+
+### 2. OAuth Token Encryption Suite (`OAuthTokenEncryptionTest`)
+- 9 dedicated test methods:
+  - `constructor_AcceptsValid256BitKey`: Validates that a valid 32-byte (256-bit) Base64 key is accepted.
+  - `constructor_RejectsShortKey_128Bit`: Fails fast at startup if a 16-byte (128-bit) key is provided.
+  - `constructor_RejectsShortKey_192Bit`: Fails fast at startup if a 24-byte (192-bit) key is provided.
+  - `constructor_RejectsArbitraryWeakKey`: Rejects arbitrary short/weak keys.
+  - `constructor_RejectsNullOrBlankKey`: Rejects null or blank encryption keys.
+  - `constructor_RejectsInvalidBase64Key`: Rejects non-Base64 strings.
+  - `encryptAndDecrypt_RoundTrip_PreservesPlaintext`: Verifies AES-256-GCM encryption/decryption roundtrip, ensuring ciphertext != plaintext.
+  - `encrypt_GeneratesUniqueIvPerEncryption_NoIvReuse`: Verifies unique 12-byte IV generation per encryption operation.
+  - `decrypt_DetectsTampering_FailsAuthenticationTagVerification`: Verifies that single-bit tampering in ciphertext triggers `AEADBadTagException` wrapped in `InvalidStateException` without leaking plaintext or key material.
+  - `decrypt_RejectsTruncatedPayload`: Verifies payloads smaller than 28 bytes (12-byte IV + 16-byte GCM tag) fail closed.
+  - `nullAndBlankInputs_HandledSafely`: Returns null for null or blank inputs without throwing.
+
+### 3. OAuth Redirect URI Validation Suite (`OAuthRedirectUriValidationTest`)
+- 12 dedicated test methods:
+  - `validateProviderRedirectUri_ValidHttps_Accepted`: Verifies standard HTTPS callback URLs are accepted.
+  - `validateProviderRedirectUri_LocalhostHttp_Accepted`: Verifies HTTP localhost, 127.0.0.1, and [::1] are accepted for development.
+  - `validateProviderRedirectUri_InsecureExternalHttp_Rejected`: Rejects insecure external HTTP URLs.
+  - `validateProviderRedirectUri_InvalidSchemes_Rejected`: Rejects non-HTTP/HTTPS schemes (`javascript:`, `ftp:`, `file:`).
+  - `validateProviderRedirectUri_RelativeUri_Rejected`: Rejects relative URIs as provider redirect targets.
+  - `validateProviderRedirectUri_FragmentPresent_Rejected`: Rejects redirect URIs with fragments per RFC 6749.
+  - `validateProviderRedirectUri_NullOrBlank_Rejected`: Rejects null and blank redirect URIs.
+  - `validateDestinationUri_SafeRelativePaths_Allowed`: Accepts valid internal paths (`/`, `/settings`, `/migrations/123`, `/?oauth_error=access_denied`).
+  - `validateDestinationUri_OpenRedirectAbsoluteUri_SanitizedToRoot`: Sanitizes external absolute URLs to `/`.
+  - `validateDestinationUri_ProtocolRelativeBypass_SanitizedToRoot`: Sanitizes protocol-relative bypasses (`//evil.com`, `/\evil.com`, `\\evil.com`) to `/`.
+  - `validateDestinationUri_JavascriptOrDataScheme_SanitizedToRoot`: Sanitizes `javascript:` and `data:` schemes to `/`.
+  - `validateDestinationUri_CrlfInjection_SanitizedToRoot`: Sanitizes CRLF header injection attempts to `/`.
+  - `validateDestinationUri_NullOrBlank_DefaultsToRoot`: Defaults null or blank inputs to `/`.
+
+### 4. OAuth Token Lifecycle & Concurrency Suite (`OAuthTokenLifecycleSecurityTest`)
+- 7 dedicated test methods:
+  - `refreshConnectionIfNeeded_ConcurrentRequests_OnlyOneUpstreamCallMade`: Validates fine-grained per-connection locking: 5 simultaneous concurrent threads refresh an expiring token, resulting in exactly 1 upstream provider call and all 5 receiving the refreshed credentials.
+  - `refreshConnectionIfNeeded_RotatedRefreshToken_PersistsNewRefreshToken`: Validates that when upstream returns a rotated refresh token, it is encrypted and persisted atomically.
+  - `refreshConnectionIfNeeded_NoNewRefreshToken_PreservesExistingRefreshToken`: Validates that when upstream returns null refresh token (standard Google behavior), existing encrypted refresh token is safely preserved.
+  - `refreshConnectionIfNeeded_ConnectionDeletedDuringUpstreamCall_DoesNotUndoDisconnect`: Validates that if connection is deleted during upstream call, refreshed token is discarded and never re-saved.
+  - `refreshConnectionIfNeeded_UpstreamFailure_FlagsReauthRequired`: Validates that upstream failure flags `REAUTH_REQUIRED` and persists it without leaking credentials.
+  - `refreshConnectionIfNeeded_MissingConnection_ThrowsInvalidStateException`: Validates missing connection check.
+  - `disconnect_RemovesConnectionFromDatabase`: Validates complete credential wipe on disconnect.
+
+### 5. OAuth Controller Security Suite (`OAuthControllerTest`)
+- 7 dedicated test methods:
+  - `generateAuthUrl_ReturnsUrl`: Verifies generation of authorization URL.
+  - `handleCallback_ValidCodeAndState_RedirectsToRoot`: Verifies successful code exchange and redirect to root.
+  - `handleCallback_ProviderError_InvalidatesStateAndRedirectsWithError`: Verifies `error=access_denied` invalidates state and redirects to `/?oauth_error=access_denied`.
+  - `handleCallback_MissingCode_InvalidatesStateAndRedirectsWithError`: Verifies missing code invalidates state and redirects to `/?oauth_error=missing_code`.
+  - `handleCallback_MissingState_RedirectsWithError`: Verifies missing state redirects to `/?oauth_error=missing_state`.
+  - `getConnectionStatus_ReturnsConnected`: Verifies status inspection.
+  - `disconnect_CallsService`: Verifies provider disconnect.

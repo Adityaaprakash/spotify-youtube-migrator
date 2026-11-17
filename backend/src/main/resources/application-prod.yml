@@ -2,6 +2,21 @@ spring:
   jpa:
     show-sql: false
 
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
+        http-only: true
+        same-site: lax
+
+oauth:
+  encryption:
+    key: ${OAUTH_ENCRYPTION_KEY}
+
 logging:
   level:
     root: INFO
+    org.springframework.web: WARN
+    org.springframework.security: INFO
+    com.spotifyyoutube.migrator: INFO

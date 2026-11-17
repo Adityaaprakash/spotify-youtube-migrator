@@ -2,11 +2,28 @@
 
 Last Updated: 2026-11-17
 
-Current Phase: Phase 15 — Frontend Product Layer [COMPLETE / VERIFIED / FROZEN]
-Current Subphase: Phase 15I (Final Accessibility Audit, Cross-Browser & Responsive Verification, and Formal Phase Freeze) [COMPLETE & FROZEN] -> Next Phase: Phase 16 — Security Hardening / End-to-End Integration [READY TO BEGIN]
-Latest Pushed Commit: a10754ad5bc1f3fc3b485981a6ad5601b905da1d (test(frontend): complete phase 15 accessibility and compatibility freeze)
+Current Phase: Phase 16 — Security Hardening / End-to-End Integration [IN PROGRESS]
+Current Subphase: Phase 16A & 16B (Security Architecture Audit, Threat Modeling & OAuth/Token Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 16C (Rate Limiting, Input Validation & API Hardening) [READY TO BEGIN]
+Latest Pushed Commit: b82277acae4287cb855265a21a759febb24657a0 (test(frontend): close phase 15 verification gaps)
 
 ## Verification Status & Release Gate
+- **Phase 16A & 16B Verification Status**: COMPLETE & VERIFIED.
+  - Security Architecture Mapping: Comprehensive audit of Spring Security session model (`CookieCsrfTokenRepository.withHttpOnlyFalse()`, SameSite=Lax, secure cookies in production), Spotify/Google OAuth 2.0 authorization code flows, token persistence, and lifecycle refresh.
+  - Trust Boundary Analysis: Mapped and audited 7 explicit trust boundaries (Browser-to-Backend, Backend-to-Spotify, Backend-to-Google, Backend-to-Database, OAuth Callback-to-Session, Authenticated User-to-Migration Resources, External Provider Responses-to-Internal Processing).
+  - Threat Modeling (STRIDE): Evaluated 13 realistic threat scenarios (OAuth Login CSRF, State manipulation/replay, Code interception/replay, Open redirects, Redirect URI manipulation, Account-linking attacks, Cross-account token access, Session fixation/confusion, Token leakage via logs/exceptions/URLs, Insecure token persistence, Unauthorized disconnect/refresh, Broken object-level authorization, Credential exposure).
+  - Phase 16B Hardening Controls Delivered:
+    - OAuth State Hardening (`OAuthStateServiceImpl` & `OAuthStateRepository`): 256 bits of cryptographic entropy (`SecureRandom` 32 bytes Base64 URL-safe), single-use atomic consumption via `DELETE FROM oauth_states WHERE state = :state`, strict user ID and provider binding, short TTL (15 minutes), expired state purging query (`deleteExpiredStates`), and graceful state invalidation on user cancellation/provider denial (`invalidateState`).
+    - Redirect URI Validation (`RedirectUriValidator`): Dedicated validation engine enforcing absolute URI syntax, scheme whitelist (`https` strictly required in production; `http` permitted solely for localhost/internal test hosts), host validation, fragment rejection, and strict post-auth destination sanitization preventing open redirects (`//`, `/\`, CRLF injection, protocol schemes).
+    - Provider Token Encryption at Rest (`OAuthTokenServiceImpl`): AES-256-GCM authenticated encryption (`AES/GCM/NoPadding`, 12-byte random IV per operation, 128-bit authentication tag), fail-fast startup validation requiring exact 32-byte (256-bit) Base64 key, minimum ciphertext length guard (`GCM_IV_LENGTH + 16` bytes) preventing array index exceptions, tamper detection via `AEADBadTagException`, and fail-safe exception wrapping with zero token leakage.
+    - Token Refresh Concurrency & Lifecycle (`OAuthTokenLifecycleServiceImpl` & `OAuthConnectionServiceImpl`): Bounded 256-stripe lock array eliminating race conditions, redundant upstream calls, and unbounded map growth; in-flight disconnect protection verifying `existsById` to prevent an in-flight refresh from undoing a user disconnect; atomic persistence of rotated tokens (both access and refresh); status synchronization restoring `CONNECTED` on re-authorization; graceful fallback to `REAUTH_REQUIRED` on unrecoverable upstream errors.
+    - Information Leak Prevention (`GoogleProviderAdapter`): Sanitized exception on token exchange failure, removing raw upstream response body string concatenation that previously risked leaking server diagnostics or sensitive payloads.
+    - Minimal OAuth Scopes Audited: Spotify source scopes (`user-read-private`, `user-read-email`, `playlist-read-private`, `playlist-read-collaborative`) and Google destination scopes (`openid`, `email`, `profile`, `https://www.googleapis.com/auth/youtube.force-ssl`) confirmed to adhere strictly to the Principle of Least Privilege.
+    - Disconnect & Isolation: Immediate local credential wipe upon `DELETE /api/oauth/{provider}`; strict user boundaries across all OAuth and migration operations.
+  - Test Suite: 4 new security test classes (`OAuthStateSecurityTest`, `OAuthTokenEncryptionTest`, `OAuthRedirectUriValidationTest`, `OAuthTokenLifecycleSecurityTest`) and updated `OAuthControllerTest` adding 46 dedicated tests (80 total tests passing across identity/security modules).
+  - Full Backend Verification: 2,186 total tests passing across all domains with 0 failures, 0 errors, and 0 skipped.
+  - Checkstyle Hygiene: 0 Checkstyle violations across the entire backend codebase (`mvnw checkstyle:check`).
+  - Git Hygiene: `git diff --check` PASSED cleanly (0 whitespace errors).
+  - Completion Report: `.ai/PHASE_16A_16B_SECURITY_REPORT.md` published.
 - **Phase 15I Verification Status**: COMPLETE, VERIFIED & FROZEN.
   - WCAG 2.1 Level AA Accessibility Audit: 19 automated scans with `@axe-core/playwright` across all Phase 15 routes (`/dashboard`, `/playlists`, `/playlists/:id`, `/migrations`, `/migrations/:id`, `/migrations/:id/review`, `/migrations/:id/progress`, `/settings`, `/login`, `/register`) and representative states (normal, loading skeleton, empty state, HTTP 500 error, expired OAuth, form validation errors, filtered search results, active migration, completed migration, resume dialog, candidate search dialog) passed with **0 violations**.
   - Non-Axe Semantic Accessibility Inspections: 6 programmatic inspection suites passing (accessible names across all interactive controls, semantic heading hierarchy `h1 -> h2 -> h3`, landmark semantics with skip-to-content target, dialog title/description programmatic associations, `[role="progressbar"]` bounds, and scoped table headers).

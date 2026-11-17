@@ -30,7 +30,7 @@ server:
 
 oauth:
   encryption:
-    key: ${OAUTH_ENCRYPTION_KEY:1234567890abcdef1234567890abcdef12345678123=}
+    key: ${OAUTH_ENCRYPTION_KEY}
   providers:
     spotify:
       client-id: ${SPOTIFY_CLIENT_ID:mock-spotify-client-id}

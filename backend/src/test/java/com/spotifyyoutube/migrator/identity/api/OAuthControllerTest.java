@@ -1,6 +1,7 @@
 package com.spotifyyoutube.migrator.identity.api;
 
 import com.spotifyyoutube.migrator.identity.application.OAuthAuthorizationService;
+import com.spotifyyoutube.migrator.identity.application.OAuthStateService;
 import com.spotifyyoutube.migrator.identity.application.OAuthTokenLifecycleService;
 import com.spotifyyoutube.migrator.identity.domain.ConnectionStatus;
 import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
@@ -34,6 +35,9 @@ class OAuthControllerTest {
     private OAuthAuthorizationService authorizationService;
 
     @MockBean
+    private OAuthStateService stateService;
+
+    @MockBean
     private OAuthTokenLifecycleService tokenLifecycleService;
 
     @MockBean
@@ -63,7 +67,7 @@ class OAuthControllerTest {
 
     @Test
     @WithMockUser("test@example.com")
-    void handleCallback_Redirects() throws Exception {
+    void handleCallback_ValidCodeAndState_RedirectsToRoot() throws Exception {
         when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
 
         mockMvc.perform(get("/api/oauth/google/callback")
@@ -73,6 +77,40 @@ class OAuthControllerTest {
                 .andExpect(header().string("Location", "/"));
 
         verify(authorizationService).handleCallback("valid-code", "valid-state", userId, OAuthProvider.GOOGLE);
+    }
+
+    @Test
+    void handleCallback_ProviderError_InvalidatesStateAndRedirectsWithError() throws Exception {
+        mockMvc.perform(get("/api/oauth/spotify/callback")
+                        .param("error", "access_denied")
+                        .param("error_description", "User+denied+access")
+                        .param("state", "some-state"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "/?oauth_error=access_denied"));
+
+        verify(stateService).invalidateState("some-state");
+        verifyNoInteractions(authorizationService);
+    }
+
+    @Test
+    void handleCallback_MissingCode_InvalidatesStateAndRedirectsWithError() throws Exception {
+        mockMvc.perform(get("/api/oauth/spotify/callback")
+                        .param("state", "some-state"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "/?oauth_error=missing_code"));
+
+        verify(stateService).invalidateState("some-state");
+        verifyNoInteractions(authorizationService);
+    }
+
+    @Test
+    void handleCallback_MissingState_RedirectsWithError() throws Exception {
+        mockMvc.perform(get("/api/oauth/spotify/callback")
+                        .param("code", "some-code"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "/?oauth_error=missing_state"));
+
+        verifyNoInteractions(authorizationService);
     }
 
     @Test

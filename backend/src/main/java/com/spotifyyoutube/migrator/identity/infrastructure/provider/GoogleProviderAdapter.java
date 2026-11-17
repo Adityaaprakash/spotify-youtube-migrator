@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.identity.application.OAuthProviderAdapter;
 import com.spotifyyoutube.migrator.identity.application.OAuthTokenResponse;
+import com.spotifyyoutube.migrator.identity.application.RedirectUriValidator;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -31,6 +32,7 @@ public class GoogleProviderAdapter implements OAuthProviderAdapter {
             RestClient.Builder restClientBuilder) {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
+        RedirectUriValidator.validateProviderRedirectUri(redirectUri);
         this.redirectUri = redirectUri;
         this.scopes = scopes;
         this.restClient = restClientBuilder.build();
@@ -82,7 +84,7 @@ public class GoogleProviderAdapter implements OAuthProviderAdapter {
                 .body(body)
                 .retrieve()
                 .onStatus(status -> status.isError(), (req, res) -> {
-                    throw new InvalidStateException("Failed to exchange Google token: " + res.getStatusCode() + " body: " + new String(res.getBody().readAllBytes()));
+                    throw new InvalidStateException("Failed to exchange Google token: " + res.getStatusCode());
                 })
                 .body(GoogleTokenResponse.class);
 

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 
 @Repository
@@ -16,4 +17,8 @@ public interface OAuthStateRepository extends JpaRepository<OAuthState, String> 
     @Modifying
     @Query("DELETE FROM OAuthState s WHERE s.state = :state")
     int consumeState(@Param("state") String state);
+
+    @Modifying
+    @Query("DELETE FROM OAuthState s WHERE s.expiresAt < :now")
+    int deleteExpiredStates(@Param("now") OffsetDateTime now);
 }

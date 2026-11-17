@@ -6,6 +6,8 @@ import com.spotifyyoutube.migrator.identity.domain.ConnectionStatus;
 import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
 import com.spotifyyoutube.migrator.identity.repository.OAuthConnectionRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,12 +18,25 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+/**
+ * Service managing OAuth connection lifecycle, token refreshes, and disconnection.
+ *
+ * Concurrency Note: In-memory lock stripes coordinate thread concurrency within a single JVM process
+ * to prevent duplicate upstream token refreshes and race conditions with disconnects.
+ * They do not coordinate across multiple distributed backend instances (distributed locking
+ * is deferred to multi-node clustering).
+ */
 @Service
 public class OAuthTokenLifecycleServiceImpl implements OAuthTokenLifecycleService {
+
+    private static final Logger log = LoggerFactory.getLogger(OAuthTokenLifecycleServiceImpl.class);
+    private static final int EXPIRY_BUFFER_SECONDS = 300;
+    private static final int NUM_LOCK_STRIPES = 256;
 
     private final OAuthConnectionRepository connectionRepository;
     private final OAuthTokenService tokenService;
     private final Map<OAuthProvider, OAuthProviderAdapter> adapters;
+    private final Object[] lockStripes;
 
     public OAuthTokenLifecycleServiceImpl(
             OAuthConnectionRepository connectionRepository,
@@ -31,62 +46,93 @@ public class OAuthTokenLifecycleServiceImpl implements OAuthTokenLifecycleServic
         this.tokenService = tokenService;
         this.adapters = adapterList.stream()
                 .collect(Collectors.toMap(OAuthProviderAdapter::getProvider, Function.identity()));
+        this.lockStripes = new Object[NUM_LOCK_STRIPES];
+        for (int i = 0; i < NUM_LOCK_STRIPES; i++) {
+            this.lockStripes[i] = new Object();
+        }
+    }
+
+    private Object getLock(UUID userId, OAuthProvider provider) {
+        String key = userId + ":" + provider.name();
+        int stripe = (key.hashCode() & 0x7FFFFFFF) % NUM_LOCK_STRIPES;
+        return lockStripes[stripe];
     }
 
     @Override
     @Transactional
     public OAuthConnection refreshConnectionIfNeeded(UUID userId, OAuthProvider provider) {
-        OAuthConnection connection = connectionRepository.findByUserIdAndProvider(userId, provider)
-                .orElseThrow(() -> new InvalidStateException("No active OAuth connection found for provider: " + provider.name()));
+        Object lock = getLock(userId, provider);
 
-        if (connection.getStatus() != ConnectionStatus.CONNECTED) {
-            return connection;
-        }
+        synchronized (lock) {
+            OAuthConnection connection = connectionRepository.findByUserIdAndProvider(userId, provider)
+                    .orElseThrow(() -> new InvalidStateException("No active OAuth connection found for provider: " + provider.name()));
 
-        // We use a safety window of 5 minutes (300 seconds)
-        boolean needsRefresh = connection.getExpiresAt() != null && 
-                               OffsetDateTime.now().plusSeconds(300).isAfter(connection.getExpiresAt());
+            if (connection.getStatus() != ConnectionStatus.CONNECTED) {
+                return connection;
+            }
 
-        if (!needsRefresh) {
+            // Safety window of 5 minutes (300 seconds)
+            boolean needsRefresh = connection.getExpiresAt() != null
+                    && OffsetDateTime.now().plusSeconds(EXPIRY_BUFFER_SECONDS).isAfter(connection.getExpiresAt());
+
+            if (!needsRefresh) {
+                return getDecryptedConnection(connection);
+            }
+
+            if (connection.getRefreshToken() == null) {
+                log.warn("OAuth connection for user {} and provider {} has expired access token and no refresh token",
+                        userId, provider);
+                connection.setStatus(ConnectionStatus.REAUTH_REQUIRED);
+                return connectionRepository.save(connection);
+            }
+
+            try {
+                OAuthProviderAdapter adapter = getAdapter(provider);
+                String decryptedRefreshToken = tokenService.decryptToken(connection.getRefreshToken());
+
+                OAuthTokenResponse newTokenResponse = adapter.refreshToken(decryptedRefreshToken);
+
+                // Check that the connection was not deleted by a concurrent disconnect while awaiting upstream response
+                if (connection.getId() != null && !connectionRepository.existsById(connection.getId())) {
+                    log.warn("OAuth connection for user {} and provider {} was deleted during refresh; discarding refreshed token",
+                            userId, provider);
+                    throw new ConnectionDisconnectedException("OAuth connection was disconnected during refresh");
+                }
+
+                connection.setAccessToken(tokenService.encryptToken(newTokenResponse.accessToken()));
+                if (newTokenResponse.refreshToken() != null && !newTokenResponse.refreshToken().isBlank()) {
+                    connection.setRefreshToken(tokenService.encryptToken(newTokenResponse.refreshToken()));
+                } // Otherwise preserve existing refresh token
+
+                connection.setExpiresAt(OffsetDateTime.now().plusSeconds(newTokenResponse.expiresIn()));
+                connection.setStatus(ConnectionStatus.CONNECTED);
+
+                connectionRepository.save(connection);
+            } catch (ConnectionDisconnectedException ex) {
+                throw new InvalidStateException(ex.getMessage());
+            } catch (Exception ex) {
+                log.warn("Failed to refresh OAuth token for user {} and provider {}. Flagging REAUTH_REQUIRED: {}",
+                        userId, provider, ex.getMessage());
+                if (connection.getId() == null || connectionRepository.existsById(connection.getId())) {
+                    connection.setStatus(ConnectionStatus.REAUTH_REQUIRED);
+                    connectionRepository.save(connection);
+                }
+            }
+
             return getDecryptedConnection(connection);
         }
-
-        if (connection.getRefreshToken() == null) {
-            connection.setStatus(ConnectionStatus.REAUTH_REQUIRED);
-            return connectionRepository.save(connection);
-        }
-
-        try {
-            OAuthProviderAdapter adapter = getAdapter(provider);
-            String decryptedRefreshToken = tokenService.decryptToken(connection.getRefreshToken());
-            
-            OAuthTokenResponse newTokenResponse = adapter.refreshToken(decryptedRefreshToken);
-
-            connection.setAccessToken(tokenService.encryptToken(newTokenResponse.accessToken()));
-            if (newTokenResponse.refreshToken() != null && !newTokenResponse.refreshToken().isBlank()) {
-                connection.setRefreshToken(tokenService.encryptToken(newTokenResponse.refreshToken()));
-            } // Otherwise preserve existing refresh token
-            
-            connection.setExpiresAt(OffsetDateTime.now().plusSeconds(newTokenResponse.expiresIn()));
-            connection.setStatus(ConnectionStatus.CONNECTED);
-            
-            connectionRepository.save(connection);
-        } catch (Exception ex) {
-            // For permanent failure or provider outage, we downgrade to REAUTH_REQUIRED if it's considered unrecoverable,
-            // but typical OAuth protocol handles invalid_grant gracefully. We will flag REAUTH_REQUIRED.
-            connection.setStatus(ConnectionStatus.REAUTH_REQUIRED);
-            connectionRepository.save(connection);
-        }
-
-        return getDecryptedConnection(connection);
     }
 
     @Override
     @Transactional
     public void disconnect(UUID userId, OAuthProvider provider) {
-        OAuthConnection connection = connectionRepository.findByUserIdAndProvider(userId, provider).orElse(null);
-        if (connection != null) {
-            connectionRepository.delete(connection);
+        Object lock = getLock(userId, provider);
+        synchronized (lock) {
+            OAuthConnection connection = connectionRepository.findByUserIdAndProvider(userId, provider).orElse(null);
+            if (connection != null) {
+                connectionRepository.delete(connection);
+                log.info("Disconnected OAuth connection for user {} and provider {}", userId, provider);
+            }
         }
     }
 
@@ -120,5 +166,11 @@ public class OAuthTokenLifecycleServiceImpl implements OAuthTokenLifecycleServic
             decrypted.setRefreshToken(tokenService.decryptToken(connection.getRefreshToken()));
         }
         return decrypted;
+    }
+
+    private static class ConnectionDisconnectedException extends RuntimeException {
+        ConnectionDisconnectedException(String message) {
+            super(message);
+        }
     }
 }

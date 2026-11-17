@@ -1,40 +1,50 @@
 package com.spotifyyoutube.migrator.identity.api;
 
+import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.identity.api.dto.OAuthConnectionStatusDto;
 import com.spotifyyoutube.migrator.identity.application.OAuthAuthorizationService;
+import com.spotifyyoutube.migrator.identity.application.OAuthStateService;
+import com.spotifyyoutube.migrator.identity.application.OAuthTokenLifecycleService;
+import com.spotifyyoutube.migrator.identity.application.RedirectUriValidator;
+import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.identity.repository.UserRepository;
-import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
-import com.spotifyyoutube.migrator.identity.api.dto.OAuthConnectionStatusDto;
-import com.spotifyyoutube.migrator.identity.application.OAuthTokenLifecycleService;
-import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/oauth")
 public class OAuthController {
 
+    private static final Logger log = LoggerFactory.getLogger(OAuthController.class);
+
     private final OAuthAuthorizationService authorizationService;
+    private final OAuthStateService stateService;
     private final OAuthTokenLifecycleService tokenLifecycleService;
     private final UserRepository userRepository;
 
     public OAuthController(
             OAuthAuthorizationService authorizationService,
+            OAuthStateService stateService,
             OAuthTokenLifecycleService tokenLifecycleService,
             UserRepository userRepository) {
         this.authorizationService = authorizationService;
+        this.stateService = stateService;
         this.tokenLifecycleService = tokenLifecycleService;
         this.userRepository = userRepository;
     }
@@ -51,17 +61,44 @@ public class OAuthController {
     @GetMapping("/{provider}/callback")
     public ResponseEntity<Void> handleCallback(
             @PathVariable("provider") String providerStr,
-            @RequestParam("code") String code,
-            @RequestParam("state") String state) {
+            @RequestParam(value = "code", required = false) String code,
+            @RequestParam(value = "state", required = false) String state,
+            @RequestParam(value = "error", required = false) String error,
+            @RequestParam(value = "error_description", required = false) String errorDescription) {
         
-        User user = getCurrentUser();
         OAuthProvider provider = parseProvider(providerStr);
-        
+
+        // Handle provider denial or error response (RFC 6749 Section 4.1.2.1)
+        if (error != null && !error.isBlank()) {
+            log.warn("OAuth provider {} returned error during authorization: {}", provider, error);
+            if (state != null && !state.isBlank()) {
+                stateService.invalidateState(state);
+            }
+            String sanitizedError = URLEncoder.encode(error, StandardCharsets.UTF_8);
+            String redirectUrl = RedirectUriValidator.validateDestinationUri("/?oauth_error=" + sanitizedError);
+            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+        }
+
+        // Validate presence of authorization code
+        if (code == null || code.isBlank()) {
+            if (state != null && !state.isBlank()) {
+                stateService.invalidateState(state);
+            }
+            String redirectUrl = RedirectUriValidator.validateDestinationUri("/?oauth_error=missing_code");
+            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+        }
+
+        // Validate presence of state parameter
+        if (state == null || state.isBlank()) {
+            String redirectUrl = RedirectUriValidator.validateDestinationUri("/?oauth_error=missing_state");
+            return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(redirectUrl)).build();
+        }
+
+        User user = getCurrentUser();
         authorizationService.handleCallback(code, state, user.getId(), provider);
         
-        // Redirect to a frontend success page or close the popup
-        // In a real app this would map to a configuration property, but returning 302 to root is a reasonable default.
-        return ResponseEntity.status(HttpStatus.FOUND).location(URI.create("/")).build();
+        String safeDestination = RedirectUriValidator.validateDestinationUri("/");
+        return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(safeDestination)).build();
     }
 
     @GetMapping("/{provider}")

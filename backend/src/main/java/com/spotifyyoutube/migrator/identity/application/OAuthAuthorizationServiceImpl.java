@@ -1,5 +1,6 @@
 package com.spotifyyoutube.migrator.identity.application;
 
+import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
 import com.spotifyyoutube.migrator.identity.domain.OAuthState;
@@ -37,6 +38,13 @@ public class OAuthAuthorizationServiceImpl implements OAuthAuthorizationService 
 
     @Override
     public void handleCallback(String code, String stateStr, UUID expectedUserId, OAuthProvider provider) {
+        if (code == null || code.isBlank()) {
+            throw new InvalidStateException("Authorization code must not be null or blank");
+        }
+        if (stateStr == null || stateStr.isBlank()) {
+            throw new InvalidStateException("OAuth state must not be null or blank");
+        }
+
         // 1. Validate state
         stateService.validateAndConsumeState(stateStr, expectedUserId, provider);
 

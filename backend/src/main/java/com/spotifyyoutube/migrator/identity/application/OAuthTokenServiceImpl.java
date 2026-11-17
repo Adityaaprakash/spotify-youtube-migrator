@@ -1,5 +1,6 @@
 package com.spotifyyoutube.migrator.identity.application;
 
+import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -16,23 +17,36 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int GCM_IV_LENGTH = 12;
     private static final int GCM_TAG_LENGTH = 128;
+    private static final int REQUIRED_KEY_BYTES = 32; // 256-bit AES
     
     private final SecretKeySpec keySpec;
+    private final SecureRandom secureRandom = new SecureRandom();
 
     public OAuthTokenServiceImpl(@Value("${oauth.encryption.key}") String encryptionKeyBase64) {
         if (encryptionKeyBase64 == null || encryptionKeyBase64.isBlank()) {
             throw new IllegalArgumentException("OAuth encryption key must be provided");
         }
-        byte[] key = Base64.getDecoder().decode(encryptionKeyBase64);
+        byte[] key;
+        try {
+            key = Base64.getDecoder().decode(encryptionKeyBase64.trim());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("OAuth encryption key must be valid Base64", e);
+        }
+        if (key.length != REQUIRED_KEY_BYTES) {
+            throw new IllegalArgumentException("OAuth encryption key must be exactly 256 bits (32 bytes), received "
+                    + (key.length * 8) + " bits");
+        }
         this.keySpec = new SecretKeySpec(key, "AES");
     }
 
     @Override
     public String encryptToken(String plaintextToken) {
-        if (plaintextToken == null) return null;
+        if (plaintextToken == null || plaintextToken.isBlank()) {
+            return null;
+        }
         try {
             byte[] iv = new byte[GCM_IV_LENGTH];
-            new SecureRandom().nextBytes(iv);
+            secureRandom.nextBytes(iv);
 
             Cipher cipher = Cipher.getInstance(ALGORITHM);
             GCMParameterSpec parameterSpec = new GCMParameterSpec(GCM_TAG_LENGTH, iv);
@@ -46,15 +60,20 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
             return Base64.getEncoder().encodeToString(message);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to encrypt token", e);
+            throw new InvalidStateException("Failed to encrypt token: encryption failure");
         }
     }
 
     @Override
     public String decryptToken(String encryptedToken) {
-        if (encryptedToken == null) return null;
+        if (encryptedToken == null || encryptedToken.isBlank()) {
+            return null;
+        }
         try {
-            byte[] message = Base64.getDecoder().decode(encryptedToken);
+            byte[] message = Base64.getDecoder().decode(encryptedToken.trim());
+            if (message.length < GCM_IV_LENGTH + (GCM_TAG_LENGTH / 8)) {
+                throw new InvalidStateException("Encrypted token payload is truncated or invalid");
+            }
 
             byte[] iv = new byte[GCM_IV_LENGTH];
             System.arraycopy(message, 0, iv, 0, GCM_IV_LENGTH);
@@ -68,8 +87,10 @@ public class OAuthTokenServiceImpl implements OAuthTokenService {
 
             byte[] plainText = cipher.doFinal(cipherText);
             return new String(plainText, StandardCharsets.UTF_8);
+        } catch (InvalidStateException e) {
+            throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to decrypt token", e);
+            throw new InvalidStateException("Failed to decrypt token: authentication tag verification failed or corrupted ciphertext");
         }
     }
 }

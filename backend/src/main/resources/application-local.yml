@@ -5,6 +5,10 @@ spring:
       hibernate:
         format_sql: true
 
+oauth:
+  encryption:
+    key: ${OAUTH_ENCRYPTION_KEY:1234567890abcdef1234567890abcdef12345678123=}
+
 logging:
   level:
     com.spotifyyoutube.migrator: DEBUG

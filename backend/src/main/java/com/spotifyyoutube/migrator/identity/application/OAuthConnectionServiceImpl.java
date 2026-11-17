@@ -1,6 +1,7 @@
 package com.spotifyyoutube.migrator.identity.application;
 
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.identity.domain.ConnectionStatus;
 import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
 import com.spotifyyoutube.migrator.identity.repository.OAuthConnectionRepository;
@@ -32,12 +33,13 @@ public class OAuthConnectionServiceImpl implements OAuthConnectionService {
         connection.setProviderUserId(providerUserId);
 
         connection.setAccessToken(tokenService.encryptToken(tokenResponse.accessToken()));
-        if (tokenResponse.refreshToken() != null) {
+        if (tokenResponse.refreshToken() != null && !tokenResponse.refreshToken().isBlank()) {
             connection.setRefreshToken(tokenService.encryptToken(tokenResponse.refreshToken()));
         }
 
         connection.setExpiresAt(OffsetDateTime.now().plusSeconds(tokenResponse.expiresIn()));
         connection.setScopes(tokenResponse.scopes());
+        connection.setStatus(ConnectionStatus.CONNECTED);
 
         return connectionRepository.save(connection);
     }
@@ -48,9 +50,6 @@ public class OAuthConnectionServiceImpl implements OAuthConnectionService {
         OAuthConnection connection = connectionRepository.findByUserIdAndProvider(userId, provider)
                 .orElseThrow(() -> new ResourceNotFoundException("No OAuth connection found for provider: " + provider.name()));
         
-        // Return a localized detached copy with decrypted tokens for memory convenience, OR we could keep entities encrypted and just decrypt here.
-        // For safety, we keep the entity bounded, we shouldn't necessarily modify the entity in JPA context if it's transient read.
-        
         OAuthConnection decrypted = new OAuthConnection();
         decrypted.setId(connection.getId());
         decrypted.setUserId(connection.getUserId());
@@ -58,6 +57,7 @@ public class OAuthConnectionServiceImpl implements OAuthConnectionService {
         decrypted.setProviderUserId(connection.getProviderUserId());
         decrypted.setExpiresAt(connection.getExpiresAt());
         decrypted.setScopes(connection.getScopes());
+        decrypted.setStatus(connection.getStatus());
 
         // Decrypt the tokens
         decrypted.setAccessToken(tokenService.decryptToken(connection.getAccessToken()));
