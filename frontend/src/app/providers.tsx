@@ -1,12 +1,18 @@
 import { ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { BrowserRouter } from 'react-router-dom';
+import { queryClient } from '@/lib/query/queryClient';
 
-const queryClient = new QueryClient();
+export interface ProvidersProps {
+  children: ReactNode;
+}
 
-export default function Providers({ children }: { children: ReactNode }) {
+export function Providers({ children }: ProvidersProps) {
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <BrowserRouter>{children}</BrowserRouter>
     </QueryClientProvider>
   );
 }
+
+export default Providers;

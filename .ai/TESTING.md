@@ -1300,3 +1300,41 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 - **Core Regression Suites**: 131 tests run across `MigrationExecutionDomainTest`, `MigrationExecutionStateMachineTest`, `MigrationControllerTest`, `MigrationExecutionControllerTest`, and `DefaultMigrationExecutionStateServiceTest`, 0 failures, 0 errors, 0 skipped.
 - **Checkstyle Hygiene**: 0 violations across all 470 main source files and 190 test source files.
 - **Phase Freeze**: Phase 14 is complete, verified, and formally FROZEN.
+
+---
+
+## Phase 15 Frontend Testing & Verification Scope (Phase 15A & 15B)
+
+### 1. Static Type Checking (`npm run typecheck`)
+- **Command**: `npm run typecheck` (`tsc -b`)
+- **Configuration**: Strict TypeScript mode (`"strict": true`, `"noImplicitAny": true`, `"strictNullChecks": true`, `"strictFunctionTypes": true`), path aliases mapped to `@/*`.
+- **Outcome**: **PASSED** with **0 type errors**.
+- **Verified Areas**:
+  - API client response envelope and error types (`ApiError`, `ApiException`, `FieldError`).
+  - TanStack Query client defaults and hierarchical query key factory types.
+  - UI primitive component props, variants, and element forwarding (`buttonVariants`, `badgeVariants`, `alertVariants`, `Card`, `Dialog`, `Input`, `Label`, `Separator`, `Skeleton`).
+  - Shared UX component props (`PageHeader`, `EmptyState`, `ErrorState`, `LoadingSkeleton`, `ConfirmationDialog`).
+  - Layout components and React Router v6 `<Outlet />` integration.
+  - Feature page shells and central route declarations (`src/app/routes.tsx`).
+
+### 2. ESLint Static Analysis & Code Quality (`npm run lint`)
+- **Command**: `npm run lint` (`eslint .`)
+- **Configuration**: ESLint 9 flat config with `@eslint/js`, `typescript-eslint`, and `react-hooks` / `react-refresh` plugins.
+- **Outcome**: **PASSED** with **0 errors and 0 warnings**.
+- **Hygiene Validations**:
+  - Zero unused variables or missing imports.
+  - Resolved empty interface warning on `SkeletonProps` by migrating to type alias (`export type SkeletonProps = React.HTMLAttributes<HTMLDivElement>`).
+  - React hook dependencies and rules of hooks strictly adhered to.
+
+### 3. Production Build Compilation (`npm run build`)
+- **Command**: `npm run build` (`vite build`)
+- **Outcome**: **PASSED** cleanly in 30.97s.
+- **Build Output**:
+  - `dist/index.html` (0.50 kB)
+  - `dist/assets/index-*.css` (16.29 kB │ gzip: 3.86 kB)
+  - `dist/assets/index-*.js` (249.77 kB │ gzip: 78.43 kB)
+- **Validation**: Zero unresolved imports, zero asset bundling errors, complete dead code elimination.
+
+### 4. Git Whitespace & Newline Hygiene
+- **Command**: `git diff --check`
+- **Outcome**: **PASSED** with 0 trailing whitespace violations and 0 missing newline warnings.

@@ -866,3 +866,44 @@ Controllers MUST NOT:
     - Records audit state transitions to `RUNNING` ("Execution resumed" / "Execution recovered and resumed").
   - **Formal Phase 14 Freeze Declaration**:
     - All Phase 14 subsystems (14A through 14F) are complete, verified, and **FROZEN**.
+
+## Frontend Architecture & Design System (Phase 15A & 15B)
+
+- Directory: `frontend/`
+- Tech Stack: React 18, TypeScript (strict mode), Vite, Tailwind CSS, TanStack Query v5, Lucide React
+- Purpose: Establishes a modular, accessible, strongly typed, and decoupled presentation foundation that integrates with backend REST endpoints while strictly enforcing security, boundary, and UX requirements.
+- Architecture Rules:
+  - **Module Boundaries & Directory Structure**:
+    - `src/lib/api/`: Centralized HTTP client (exporting `fetchClient` generic runner and `apiClient` method helpers), normalized error representations (`ApiError`, `ApiException`), and shared request/response models.
+    - `src/lib/query/`: TanStack Query client configuration with default caching policies (`staleTime: 60s`, `gcTime: 5m`, window refetch disabled, 4xx retry suppression) and hierarchical query key factory (`queryKeys`).
+    - `src/lib/utils/`: Generic utility helpers (`cn` class merger combining `clsx` and `tailwind-merge`).
+    - `src/components/ui/`: Atomic, reusable, accessible UI primitives (`Button`, `Badge`, `Card`, `Input`, `Label`, `Alert`, `Separator`, `Skeleton`, `Dialog`) following headless/shadcn patterns.
+    - `src/components/shared/`: Domain-agnostic composite UX feedback components (`PageHeader`, `EmptyState`, `ErrorState`, `LoadingSkeleton`, `ConfirmationDialog`).
+    - `src/components/layout/`: Application shell components (`AppHeader`, `AppSidebar`, `AppLayout`) providing persistent branding, navigation, connection status indicators, and responsive mobile navigation.
+    - `src/features/`: Feature modules scoped by roadmap domains (`auth`, `dashboard`, `playlists`, `migrations`, `settings`, `notFound`), housing page shells and future workflow components.
+    - `src/types/`: Global frontend navigation, identity, and shared UI types.
+  - **Authentication & Security Contract**:
+    - **Session Cookie Authentication**: Authentication relies entirely on backend Spring Security HTTP-only session cookies (`JSESSIONID`). The frontend never reads, stores, or transmits session tokens via JavaScript. All requests use `credentials: 'include'`.
+    - **CSRF Token Handling**: Backend configures `CookieCsrfTokenRepository.withHttpOnlyFalse()` issuing `XSRF-TOKEN` cookie. The API client automatically reads this cookie from `document.cookie` and populates the `X-XSRF-TOKEN` header on all state-mutating requests (`POST`, `PUT`, `DELETE`, `PATCH`).
+    - **OAuth Token Isolation**: OAuth tokens (Spotify and Google) remain strictly within the backend database. The frontend only inspects connection status (`OAuthConnectionStatusDto`) and initiates flows via full-page redirect to `/api/oauth/{provider}`.
+    - **API Idempotency**: State-mutating requests accept an optional `Idempotency-Key` parameter, transmitting the header to satisfy backend Phase 13E fencing requirements.
+    - **Error Handling**: API errors are mapped to strongly typed `ApiException` instances preserving backend `ApiError` structures (`timestamp`, `status`, `error`, `message`, `path`, `fieldErrors`).
+  - **Design System & Visual Language**:
+    - **Dark-First Music Aesthetic**: Default theme utilizes dark background (`#09090b`), muted surfaces (`#18181b`), crisp foreground text (`#fafafa`), and subtle borders (`#27272a`).
+    - **Brand Color Accents**: Dedicated semantic tokens for Spotify green (`#1DB954`) and YouTube red (`#FF0000`) for connection indicators, brand badges, and provider-specific actions.
+    - **Typography & Spacing**: Inter font family with systematic hierarchy, responsive padding, and touch-friendly targets ($\ge 44\text{px}$).
+  - **Routing Architecture**:
+    - Centralized declarative route configuration (`src/app/routes.tsx`) mapping all 9 roadmap paths:
+      - `/login` $\to$ `LoginPage`
+      - `/dashboard` $\to$ `DashboardPage`
+      - `/playlists` $\to$ `PlaylistsPage`
+      - `/playlists/:id` $\to$ `PlaylistDetailPage`
+      - `/migrations` $\to$ `MigrationsPage`
+      - `/migrations/:id` $\to$ `MigrationDetailPage`
+      - `/migrations/:id/review` $\to$ `MigrationReviewPage`
+      - `/migrations/:id/progress` $\to$ `MigrationProgressPage`
+      - `/settings` $\to$ `SettingsPage`
+      - `*` $\to$ `NotFoundPage` (404 catch-all)
+  - **Strict Phase 15B Boundary**:
+    - Zero future-phase workflow mutations or live backend API calls implemented in foundation phase.
+    - Route shells render structured placeholder interfaces with `PageHeader` and `EmptyState` explaining roadmap scope.

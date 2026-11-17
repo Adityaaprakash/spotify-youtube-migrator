@@ -2,11 +2,18 @@
 
 Last Updated: 2026-11-17
 
-Current Phase: Phase 14 — Migration History, Analytics & Auditability [COMPLETE & FROZEN]
-Current Subphase: Phase 14E & 14F — Migration Resume Integration, Verification & Phase Freeze [COMPLETE & FROZEN] -> Next Phase: Phase 15 — Frontend Product Layer [READY TO START]
+Current Phase: Phase 15 — Frontend Product Layer [IN PROGRESS]
+Current Subphase: Phase 15A & 15B — Frontend Audit, Integration Contract, Foundation & Design System [COMPLETE & VERIFIED] -> Next Subphase: Phase 15C — Authentication & Session Integration [READY TO START]
 Latest Pushed Commit: 86fe743 (feat(history): implement phase 14C and 14D history APIs and audit logging)
 
 ## Verification Status & Release Gate
+- **Phase 15A & 15B Verification Status**: COMPLETE & VERIFIED.
+  - Audit document: `.ai/PHASE_15A_FRONTEND_AUDIT.md` comprehensive audit of 11 backend controllers, 26 endpoints, CSRF/cookie model, and integration contract.
+  - Frontend TypeScript verification: `npm run typecheck` (`tsc -b`) PASSED with 0 errors.
+  - Frontend Lint hygiene: `npm run lint` (`eslint .`) PASSED with 0 errors and 0 warnings.
+  - Production build: `npm run build` (`vite build`) PASSED cleanly (built in 30.97s, generated `dist/`).
+  - Git whitespace hygiene: `git diff --check` PASSED with 0 whitespace errors.
+  - Completion report: `.ai/PHASE_15AB_COMPLETION_REPORT.md` validated and published.
 - **Phase 14 Verification Status**: COMPLETE & FROZEN (All subphases 14A through 14F verified and frozen).
   - Schema migrations: Flyway `V15` and `V16` validated and applied cleanly in PostgreSQL 16 Testcontainers.
   - Phase 14E/F test suites: `Phase14EFResumeIntegrationIT` (6 Testcontainers PostgreSQL integration tests passing, 0 failures, 0 errors).
@@ -1770,7 +1777,23 @@ Latest Pushed Commit: 86fe743 (feat(history): implement phase 14C and 14D histor
   - **Phase 13G (Recovery & Resume Integration)**: COMPLETE / FROZEN
   - **Phase 13H (Reliability & Fault-Injection Testing)**: COMPLETE / FROZEN
   - **Phase 13I (Final Verification & Reliability Freeze)**: COMPLETE / FROZEN
+- **Phase 14 (Migration History, Analytics & Auditability)**: COMPLETE / FROZEN
+  - **Phase 14A (Architecture Audit & Existing-System Audit)**: COMPLETE / FROZEN
+  - **Phase 14B (Persistent Migration Records & Schema V15)**: COMPLETE / FROZEN
+  - **Phase 14C (Migration History & Detail REST APIs)**: COMPLETE / FROZEN
+  - **Phase 14D (Audit Logging & Timeline History Schema V16)**: COMPLETE / FROZEN
+  - **Phase 14E (Migration Resume Integration & Track Outcomes)**: COMPLETE / FROZEN
+  - **Phase 14F (Complete Verification, Audit & Phase Freeze)**: COMPLETE / FROZEN
+- **Phase 15 (Frontend Product Layer)**: IN PROGRESS
+  - **Phase 15A (Frontend Audit & Backend Integration Contract)**: COMPLETE / VERIFIED
+  - **Phase 15B (Frontend Foundation & Design System)**: COMPLETE / VERIFIED
+  - **Phase 15C (Authentication & Session Integration)**: PENDING
+  - **Phase 15D (Playlist Discovery & Inspection UI)**: PENDING
+  - **Phase 15E (Review & Manual Correction UI)**: PENDING
+  - **Phase 15F (Migration Execution & Real-Time Progress UI)**: PENDING
+  - **Phase 15G (History, Analytics & Rollback UI)**: PENDING
+  - **Phase 15H (Frontend Verification, Accessibility & Hardening)**: PENDING
 
 ## Next Recommended Work
-1. **Phase 13 Reliability Freeze Complete**: All Phase 13 subphases (13A through 13I) are 100% complete, fully verified, and architecturally frozen under ADR-031.
-2. **Phase 14 — Migration History, Analytics & Auditability**: Ready to begin when authorized by user. Phase 14 will deliver durable historical recording, completion analytics, error rate aggregation, and audit logs for completed migrations.
+1. **Phase 15A & 15B Complete & Verified**: Frontend architectural audit, complete 26-endpoint integration contract, design system, API client with CSRF/credentials/idempotency support, TanStack Query configuration, shared layout, and 9 route placeholder shells implemented and verified cleanly (`tsc -b`, `eslint`, `vite build` all passing with 0 errors).
+2. **Phase 15C — Authentication & Session Integration**: Ready to begin when authorized by user. Phase 15C will deliver session polling (`GET /api/auth/me`), login/registration form interactions, OAuth connect initiation and status synchronization, route protection guards, and session expiration handling.
