@@ -3,10 +3,30 @@
 Last Updated: 2026-11-17
 
 Current Phase: Phase 15 — Frontend Product Layer [IN PROGRESS]
-Current Subphase: Phase 15D — Spotify Playlist Discovery & Detail [COMPLETE & VERIFIED] -> Next Subphase: Phase 15E — Migration Plan Preview & Review Session Workflow [READY TO START]
-Latest Pushed Commit: 42444ec (feat(frontend): establish phase 15 foundation)
+Current Subphase: Phase 15E (Migration Preview & Review) & Phase 15F (Execution & Live Progress) [COMPLETE & VERIFIED] -> Next Subphase: Phase 15G — History, Analytics & Rollback UI [READY TO START]
+Latest Pushed Commit: 89a9e2d (feat(frontend): implement Phase 15C auth & 15D playlist discovery)
 
 ## Verification Status & Release Gate
+- **Phase 15F Verification Status**: COMPLETE & VERIFIED.
+  - Execution Submission & Idempotency: `POST /api/migrations` dispatching approved, completed review sessions with fresh RFC 4122 UUID `Idempotency-Key` headers preventing duplicate executions.
+  - Live Real-Time Progress: `useMigrationProgress` polling `GET /api/migrations/{id}/progress` every 1,500 ms with automatic safe cessation on terminal statuses (`COMPLETED`, `FAILED`, `ROLLED_BACK`, `PARTIALLY_COMPLETED`, `RECOVERY_REQUIRED`).
+  - Itemized Execution Table: Ordered per-track outcomes via `GET /api/migrations/{id}/tracks` preserving target positions, status chips (`ADDED`, `FAILED`, `SKIPPED`, `UNCERTAIN`), retry attempt counts, error messages, and real-time search filtering.
+  - Completion Summary & Destination Link: Detailed completion banner with direct "Open in YouTube Music" external playlist links.
+  - Anti-IDOR Security: 404 non-disclosure for unowned executions.
+  - Test Suite: 10 dedicated tests in `src/test/execution.test.ts` (68 total frontend tests passing across 33 suites).
+  - TypeScript & Lint: 0 type errors, 0 lint warnings.
+  - Production build: `npm run build` PASSED cleanly in 25.80s.
+  - Completion report: `.ai/PHASE_15F_COMPLETION_REPORT.md` published.
+- **Phase 15E Verification Status**: COMPLETE & VERIFIED.
+  - Transient Migration Preview: `POST /api/migrations/preview` generating in-memory matching preview with metrics breakdown (auto-matches, review-required, unmatched, duplicates, failure rates) and match reasons. Zero premature database rows created.
+  - Review Session Lifecycle: `POST /api/review-sessions` establishing persistent session, `GET /api/review-sessions/{id}` fetching metadata, `GET /api/review-sessions/{id}/progress` evaluating completion readiness.
+  - Itemized Track Review & Decision Dispatch: Canonical 0-indexed track review via `GET /api/review-sessions/{id}/tracks`, one-click match approval (`POST .../accept`), custom candidate selection (`POST .../select`), and track exclusion (`POST .../exclude`).
+  - YouTube Candidate Search: Modal dialog querying candidate videos via `POST .../candidates/search` and enabling instantaneous candidate selection.
+  - Session Finalization: `POST /api/review-sessions/{id}/complete` marking review complete when all tracks are resolved, unlocking execution dispatch.
+  - Test Suite: 11 dedicated tests in `src/test/review.test.ts` (68 total frontend tests passing across 33 suites).
+  - TypeScript & Lint: 0 type errors, 0 lint warnings.
+  - Production build: `npm run build` PASSED cleanly in 25.80s.
+  - Completion report: `.ai/PHASE_15E_COMPLETION_REPORT.md` published.
 - **Phase 15D Verification Status**: COMPLETE & VERIFIED.
   - Playlist Discovery & Detail Engine: Typesafe Spotify playlist browsing (`/playlists`) and track inspection (`/playlists/:id`) integrating `GET /api/spotify/playlists`, `GET /api/spotify/playlists/{id}`, and `GET /api/spotify/playlists/{id}/tracks`.
   - TanStack Query Hooks: `usePlaylists` (offset/limit pagination, enabled on Spotify connection), `usePlaylistDetail`, and `usePlaylistTracks` caching with hierarchical query keys (`queryKeys.playlists`).

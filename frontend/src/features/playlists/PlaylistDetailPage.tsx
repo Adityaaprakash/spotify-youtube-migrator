@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { EmptyState } from '@/components/shared/EmptyState';
@@ -12,9 +13,11 @@ import { usePlaylistDetail } from './hooks/usePlaylistDetail';
 import { usePlaylistTracks } from './hooks/usePlaylistTracks';
 import { TrackTable } from './components/TrackTable';
 import { sanitizeDescription } from './utils';
+import { MigrationPreviewModal } from '@/features/review/components/MigrationPreviewModal';
 
 export function PlaylistDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const {
     playlist,
@@ -160,20 +163,19 @@ export function PlaylistDetailPage() {
                     </CardDescription>
                   )}
 
-                  {/* Migration Preview Entry Point — Boundary to Phase 15E */}
+                  {/* Migration Preview Entry Point */}
                   <div className="pt-2 flex items-center gap-3">
                     <Button
                       variant="default"
                       size="sm"
-                      disabled
-                      title="Migration planning and review will be enabled in Phase 15E"
-                      className="gap-2 bg-primary/80 opacity-70 cursor-not-allowed text-primary-foreground font-medium text-xs shadow-none"
+                      onClick={() => setPreviewOpen(true)}
+                      className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs shadow-sm"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
                       Preview Migration
                     </Button>
-                    <span className="text-[11px] text-muted-foreground/80 italic">
-                      Matching and migration preview will be enabled in Phase 15E
+                    <span className="text-[11px] text-muted-foreground/80">
+                      Analyze matches and review track candidates
                     </span>
                   </div>
                 </div>
@@ -190,6 +192,13 @@ export function PlaylistDetailPage() {
 
             <TrackTable tracks={tracks} />
           </div>
+
+          <MigrationPreviewModal
+            open={previewOpen}
+            onOpenChange={setPreviewOpen}
+            playlistId={id ?? ''}
+            playlistName={playlist.name}
+          />
         </div>
       ) : (
         /* Playlist Not Found */

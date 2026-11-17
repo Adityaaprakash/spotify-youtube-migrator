@@ -1423,11 +1423,60 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 ### 4. Production Build Verification (`npm run build`)
 - **Command**: `npm run build` (`vite build`)
 - **Outcome**: **PASSED** cleanly in 32.11s, generated production artifacts in `dist/`.
+
+### 5. Git Whitespace Hygiene
+- **Command**: `git diff --check`
+- **Outcome**: **PASSED** with 0 trailing whitespace violations and 0 newline warnings.
+
+---
+
+## Phase 15E & Phase 15F Migration Review & Execution Testing Scope
+
+### 1. Unit & Contract Test Suite (`npm test`)
+- **Command**: `npm test` (`esbuild src/test/*.test.ts --bundle --platform=node --format=esm --outdir=src/test/.dist --alias:@=./src && node --test "src/test/.dist/*.test.js"`)
+- **Outcome**: **PASSED** with **68 tests passing across 33 suites in 470ms** (0 failures, 0 errors, 0 skipped).
+- **Test Suites Delivered for Phase 15E** (`src/test/review.test.ts` - 11 tests across 4 suites):
+  1. `Migration Preview Generation (POST /api/migrations/preview)`:
+     - Submits preview request with `spotifyPlaylistId` and `deduplicate` flag.
+     - Parses `MigrationPlanResponse`, per-track classifications, match reasons, and summary statistics.
+  2. `Review Session Lifecycle (POST & GET /api/review-sessions)`:
+     - Creates review session from `sourcePlaylistId` and `planId`.
+     - Fetches review session details and progress summary with `eligibleForCompletion` readiness check.
+     - Retrieves itemized tracks preserving canonical 0-indexed positions.
+  3. `Track Review Decisions (Accept, Select Candidate, Exclude)`:
+     - Accepts automatic match candidate via `POST .../tracks/{position}/accept`.
+     - Selects replacement candidate with `CandidateSelectionDto` payload via `POST .../tracks/{position}/select`.
+     - Excludes track from migration with optional reason via `POST .../tracks/{position}/exclude`.
+  4. `Candidate Search & Session Completion`:
+     - Searches destination candidates for a track via `POST .../tracks/{position}/candidates/search`.
+     - Completes review session via `POST .../complete` when all decisions are resolved.
+- **Test Suites Delivered for Phase 15F** (`src/test/execution.test.ts` - 10 tests across 4 suites):
+  1. `Migration Execution Submission (POST /api/migrations)`:
+     - Submits approved migration with `reviewSessionId`, playlist details, and custom `Idempotency-Key` header.
+     - Propagates `409 CONFLICT` on duplicate or concurrent execution.
+     - Propagates `400 INCOMPLETE_REVIEW` if session is not yet completed.
+  2. `Real-time Migration Progress (GET /api/migrations/:id/progress)`:
+     - Fetches progress snapshot with accurate percentage and track counters.
+     - Handles `404 Not Found` for non-existent execution or IDOR attempt.
+     - Correctly classifies terminal (`COMPLETED`, `FAILED`, `ROLLED_BACK`, `PARTIALLY_COMPLETED`, `RECOVERY_REQUIRED`) and non-terminal execution statuses via `isTerminalExecutionStatus`.
+  3. `Itemized Execution Track Outcomes (GET /api/migrations/:id/tracks)`:
+     - Retrieves track outcomes ordered by target position with execution details and error diagnostics.
+     - Correctly handles `SKIPPED`, `UNCERTAIN`, and `ROLLING_BACK` track statuses.
+  4. `Execution Detail & Destination Metadata (GET /api/migrations/:id)`:
+     - Retrieves aggregate execution detail and direct destination playlist link.
+     - Handles `429 Too Many Requests` rate limiting gracefully.
+
+### 2. Static Type Checking (`npm run typecheck`)
+- **Command**: `npm run typecheck` (`tsc --noEmit`)
+- **Outcome**: **PASSED** with **0 type errors**.
+
+### 3. ESLint Static Analysis (`npm run lint`)
+- **Command**: `npm run lint` (`eslint .`)
 - **Outcome**: **PASSED** with **0 errors and 0 warnings**.
 
-### 4. Production Build Compilation (`npm run build`)
+### 4. Production Build Verification (`npm run build`)
 - **Command**: `npm run build` (`vite build`)
-- **Outcome**: **PASSED** cleanly in 35.34s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
+- **Outcome**: **PASSED** cleanly in 25.80s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
 
 ### 5. Git Whitespace Hygiene
 - **Command**: `git diff --check`

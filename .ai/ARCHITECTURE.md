@@ -955,5 +955,47 @@ Controllers MUST NOT:
     - `PlaylistCard`: Handles missing artwork or failed image loading (`onError`) with a Spotify badge fallback.
     - `formatDuration`: Safely converts millisecond timestamps to `m:ss` or `h:mm:ss`, handling missing or invalid durations as `-:--`.
     - `sanitizeDescription`: Cleans up HTML tags and entities in playlist descriptions.
-  - **Strict Phase Boundary Enforcement**:
-    - Playlist detail page provides a "Preview Migration" CTA button, but it is explicitly disabled and annotated with informational guidance that review session workflows begin in Phase 15E. Zero calls are made to `/api/migrations/preview` or `/api/review-sessions`.
+  - **Migration Preview Entrypoint**:
+    - Playlist detail page provides an active "Preview Migration" CTA button that opens `MigrationPreviewModal`, initiating the transient plan preview and human review workflow delivered in Phase 15E.
+
+## Migration Preview & Human Review Architecture (Phase 15E)
+
+- Directory: `frontend/src/features/review/`
+- Purpose: Delivers transient in-memory plan generation, candidate match inspection, review session lifecycle management, track-level decisions, manual YouTube candidate search, and review finalization.
+- Architecture Rules:
+  - **Transient In-Memory Preview Invariant (ADR-022)**:
+    - `POST /api/migrations/preview` generates matching evaluations strictly in memory without database persistence or destination mutations.
+    - `MigrationPreviewModal` presents summary metrics (total tracks, auto-matches, review-required, duplicates, failure rates) and sample match candidate cards with calibrated probabilities and match reasons.
+  - **Persistent Review Session Lifecycle**:
+    - Review session creation (`POST /api/review-sessions`) persists session state using `sourcePlaylistId` and `planId`.
+    - Session detail (`GET /api/review-sessions/{id}`) and progress summary (`GET /api/review-sessions/{id}/progress`) drive UI status indicators and execution eligibility.
+    - Tracks query (`GET /api/review-sessions/{id}/tracks`) preserves canonical 0-indexed positions matching backend ordering.
+  - **Track-Level Decision Dispatch**:
+    - One-click match approval: `POST /api/review-sessions/{id}/tracks/{position}/accept`.
+    - Candidate replacement: `POST /api/review-sessions/{id}/tracks/{position}/select` transmitting selected candidate payload (`CandidateSelectionDto`).
+    - Track exclusion: `POST /api/review-sessions/{id}/tracks/{position}/exclude` with optional exclusion reason.
+    - YouTube candidate search: `POST /api/review-sessions/{id}/tracks/{position}/candidates/search` enabling interactive queries and candidate selection from modal search dialog.
+  - **Session Finalization Invariant**:
+    - The review session must be completed via `POST /api/review-sessions/{id}/complete` when `eligibleForCompletion` is true before execution dispatch can succeed.
+
+## Migration Execution & Live Progress Architecture (Phase 15F)
+
+- Directory: `frontend/src/features/execution/`
+- Purpose: Delivers asynchronous migration job dispatch with idempotency protection, live real-time progress polling, itemized track execution outcomes, and direct destination playlist links.
+- Architecture Rules:
+  - **Asynchronous Execution Submission & Idempotency**:
+    - Submits approved migrations via `POST /api/migrations` using `RunMigrationRequest` (`reviewSessionId`, `targetPlaylistTitle`, `targetPlaylistDescription`, `isPrivate`).
+    - Enforces backend prerequisite: Review session must be in `COMPLETED` status prior to execution dispatch (otherwise rejected with `INCOMPLETE_REVIEW`).
+    - Automatically generates and transmits RFC 4122 UUID `Idempotency-Key` headers on every submission mutation, guarding against duplicate job dispatch upon network retries or repeated user clicks.
+    - Parses `202 ACCEPTED` response and routes user immediately to `/migrations/:id/progress`.
+  - **Real-Time Progress Polling & Safe Cessation**:
+    - `useMigrationProgress` polls `GET /api/migrations/{id}/progress` every 1,500 ms while execution status is active (`ALLOCATING_DESTINATION`, `INITIALIZED`, `QUEUED`, `RUNNING`).
+    - Polling halts immediately (`refetchInterval: false`) when the status reaches terminal or stopped states (`COMPLETED`, `FAILED`, `ROLLED_BACK`, `PARTIALLY_COMPLETED`, `RECOVERY_REQUIRED`).
+    - `LiveProgressBar` renders smooth progress animation, calculated percentage, execution status badges, and real-time track count chips.
+  - **Itemized Execution Track Outcomes**:
+    - `GET /api/migrations/{id}/tracks` fetches execution track records in canonical target position order.
+    - `ExecutionTrackTable` displays per-track status badges (`ADDED`, `FAILED`, `SKIPPED`, `UNCERTAIN`, `ROLLING_BACK`), retry attempt counts, error diagnostic messages, and client-side track/artist search filtering.
+  - **Completion Summary & Anti-IDOR Security**:
+    - `GET /api/migrations/{id}` retrieves aggregate migration metrics and destination YouTube playlist URLs upon completion.
+    - `ExecutionSummaryCard` provides direct external links to YouTube Music and diagnostic failure summaries.
+    - Anti-IDOR non-disclosure: 404 responses for unowned executions are rendered with neutral empty states without leaking metadata.
