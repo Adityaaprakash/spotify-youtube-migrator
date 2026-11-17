@@ -1261,3 +1261,42 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 ### 4. Combined Regression Verification
 - **Suites Executed**: `Phase14BPersistentMigrationRecordIT`, `Phase14BPersistentMigrationRecordTest`, `MigrationExecutionDomainTest`, `MigrationControllerTest` (40 regression tests run, 0 failures, 0 errors, 0 skipped).
 - **Checkstyle**: 0 Checkstyle violations across all modified and newly created source and test files.
+
+---
+
+## Phase 14 Testing Scope: Migration Resume Integration & Full Verification (Phase 14E & 14F)
+
+### 1. Phase 14E WebMvc Tests (`MigrationHistoryControllerTest`)
+- **Suite**: `MigrationHistoryControllerTest` (24 WebMvc tests, 0 failures, 0 errors, 0 skipped).
+- **Added Coverage**:
+  - `getUserMigrationHistoryRootPathAlias`: Validates `GET /api/migrations` root path alias returns 200 OK with `PagedResponse<MigrationHistoryItemResponse>`.
+  - `TrackOutcomesTests` (4 tests):
+    - `getMigrationTracksReturnsOrderedOutcomes`: Validates `GET /api/migrations/{id}/tracks` returns 200 OK with track list ordered by canonical target position.
+    - `getMigrationTracksCrossUserThrowsNotFound`: Validates anti-IDOR non-disclosure (404) for foreign user execution track requests.
+    - `getMigrationTracksNotFound`: Validates non-existent execution returns 404 Not Found.
+    - `getMigrationTracksUnauthenticatedForbidden`: Validates unauthenticated requests return 403 Forbidden.
+  - `MigrationResumeTests` (7 tests):
+    - `resumeEligibleMigrationReturnsSummary`: Validates `POST /api/migrations/{id}/resume` returns 200 OK with execution summary for eligible partially completed migration.
+    - `resumeFailedMigrationRecoversAndResumes`: Validates `POST /api/migrations/{id}/resume` delegates to `recoverExecution` and returns 200 OK when execution has failed tracks.
+    - `resumeRunningMigrationReturnsConflict`: Validates 409 Conflict when execution is currently `RUNNING`.
+    - `resumeCompletedMigrationReturnsConflict`: Validates 409 Conflict when execution is already `COMPLETED`.
+    - `resumeUncertainMigrationReturnsConflict`: Validates 409 Conflict when execution has uncertain tracks or is in `UNCERTAIN` status.
+    - `resumeCrossUserThrowsNotFound`: Validates anti-IDOR non-disclosure (404) when a user attempts to resume another user's execution.
+    - `resumeUnauthenticatedForbidden`: Validates unauthenticated resume returns 403 Forbidden.
+
+### 2. Phase 14E & 14F PostgreSQL Integration Tests (`Phase14EFResumeIntegrationIT`)
+- **Suite**: `Phase14EFResumeIntegrationIT` (6 integration tests executed against Testcontainers PostgreSQL 16, 0 failures, 0 errors, 0 skipped).
+- **Coverage**:
+  - `testResumePartiallyCompletedMigrationPreservesAddedTracksAndInsertsPending`: Validates safe resume skipping already `ADDED` tracks, inserting only remaining `PENDING` tracks, reusing destination playlist, verifying YouTube destination API called only for unfinished tracks, and verifying audit transitions to `RUNNING` and `COMPLETED`.
+  - `testResumeFailedMigrationRecoversFailedAndSkippedTracks`: Validates recovery of `FAILED` and `SKIPPED` tracks without duplicate destination playlist creation, retaining original playlist item IDs for previously added tracks.
+  - `testResumeCompletedMigrationThrowsConflict`: Validates terminal `COMPLETED` execution cannot be resumed, throwing `InvalidStateException` (409 Conflict).
+  - `testResumeRunningMigrationThrowsConflict`: Validates concurrent resume attempt rejected when execution is already `RUNNING` by another worker/thread.
+  - `testResumeAntiIdorIsolation`: Validates multi-tenant isolation, throwing `ResourceNotFoundException` (404) on cross-user resume attempt.
+  - `testTrackOutcomesPersistenceAndOrderingAcrossApplicationRestart`: Validates track outcomes, candidate details, match scores, match decisions, and decision provenance survive restart and are returned in deterministic target position order.
+
+### 3. Full Release Gate & Regression Verification
+- **Full Backend Clean Test Suite**: `.\mvnw.cmd clean test` PASSED with 2,139 tests run, 0 failures, 0 errors, 0 skipped.
+- **Combined Phase 14 Test Suite**: 55 tests run across all Phase 14 test classes (`Phase14EFResumeIntegrationIT`, `Phase14CDPersistentHistoryAndAuditIT`, `ExecutionAuditServiceTest`, `MigrationHistoryControllerTest`, `Phase14BPersistentMigrationRecordIT`, `Phase14BPersistentMigrationRecordTest`), 0 failures, 0 errors, 0 skipped.
+- **Core Regression Suites**: 131 tests run across `MigrationExecutionDomainTest`, `MigrationExecutionStateMachineTest`, `MigrationControllerTest`, `MigrationExecutionControllerTest`, and `DefaultMigrationExecutionStateServiceTest`, 0 failures, 0 errors, 0 skipped.
+- **Checkstyle Hygiene**: 0 violations across all 470 main source files and 190 test source files.
+- **Phase Freeze**: Phase 14 is complete, verified, and formally FROZEN.

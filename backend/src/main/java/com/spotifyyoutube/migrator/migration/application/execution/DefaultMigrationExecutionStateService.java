@@ -1648,7 +1648,10 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 throw new InvalidStateException("Migration execution could not be claimed: " +
                         "execution is already in progress, in an invalid state, or was modified concurrently");
             }
+            MigrationExecutionStatus preClaim = execution.getStatus();
             execution.claimExecution();
+            recordAuditStateTransition(execution, preClaim, MigrationExecutionStatus.RUNNING,
+                    isResume ? "Execution resumed" : "Execution started", "USER", null);
 
             return execution.getDestinationPlaylistId();
         });
@@ -1792,7 +1795,10 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                 throw new InvalidStateException("Migration execution could not be claimed for recovery: " +
                         "execution is either already in progress, in an invalid state, or was modified concurrently");
             }
-            execution.claimExecution();
+            MigrationExecutionStatus preClaim = execution.getStatus();
+            execution.setStatus(MigrationExecutionStatus.RUNNING);
+            recordAuditStateTransition(execution, preClaim, MigrationExecutionStatus.RUNNING,
+                    "Execution recovered and resumed", "USER", null);
 
             return execution.getDestinationPlaylistId();
         });

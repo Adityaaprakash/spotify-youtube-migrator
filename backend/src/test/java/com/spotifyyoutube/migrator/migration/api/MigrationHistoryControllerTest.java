@@ -17,6 +17,11 @@ import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
+import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackStatus;
+import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,7 +51,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -82,6 +89,12 @@ class MigrationHistoryControllerTest {
 
     @MockBean
     private ExecutionAuditService auditService;
+
+    @MockBean
+    private MigrationExecutionStateService executionStateService;
+
+    @MockBean
+    private ExecutionTrackRecordRepository trackRecordRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -156,6 +169,26 @@ class MigrationHistoryControllerTest {
                     .andExpect(jsonPath("$.content[0].failedInsertions").value(2));
 
             verify(executionRepository).findByUserIdOrderByCreatedAtDesc(eq(userId), any(Pageable.class));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("GET /api/migrations root path returns paginated migration history for authenticated user")
+        void getHistory_RootPathSuccess() throws Exception {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution execution = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.COMPLETED);
+
+            Page<MigrationExecution> page = new PageImpl<>(List.of(execution), PageRequest.of(0, 20), 1);
+            when(executionRepository.findByUserIdOrderByCreatedAtDesc(eq(userId), any(Pageable.class))).thenReturn(page);
+
+            mockMvc.perform(get("/api/migrations")
+                            .param("page", "0")
+                            .param("size", "20")
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.page").value(0))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].migrationId").value(execId.toString()));
         }
 
         @Test
@@ -362,6 +395,216 @@ class MigrationHistoryControllerTest {
         @DisplayName("Unauthenticated request to audit history endpoint returns 403 Forbidden")
         void getAuditHistory_UnauthenticatedReturnsForbidden() throws Exception {
             mockMvc.perform(get("/api/migrations/{id}/history", UUID.randomUUID())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isForbidden());
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /api/migrations/{id}/tracks - Migration Track-Level Outcomes")
+    class TrackOutcomesTests {
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Owner can retrieve track execution outcomes in target position order")
+        void getTracks_OwnerSuccess() throws Exception {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution execution = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.COMPLETED);
+
+            ExecutionTrackRecord track1 = new ExecutionTrackRecord(execution, 0, "sp-1", "yt-1", "Midnight City", "M83");
+            ReflectionTestUtils.setField(track1, "id", UUID.randomUUID());
+            ReflectionTestUtils.setField(track1, "destinationTitle", "M83 - Midnight City");
+            ReflectionTestUtils.setField(track1, "destinationChannel", "M83");
+            ReflectionTestUtils.setField(track1, "destinationDurationMs", 243000L);
+            ReflectionTestUtils.setField(track1, "matchScore", 0.98);
+            ReflectionTestUtils.setField(track1, "matchDecision", "MATCH");
+            ReflectionTestUtils.setField(track1, "decisionSource", "AUTOMATIC");
+            ReflectionTestUtils.setField(track1, "status", ExecutionTrackStatus.ADDED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+            when(trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(execId)).thenReturn(List.of(track1));
+
+            mockMvc.perform(get("/api/migrations/{id}/tracks", execId)
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$[0].sourceTitle").value("Midnight City"))
+                    .andExpect(jsonPath("$[0].sourceArtist").value("M83"))
+                    .andExpect(jsonPath("$[0].destinationTitle").value("M83 - Midnight City"))
+                    .andExpect(jsonPath("$[0].destinationChannel").value("M83"))
+                    .andExpect(jsonPath("$[0].status").value("ADDED"))
+                    .andExpect(jsonPath("$[0].matchScore").value(0.98));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Anti-IDOR: Requesting track outcomes for another user's execution returns 404 NOT FOUND")
+        void getTracks_AntiIdorReturns404() throws Exception {
+            UUID execId = UUID.randomUUID();
+            User otherUser = new User("other@example.com");
+            ReflectionTestUtils.setField(otherUser, "id", UUID.randomUUID());
+            MigrationExecution execution = createMockExecution(execId, otherUser, MigrationExecutionStatus.COMPLETED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+
+            mockMvc.perform(get("/api/migrations/{id}/tracks", execId)
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Requesting tracks for non-existent execution returns 404 NOT FOUND")
+        void getTracks_NotFound() throws Exception {
+            UUID execId = UUID.randomUUID();
+            when(executionRepository.findById(execId)).thenReturn(Optional.empty());
+
+            mockMvc.perform(get("/api/migrations/{id}/tracks", execId)
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        }
+
+        @Test
+        @WithAnonymousUser
+        @DisplayName("Unauthenticated request to tracks endpoint returns 403 Forbidden")
+        void getTracks_UnauthenticatedReturnsForbidden() throws Exception {
+            mockMvc.perform(get("/api/migrations/{id}/tracks", UUID.randomUUID())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isForbidden());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/migrations/{id}/resume - Safe Migration Resumption")
+    class MigrationResumeTests {
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Owner can resume eligible execution with pending tracks")
+        void resume_EligiblePendingTracksSuccess() throws Exception {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution execution = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.PARTIALLY_COMPLETED);
+
+            ExecutionTrackRecord t0 = new ExecutionTrackRecord(execution, 0, "sp-0", "yt-0", "Song A", "Artist A");
+            ReflectionTestUtils.setField(t0, "status", ExecutionTrackStatus.ADDED);
+            ExecutionTrackRecord t1 = new ExecutionTrackRecord(execution, 1, "sp-1", "yt-1", "Song B", "Artist B");
+            ReflectionTestUtils.setField(t1, "status", ExecutionTrackStatus.PENDING);
+            ReflectionTestUtils.setField(execution, "trackRecords", List.of(t0, t1));
+
+            MigrationExecution completedExec = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.COMPLETED);
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+            when(executionStateService.resumeExecution(eq(execId), eq(userId))).thenReturn(MigrationExecutionSummary.from(completedExec));
+
+            mockMvc.perform(post("/api/migrations/{id}/resume", execId)
+                            .with(csrf())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+            verify(executionStateService).resumeExecution(eq(execId), eq(userId));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Owner can resume and recover execution with failed/skipped tracks")
+        void resume_RecoverFailedTracksSuccess() throws Exception {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution execution = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.FAILED);
+
+            ExecutionTrackRecord t0 = new ExecutionTrackRecord(execution, 0, "sp-0", "yt-0", "Song A", "Artist A");
+            ReflectionTestUtils.setField(t0, "status", ExecutionTrackStatus.FAILED);
+            ReflectionTestUtils.setField(execution, "trackRecords", List.of(t0));
+
+            MigrationExecution completedExec = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.COMPLETED);
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+            when(executionStateService.recoverExecution(eq(execId), eq(userId))).thenReturn(MigrationExecutionSummary.from(completedExec));
+
+            mockMvc.perform(post("/api/migrations/{id}/resume", execId)
+                            .with(csrf())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("COMPLETED"));
+
+            verify(executionStateService).recoverExecution(eq(execId), eq(userId));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Resume rejects when execution is already RUNNING (409 Conflict)")
+        void resume_ConflictWhenRunning() throws Exception {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution execution = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.RUNNING);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+
+            mockMvc.perform(post("/api/migrations/{id}/resume", execId)
+                            .with(csrf())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_STATE"))
+                    .andExpect(jsonPath("$.message").value("Migration execution is already in progress"));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Resume rejects when execution is already COMPLETED (409 Conflict)")
+        void resume_ConflictWhenCompleted() throws Exception {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution execution = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.COMPLETED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+
+            mockMvc.perform(post("/api/migrations/{id}/resume", execId)
+                            .with(csrf())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_STATE"))
+                    .andExpect(jsonPath("$.message").value("Cannot resume: execution is already COMPLETED"));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Resume rejects when execution contains UNCERTAIN tracks (409 Conflict)")
+        void resume_ConflictWhenUncertain() throws Exception {
+            UUID execId = UUID.randomUUID();
+            MigrationExecution execution = createMockExecution(execId, authenticatedUser, MigrationExecutionStatus.RECOVERY_REQUIRED);
+            ReflectionTestUtils.setField(execution, "uncertainInsertions", 1);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+
+            mockMvc.perform(post("/api/migrations/{id}/resume", execId)
+                            .with(csrf())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_STATE"))
+                    .andExpect(jsonPath("$.message").value("Cannot resume: execution contains uncertain tracks that require reconciliation"));
+        }
+
+        @Test
+        @WithMockUser(username = "user@example.com")
+        @DisplayName("Anti-IDOR: Resuming another user's execution returns 404 NOT FOUND")
+        void resume_AntiIdorReturns404() throws Exception {
+            UUID execId = UUID.randomUUID();
+            User otherUser = new User("other@example.com");
+            ReflectionTestUtils.setField(otherUser, "id", UUID.randomUUID());
+            MigrationExecution execution = createMockExecution(execId, otherUser, MigrationExecutionStatus.PARTIALLY_COMPLETED);
+
+            when(executionRepository.findById(execId)).thenReturn(Optional.of(execution));
+
+            mockMvc.perform(post("/api/migrations/{id}/resume", execId)
+                            .with(csrf())
+                            .accept(MediaType.APPLICATION_JSON))
+                    .andExpect(status().isNotFound())
+                    .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+        }
+
+        @Test
+        @WithAnonymousUser
+        @DisplayName("Unauthenticated request to resume endpoint returns 403 Forbidden")
+        void resume_UnauthenticatedReturnsForbidden() throws Exception {
+            mockMvc.perform(post("/api/migrations/{id}/resume", UUID.randomUUID())
+                            .with(csrf())
                             .accept(MediaType.APPLICATION_JSON))
                     .andExpect(status().isForbidden());
         }

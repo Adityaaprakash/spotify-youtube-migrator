@@ -63,3 +63,23 @@ A durable, append-only audit tracking subsystem captures execution lifecycle eve
 - **`execution_audit_events`**: Append-only table linked to `migration_executions(id)` with `ON DELETE CASCADE`. Optional links to `execution_rollback_records` and `execution_reconciliation_records` with `ON DELETE SET NULL`.
 - **`ExecutionAuditEvent` & `ExecutionAuditService`**: Captured events include `STATE_TRANSITION`, `LEASE_ACQUIRED`, `LEASE_RELEASED`, `LEASE_EXPIRED`, `RETRY_SCHEDULED`, `RETRY_EXECUTION`, `RETRY_EXHAUSTED`, `ROLLBACK_REQUESTED`, `ROLLBACK_COMPLETED`, and `RECONCILIATION_COMPLETED`.
 - **`GET /api/migrations/{id}/history`**: Chronological audit timeline returning `PagedResponse<MigrationAuditEventResponse>` ordered by `createdAt ASC`. Protected by anti-IDOR checks (404 Not Found on unowned executions).
+
+### 6. Phase 14E Migration Resume Integration & Track Outcomes
+Provides endpoints for retrieving itemized track results and resuming interrupted/failed migrations safely:
+- **`GET /api/migrations/{id}/tracks`**: Returns itemized list of `ExecutionTrackRecordResponse` in canonical target position order. Protected by anti-IDOR checks (404 Not Found on unowned executions).
+- **`POST /api/migrations/{id}/resume`**: Resumes or recovers migration executions.
+  - Skips already `ADDED` tracks; executes only eligible unfinished tracks (`PENDING`, recovered `FAILED`/`SKIPPED`).
+  - Preserves existing destination playlist identity without creating duplicate remote playlists.
+  - Idempotency & concurrency protection: Rejects terminal `COMPLETED`, `ROLLED_BACK`, in-flight `RUNNING`, or `UNCERTAIN` executions with `409 Conflict`.
+  - Multi-tenant security: Strictly verifies user ownership, returning `404 Not Found` for unowned executions (anti-IDOR non-disclosure).
+  - Automatically delegates to `resumeExecution` if status is eligible (`canResume()`), or `recoverExecution` if failed/skipped tracks exist.
+  - Emits audit state transition events to `RUNNING` ("Execution resumed" / "Execution recovered and resumed").
+
+### 7. Phase 14F Verification & Freeze Declaration
+All Phase 14 requirements (14A through 14F) have been implemented, thoroughly tested, verified, and formally **FROZEN**.
+- **No Duplicate Entities**: Single authoritative aggregate root `MigrationExecution`.
+- **No Duplicate State Machines**: Reuses `MigrationExecutionStatus` and `ExecutionTrackStatus`.
+- **PostgreSQL 16 Testcontainers**: `Phase14EFResumeIntegrationIT` (6/6 passing), `Phase14CDPersistentHistoryAndAuditIT` (5/5 passing), `Phase14BPersistentMigrationRecordIT` (5/5 passing).
+- **WebMvc & Unit Tests**: `MigrationHistoryControllerTest` (24/24 passing), `ExecutionAuditServiceTest` (9/9 passing), `Phase14BPersistentMigrationRecordTest` (6/6 passing).
+- **Full Backend Suite**: 2,139 tests passing, 0 failures, 0 errors, 0 skipped, 0 Checkstyle violations.
+- Phase 14 is complete and ready for Phase 15 (Frontend).

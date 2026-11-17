@@ -14,8 +14,8 @@ All APIs start with `/api`.
 
 ## Migration History & Detail Endpoints (Phase 14C & 14D)
 
-### 1. `GET /api/migrations/history`
-Retrieves a paginated list of migrations executed by the authenticated user.
+### 1. `GET /api/migrations` and `GET /api/migrations/history`
+Retrieves a paginated list of migrations executed by the authenticated user (`/api/migrations` is a root-path alias for `/api/migrations/history`).
 
 - **Authentication**: Required (Session Cookie / OAuth).
 - **Query Parameters**:
@@ -200,5 +200,84 @@ Retrieves a chronological audit timeline of lifecycle state transitions, retry a
   "totalPages": 1,
   "first": true,
   "last": true
+}
+```
+
+---
+
+## Migration Outcomes & Safe Resume Endpoints (Phase 14E)
+
+### 4. `GET /api/migrations/{id}/tracks`
+Retrieves the complete list of itemized track outcomes and candidate metadata for a migration execution, ordered deterministically by canonical 0-indexed destination target position.
+
+- **Authentication**: Required (Session Cookie / OAuth).
+- **Path Parameters**:
+  - `id` (UUID): Unique ID of the migration execution.
+- **Security**: Strictly user-scoped with anti-IDOR non-disclosure. Returns HTTP 404 Not Found if the execution belongs to another user.
+- **Response**: HTTP 200 OK with `List<ExecutionTrackRecordResponse>`.
+
+#### Example Response
+```json
+[
+  {
+    "id": "1fa85f64-5717-4562-b3fc-2c963f66afa7",
+    "executionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+    "sourceTrackId": "spotify:track:4cOdK2wGLETKBW3PvgPWqT",
+    "sourceTitle": "Never Gonna Give You Up",
+    "sourceArtist": "Rick Astley",
+    "sourcePosition": 0,
+    "destinationTrackId": "dQw4w9WgXcQ",
+    "destinationTitle": "Rick Astley - Never Gonna Give You Up (Official Music Video)",
+    "destinationChannel": "Rick Astley",
+    "destinationDuration": "PT3M33S",
+    "targetPosition": 0,
+    "status": "ADDED",
+    "destinationPlaylistItemId": "PL_item_12345",
+    "attemptCount": 1,
+    "errorMessage": null,
+    "decisionSource": "AUTOMATIC",
+    "matchScore": 0.98,
+    "matchDecision": "MATCH",
+    "addedAt": "2026-03-01T10:00:15Z"
+  }
+]
+```
+
+---
+
+### 5. `POST /api/migrations/{id}/resume`
+Resumes an eligible interrupted, partially completed, or failed migration execution. Reuses the existing destination playlist without re-creating remote containers, skips tracks already in `ADDED` status, and sequentially processes eligible unfinished (`PENDING`) or recovered (`FAILED`/`SKIPPED`) tracks.
+
+- **Authentication**: Required (Session Cookie / OAuth).
+- **Path Parameters**:
+  - `id` (UUID): Unique ID of the migration execution.
+- **Concurrency & State Rules**:
+  - Rejects executions currently `RUNNING` with `409 Conflict`.
+  - Rejects executions already `COMPLETED` or `ROLLED_BACK` with `409 Conflict`.
+  - Rejects executions with ambiguous `UNCERTAIN` tracks with `409 Conflict` (requires reconciliation).
+  - Automatically routes to `resumeExecution` if status is eligible (`canResume()`), or `recoverExecution` if failed/skipped tracks exist.
+- **Security**: Strictly user-scoped with anti-IDOR non-disclosure. Returns HTTP 404 Not Found if the execution belongs to another user.
+- **Response**: HTTP 200 OK with `MigrationExecutionSummary`.
+
+#### Example Response
+```json
+{
+  "executionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "reviewSessionId": "2fa85f64-5717-4562-b3fc-2c963f66afa5",
+  "destinationPlaylistId": "PL_abc123xyz",
+  "destinationPlaylistUrl": "https://music.youtube.com/playlist?list=PL_abc123xyz",
+  "status": "COMPLETED",
+  "totalApprovedTracks": 25,
+  "successfulInsertions": 25,
+  "failedInsertions": 0,
+  "uncertainInsertions": 0,
+  "skippedInsertions": 0,
+  "rolledBackInsertions": 0,
+  "startedAt": "2026-03-01T10:00:00Z",
+  "completedAt": "2026-03-01T10:01:20Z",
+  "failureSummary": null,
+  "fullySuccessful": true,
+  "totalSourceTracks": 30,
+  "matchedTracks": 25
 }
 ```

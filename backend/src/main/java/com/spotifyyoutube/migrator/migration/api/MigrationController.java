@@ -2,11 +2,14 @@ package com.spotifyyoutube.migrator.migration.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import com.spotifyyoutube.migrator.identity.application.UserService;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.api.dto.CreateMigrationRequest;
+import com.spotifyyoutube.migrator.migration.api.dto.ExecutionTrackRecordResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationAuditEventResponse;
+import com.spotifyyoutube.migrator.migration.api.dto.MigrationExecutionResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationHistoryItemResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationJobResponse;
 import com.spotifyyoutube.migrator.migration.api.dto.MigrationProgressResponse;
@@ -18,12 +21,16 @@ import com.spotifyyoutube.migrator.migration.api.mapper.MigrationExecutionApiMap
 import com.spotifyyoutube.migrator.migration.api.mapper.MigrationMapper;
 import com.spotifyyoutube.migrator.migration.application.MigrationService;
 import com.spotifyyoutube.migrator.migration.application.execution.ExecutionAuditService;
+import com.spotifyyoutube.migrator.migration.application.execution.MigrationExecutionStateService;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.ApprovedMigrationExecutionRequest;
+import com.spotifyyoutube.migrator.migration.application.execution.contract.ExecutionTrackRecordDto;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.async.MigrationJobDispatcher;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionAuditEvent;
+import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionTrackRecord;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import com.spotifyyoutube.migrator.migration.execution.repository.ExecutionTrackRecordRepository;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
 import com.spotifyyoutube.migrator.migration.progress.application.MigrationProgressService;
 import com.spotifyyoutube.migrator.migration.progress.application.ProgressPollingRateLimiter;
@@ -83,6 +90,8 @@ public class MigrationController {
     private final Validator validator;
     private final MigrationExecutionRepository executionRepository;
     private final ExecutionAuditService auditService;
+    private final MigrationExecutionStateService executionStateService;
+    private final ExecutionTrackRecordRepository trackRecordRepository;
 
     @Autowired
     public MigrationController(
@@ -94,7 +103,9 @@ public class MigrationController {
             ObjectMapper objectMapper,
             Validator validator,
             @Autowired(required = false) MigrationExecutionRepository executionRepository,
-            @Autowired(required = false) ExecutionAuditService auditService
+            @Autowired(required = false) ExecutionAuditService auditService,
+            @Autowired(required = false) MigrationExecutionStateService executionStateService,
+            @Autowired(required = false) ExecutionTrackRecordRepository trackRecordRepository
     ) {
         this.migrationService = Objects.requireNonNull(migrationService, "MigrationService must not be null");
         this.jobDispatcher = Objects.requireNonNull(jobDispatcher, "MigrationJobDispatcher must not be null");
@@ -105,6 +116,23 @@ public class MigrationController {
         this.validator = validator;
         this.executionRepository = executionRepository;
         this.auditService = auditService;
+        this.executionStateService = executionStateService;
+        this.trackRecordRepository = trackRecordRepository;
+    }
+
+    public MigrationController(
+            MigrationService migrationService,
+            MigrationJobDispatcher jobDispatcher,
+            MigrationProgressService progressService,
+            ProgressPollingRateLimiter rateLimiter,
+            UserService userService,
+            ObjectMapper objectMapper,
+            Validator validator,
+            MigrationExecutionRepository executionRepository,
+            ExecutionAuditService auditService
+    ) {
+        this(migrationService, jobDispatcher, progressService, rateLimiter, userService, objectMapper,
+                validator, executionRepository, auditService, null, null);
     }
 
     public MigrationController(
@@ -116,7 +144,8 @@ public class MigrationController {
             ObjectMapper objectMapper,
             Validator validator
     ) {
-        this(migrationService, jobDispatcher, progressService, rateLimiter, userService, objectMapper, validator, null, null);
+        this(migrationService, jobDispatcher, progressService, rateLimiter, userService, objectMapper,
+                validator, null, null, null, null);
     }
 
     /**
@@ -234,7 +263,7 @@ public class MigrationController {
      * @param principal authenticated principal
      * @return paginated migration summary history envelope
      */
-    @GetMapping("/history")
+    @GetMapping({"", "/history"})
     public ResponseEntity<PagedResponse<MigrationHistoryItemResponse>> getMigrationHistory(
             @RequestParam(required = false) MigrationExecutionStatus status,
             @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable,
@@ -338,6 +367,110 @@ public class MigrationController {
                 MigrationExecutionApiMapper::toAuditEventResponse
         );
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Retrieves track-level execution outcomes for a migration execution (Phase 14E).
+     * Enforces strict anti-IDOR security: returns 404 NOT FOUND if nonexistent or belonging to another user.
+     *
+     * @param id execution identifier
+     * @param principal authenticated principal
+     * @return itemized list of track execution records in canonical target position order
+     */
+    @GetMapping("/{id}/tracks")
+    public ResponseEntity<List<ExecutionTrackRecordResponse>> getMigrationTracks(
+            @PathVariable UUID id,
+            Principal principal
+    ) {
+        UUID userId = resolveUserId(null, principal);
+        if (executionRepository == null) {
+            throw new ResourceNotFoundException("Migration execution not found: " + id);
+        }
+
+        MigrationExecution execution = executionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + id));
+
+        if (!execution.getUser().getId().equals(userId)) {
+            // Anti-IDOR: Prevent disclosure of foreign migration existence
+            throw new ResourceNotFoundException("Migration execution not found: " + id);
+        }
+
+        List<ExecutionTrackRecord> records;
+        if (trackRecordRepository != null) {
+            records = trackRecordRepository.findByExecutionIdOrderByTargetPositionAsc(id);
+        } else {
+            records = execution.getTrackRecords();
+        }
+
+        List<ExecutionTrackRecordResponse> response = records.stream()
+                .map(ExecutionTrackRecordDto::from)
+                .map(MigrationExecutionApiMapper::toTrackRecordResponse)
+                .toList();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Resumes or recovers an eligible migration execution (Phase 14E).
+     * <p>
+     * Skips already ADDED tracks, reuses existing destination playlist, prevents duplicate execution,
+     * updates summary counters and timestamps, and enforces anti-IDOR security.
+     * Rejects already COMPLETED migrations (409 Conflict) and concurrent executions (409 Conflict).
+     *
+     * @param id execution identifier
+     * @param principal authenticated principal
+     * @return updated migration execution response
+     */
+    @PostMapping("/{id}/resume")
+    public ResponseEntity<MigrationExecutionResponse> resumeMigration(
+            @PathVariable UUID id,
+            Principal principal
+    ) {
+        UUID userId = resolveUserId(null, principal);
+        if (executionStateService == null) {
+            throw new IllegalStateException("MigrationExecutionStateService is not configured");
+        }
+
+        if (executionRepository == null) {
+            throw new ResourceNotFoundException("Migration execution not found: " + id);
+        }
+
+        MigrationExecution execution = executionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Migration execution not found: " + id));
+
+        if (!execution.getUser().getId().equals(userId)) {
+            // Anti-IDOR: Prevent disclosure of foreign migration existence
+            throw new ResourceNotFoundException("Migration execution not found: " + id);
+        }
+
+        if (execution.getStatus() == MigrationExecutionStatus.RUNNING) {
+            throw new InvalidStateException("Migration execution is already in progress");
+        }
+
+        if (execution.getStatus() == MigrationExecutionStatus.COMPLETED) {
+            throw new InvalidStateException("Cannot resume: execution is already COMPLETED");
+        }
+
+        if (execution.getStatus() == MigrationExecutionStatus.ROLLED_BACK) {
+            throw new InvalidStateException("Cannot resume: execution has been ROLLED_BACK");
+        }
+
+        if (execution.getUncertainInsertions() > 0) {
+            throw new InvalidStateException("Cannot resume: execution contains uncertain tracks that require reconciliation");
+        }
+
+        MigrationExecutionSummary summary;
+        if (execution.canResume()) {
+            summary = executionStateService.resumeExecution(id, userId);
+        } else if (execution.getStatus() == MigrationExecutionStatus.FAILED
+                || execution.getStatus() == MigrationExecutionStatus.PARTIALLY_COMPLETED
+                || execution.getStatus() == MigrationExecutionStatus.RECOVERY_REQUIRED) {
+            summary = executionStateService.recoverExecution(id, userId);
+        } else {
+            throw new InvalidStateException("Execution cannot be resumed in current status: " + execution.getStatus());
+        }
+
+        return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
     }
 
     @GetMapping("/{id}/tasks")

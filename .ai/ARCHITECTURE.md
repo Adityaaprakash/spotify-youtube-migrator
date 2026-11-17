@@ -841,3 +841,28 @@ Controllers MUST NOT:
   - **Formal Phase 13 Freeze Declaration**:
     - All Phase 13 subsystems (13A through 13I) are complete, verified, and **FROZEN**.
     - No further architectural or schema modifications to Phase 13 reliability components are permitted.
+
+## Migration History, Auditability & Resume Layer (Phase 14A–14F — Persistent History, Audit Timeline & Safe Resume)
+
+- Packages: `com.spotifyyoutube.migrator.migration.execution.domain`, `com.spotifyyoutube.migrator.migration.execution.repository`, `com.spotifyyoutube.migrator.migration.application.execution`, `com.spotifyyoutube.migrator.migration.api`
+- Purpose: Provides durable migration history records, immutable audit logging for execution state transitions, itemized track outcomes, and controlled, safe migration resume capabilities without duplicating migration execution engines or state machines.
+- Architecture Rules:
+  - **Single Execution Aggregate Root**: `MigrationExecution` remains the authoritative aggregate root for both active executions and completed historical migrations. No secondary history entity or competing state machine exists.
+  - **Itemized Persistent Track Records**: `ExecutionTrackRecord` persists the complete lifecycle, target position, match scores, match decisions, decision source (provenance), destination track metadata, and destination playlist item IDs.
+  - **Audit Logging Subsystem**:
+    - `ExecutionAuditEvent` table (`execution_audit_events`, Flyway `V16`) captures immutable audit events for state transitions, worker lease acquisition/renewal, retries, rollbacks, and reconciliations.
+    - `ExecutionAuditService` records timeline events with actor, event type, old state, new state, message, and metadata.
+  - **History & Outcomes Presentation APIs**:
+    - `GET /api/migrations` & `GET /api/migrations/history`: Paginated user-scoped migration records ordered reverse-chronologically with status filtering and summary statistics (`totalSourceTracks`, `matchedTracks`, `successfulInsertions`, `failedInsertions`, `skippedInsertions`).
+    - `GET /api/migrations/{id}`: Detailed view of a single migration execution including per-track execution records and provenance.
+    - `GET /api/migrations/{id}/history`: Chronological audit log timeline.
+    - `GET /api/migrations/{id}/tracks`: Itemized track outcomes ordered by canonical 0-indexed destination target position.
+  - **Safe Resume & Recovery Integration (`POST /api/migrations/{id}/resume`)**:
+    - Delegates to `resumeExecution` for eligible partial executions or `recoverExecution` for failed executions.
+    - Skips already `ADDED` tracks; executes only eligible unfinished tracks (`PENDING`, recovered `FAILED`/`SKIPPED`).
+    - Preserves existing destination playlist identity without creating duplicate remote playlists.
+    - Idempotency & concurrency protection: Rejects terminal `COMPLETED`, `ROLLED_BACK`, in-flight `RUNNING`, or `UNCERTAIN` executions with `409 Conflict`.
+    - Multi-tenant security: Strictly verifies user ownership, returning `404 Not Found` for unowned executions to prevent resource enumeration (anti-IDOR).
+    - Records audit state transitions to `RUNNING` ("Execution resumed" / "Execution recovered and resumed").
+  - **Formal Phase 14 Freeze Declaration**:
+    - All Phase 14 subsystems (14A through 14F) are complete, verified, and **FROZEN**.

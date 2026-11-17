@@ -2,21 +2,25 @@
 
 Last Updated: 2026-11-17
 
-Current Phase: Phase 14 — Migration History, Analytics & Auditability [IN PROGRESS]
-Current Subphase: Phase 14C & 14D — Migration History APIs & Audit Logging [COMPLETE & VERIFIED] -> Phase 14E — Analytics & Metric Summaries [READY TO START]
-Latest Pushed Commit: c78bd896b20fd790a4772697ec3b1b9785bc1870
+Current Phase: Phase 14 — Migration History, Analytics & Auditability [COMPLETE & FROZEN]
+Current Subphase: Phase 14E & 14F — Migration Resume Integration, Verification & Phase Freeze [COMPLETE & FROZEN] -> Next Phase: Phase 15 — Frontend Product Layer [READY TO START]
+Latest Pushed Commit: 86fe743 (feat(history): implement phase 14C and 14D history APIs and audit logging)
 
 ## Verification Status & Release Gate
-- **Phase 14C & 14D Verification Status**: COMPLETE & VERIFIED.
-  - Audit document: `docs/PHASE_14_CD_AUDIT.md` covering all existing components, gaps, and architecture constraints.
-  - Implementation report: `docs/PHASE_14_CD_IMPLEMENTATION_REPORT.md` covering all 11 implementation, schema, security, and verification sections.
-  - Schema migration: `V16__phase14d_execution_audit_events.sql` applied cleanly in PostgreSQL 16 Testcontainers (`execution_audit_events` table, indexes `idx_audit_events_execution_created`, `idx_audit_events_type`, and composite index `idx_migrationexecutions_user_status_created`).
-  - Unit tests: `ExecutionAuditServiceTest` (9 tests passing, 0 failures, 0 errors).
-  - WebMvc tests: `MigrationHistoryControllerTest` (12 tests passing, 0 failures, 0 errors).
-  - Integration tests: `Phase14CDPersistentHistoryAndAuditIT` (5 Testcontainers PostgreSQL tests passing, 0 failures, 0 errors).
-  - Combined Phase 14C & 14D tests: 26 tests passing, 0 failures, 0 errors.
-  - Regression tests: `Phase14BPersistentMigrationRecordIT`, `Phase14BPersistentMigrationRecordTest`, `MigrationExecutionDomainTest`, `MigrationControllerTest` (40 regression tests passing, 0 failures, 0 errors).
+- **Phase 14 Verification Status**: COMPLETE & FROZEN (All subphases 14A through 14F verified and frozen).
+  - Schema migrations: Flyway `V15` and `V16` validated and applied cleanly in PostgreSQL 16 Testcontainers.
+  - Phase 14E/F test suites: `Phase14EFResumeIntegrationIT` (6 Testcontainers PostgreSQL integration tests passing, 0 failures, 0 errors).
+  - Phase 14C/D test suites: `Phase14CDPersistentHistoryAndAuditIT` (5 Testcontainers PostgreSQL integration tests passing), `ExecutionAuditServiceTest` (9 tests passing), `MigrationHistoryControllerTest` (24 WebMvc tests passing covering `/history`, `/`, `/{id}`, `/{id}/history`, `/{id}/tracks`, and `/{id}/resume`).
+  - Phase 14B test suites: `Phase14BPersistentMigrationRecordIT` (5 integration tests passing), `Phase14BPersistentMigrationRecordTest` (6 unit tests passing).
+  - Combined Phase 14 tests: 55 tests passing, 0 failures, 0 errors, 0 skipped.
+  - Full backend clean test suite: 2,139 tests passing, 0 failures, 0 errors, 0 skipped.
   - Checkstyle hygiene: 0 Checkstyle violations across the entire project.
+- **Phase 14E Core Subsystems Delivered**:
+  - `GET /api/migrations`: Root alias for user paginated migration history.
+  - `GET /api/migrations/{id}/tracks`: Itemized track outcomes ordered by canonical target position with anti-IDOR non-disclosure (404).
+  - `POST /api/migrations/{id}/resume`: Safe resume and recovery endpoint skipping already `ADDED` tracks, reusing destination playlist, enforcing multi-tenant anti-IDOR isolation (404), rejecting running/terminal statuses with 409 Conflict, and recording audit state transitions to `RUNNING`.
+- **Phase 14F Verification Delivered**:
+  - Verification of track skipping, idempotent execution, anti-IDOR security, retry/lease invariant preservation, and audit logging under PostgreSQL Testcontainers.
 - **Phase 14A & 14B Verification Status**: COMPLETE & VERIFIED (Committed and pushed in `c78bd89`).
 - **Phase 13H & 13I Verification Status**: COMPLETE & FROZEN (`mvn clean verify` passing with 2,212 total tests: 2,100 Surefire unit tests, 112 Failsafe integration tests, 0 failures, 0 errors, 0 skipped, 0 Checkstyle violations).
 - **Phase 13H Fault-Injection Test Suites (37 tests across 4 suites)**:
