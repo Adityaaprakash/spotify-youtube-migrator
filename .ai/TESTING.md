@@ -1338,3 +1338,97 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 ### 4. Git Whitespace & Newline Hygiene
 - **Command**: `git diff --check`
 - **Outcome**: **PASSED** with 0 trailing whitespace violations and 0 missing newline warnings.
+
+---
+
+## Phase 15C Authentication & Session Integration Testing Scope
+
+### 1. Unit Test Suite (`npm test`)
+- **Command**: `npm test` (`esbuild src/test/*.test.ts --bundle --platform=node --format=esm --outdir=src/test/.dist --alias:@=./src && node --test "src/test/.dist/*.test.js"`)
+- **Outcome**: **PASSED** with **30 tests passing across 15 suites in 400ms** (0 failures, 0 errors, 0 skipped).
+- **Test Suites Delivered**:
+  1. `api-client.test.ts` (7 tests):
+     - `enforces credentials: include on all requests`: Validates cookie transmission.
+     - `automatically extracts XSRF-TOKEN cookie and injects X-XSRF-TOKEN header on mutating POST`: Validates CSRF protection.
+     - `does not inject X-XSRF-TOKEN header on safe GET requests`: Validates safe GET methods bypass CSRF header.
+     - `injects Idempotency-Key header when idempotencyKey option is provided`: Validates idempotency key forwarding.
+     - `parses backend ApiError and throws strongly typed ApiException on non-2xx`: Validates error envelope parsing.
+     - `handles 204 No Content without attempting JSON parsing`: Validates empty response body safety.
+     - `appends query parameters correctly to the URL`: Validates pagination and status query encoding.
+  2. `auth.test.ts` (10 tests):
+     - Session initialization: Validates `GET /api/auth/me` returning `UserResponse` on authenticated session.
+     - Anonymous handling: Validates 401 returns empty session without crash or unhandled throw.
+     - Error distinction: Validates server 500 error propagates to error state instead of falsely confirming logout.
+     - Login workflow: Validates `POST /api/auth/login` payload transmission, returns `UserResponse`, rejects invalid credentials with 404/NOT_FOUND.
+     - Registration workflow: Validates `POST /api/auth/register` payload, automatic session establishment, rejects duplicate emails with 409 Conflict.
+     - Logout workflow: Validates `POST /api/auth/logout` sending POST with CSRF header, invalidating session.
+     - Zod schemas: Validates email formatting, required fields, password length $\ge 6$, and confirmation mismatch detection.
+  3. `oauth.test.ts` (6 tests):
+     - Status inspection: Validates `GET /api/oauth/spotify` returning connected status with user ID and expiry.
+     - Disconnected inspection: Validates `GET /api/oauth/google` returning disconnected status.
+     - Authorize retrieval: Validates `GET /api/oauth/spotify/authorize` and `/api/oauth/google/authorize` returning redirect URLs.
+     - Disconnect mutation: Validates `DELETE /api/oauth/spotify` with CSRF protection, returning 204 No Content.
+     - Failure handling: Validates provider error propagation on disconnect failure.
+  4. `routing.test.ts` (7 tests):
+     - `ProtectedRoute`: Validates unauthenticated users redirected to `/login` with `state.from` target preservation.
+     - `ProtectedRoute`: Validates authenticated users permitted through.
+     - Loading state: Validates full-page loading skeleton rendered while session query is pending.
+     - `PublicOnlyRoute`: Validates authenticated users visiting `/login` or `/register` redirected to `/dashboard` or intended destination.
+     - Session expiry: Validates 401 response on protected request triggers session expiry flag.
+     - Transient network error: Validates network errors (TypeError) do not trigger false session expiry.
+
+### 2. Static Type Checking (`npm run typecheck`)
+- **Command**: `npm run typecheck` (`tsc --noEmit`)
+- **Outcome**: **PASSED** with **0 type errors**.
+
+### 3. ESLint Static Analysis (`npm run lint`)
+- **Command**: `npm run lint` (`eslint .`)
+- **Outcome**: **PASSED** with **0 errors and 0 warnings**.
+
+---
+
+## Phase 15D Spotify Playlist Discovery & Detail Testing Scope
+
+### 1. Unit & Contract Test Suite (`npm test`)
+- **Command**: `npm test` (`esbuild src/test/*.test.ts --bundle --platform=node --format=esm --outdir=src/test/.dist --alias:@=./src && node --test "src/test/.dist/*.test.js"`)
+- **Outcome**: **PASSED** with **48 tests passing across 23 suites in 431ms** (0 failures, 0 errors, 0 skipped).
+- **Test Suites Delivered for Phase 15D** (`src/test/playlists.test.ts` - 18 tests):
+  1. `Playlist Discovery API (GET /api/spotify/playlists)`:
+     - `fetches playlists using default limit and offset`: Validates query parameters (`limit=20`, `offset=0`), response mapping (`items`, `total`, `hasNext`).
+     - `transmits custom limit and offset parameters for pagination`: Validates pagination parameters passed to endpoint.
+     - `handles empty playlist items response`: Validates empty playlist lists return cleanly without throwing.
+  2. `Playlist Detail API (GET /api/spotify/playlists/{id})`:
+     - `retrieves single playlist metadata with url encoded id`: Validates single playlist fetch, encoding, and mapping to `PlaylistDetail`.
+     - `throws ApiException with 404 when playlist does not exist`: Validates 404 error envelope parsing with strongly typed `ApiException`.
+  3. `Playlist Tracks API (GET /api/spotify/playlists/{id}/tracks)`:
+     - `retrieves playlist tracks preserving exact source ordering`: Validates track index preservation and null fields mapping (`artist`, `album`).
+     - `handles external provider errors (502 Bad Gateway) gracefully`: Validates 502 error propagation.
+  4. `Formatting & Sanitization Utilities`:
+     - `formatDuration`: Standard durations, short tracks (< 1m), long tracks (> 1h), zero ms, and null/negative fallbacks (`-:--`).
+     - `sanitizeDescription`: HTML tag stripping, HTML entity decoding (`&amp;`, `&quot;`, `&#39;`), null/empty safety.
+  5. `Track Filtering & Pagination Contract Logic`:
+     - `filters tracks by title case-insensitively`: Matches track names cleanly.
+     - `filters tracks by artist across multiple matches`: Matches multiple tracks by artist.
+     - `handles tracks with null artist or album during filtering without error`: Null metadata safety.
+     - `calculates pagination boundary conditions correctly`: Validates Next/Previous boundary conditions (`offset + limit >= total`, `!hasNext`).
+
+### 2. Static Type Checking (`npm run typecheck`)
+- **Command**: `npm run typecheck` (`tsc --noEmit`)
+- **Outcome**: **PASSED** with **0 type errors**.
+
+### 3. ESLint Static Analysis (`npm run lint`)
+- **Command**: `npm run lint` (`eslint .`)
+- **Outcome**: **PASSED** with **0 errors and 0 warnings**.
+
+### 4. Production Build Verification (`npm run build`)
+- **Command**: `npm run build` (`vite build`)
+- **Outcome**: **PASSED** cleanly in 32.11s, generated production artifacts in `dist/`.
+- **Outcome**: **PASSED** with **0 errors and 0 warnings**.
+
+### 4. Production Build Compilation (`npm run build`)
+- **Command**: `npm run build` (`vite build`)
+- **Outcome**: **PASSED** cleanly in 35.34s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
+
+### 5. Git Whitespace Hygiene
+- **Command**: `git diff --check`
+- **Outcome**: **PASSED** with 0 trailing whitespace violations and 0 newline warnings.

@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { LoginPage } from '@/features/auth/LoginPage';
+import { RegisterPage } from '@/features/auth/RegisterPage';
+import { ProtectedRoute, PublicOnlyRoute } from '@/features/auth/ProtectedRoute';
 import { DashboardPage } from '@/features/dashboard/DashboardPage';
 import { PlaylistsPage } from '@/features/playlists/PlaylistsPage';
 import { PlaylistDetailPage } from '@/features/playlists/PlaylistDetailPage';
@@ -14,11 +16,32 @@ import { NotFoundPage } from '@/features/notFound/NotFoundPage';
 export function AppRoutes() {
   return (
     <Routes>
-      {/* Public Authentication Shell */}
-      <Route path="/login" element={<LoginPage />} />
+      {/* Anonymous-only Authentication Routes */}
+      <Route
+        path="/login"
+        element={
+          <PublicOnlyRoute>
+            <LoginPage />
+          </PublicOnlyRoute>
+        }
+      />
+      <Route
+        path="/register"
+        element={
+          <PublicOnlyRoute>
+            <RegisterPage />
+          </PublicOnlyRoute>
+        }
+      />
 
-      {/* Main Application Shell with Shared Layout */}
-      <Route element={<AppLayout />}>
+      {/* Protected Application Routes requiring authenticated session */}
+      <Route
+        element={
+          <ProtectedRoute>
+            <AppLayout />
+          </ProtectedRoute>
+        }
+      >
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/playlists" element={<PlaylistsPage />} />

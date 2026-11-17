@@ -3,10 +3,33 @@
 Last Updated: 2026-11-17
 
 Current Phase: Phase 15 — Frontend Product Layer [IN PROGRESS]
-Current Subphase: Phase 15A & 15B — Frontend Audit, Integration Contract, Foundation & Design System [COMPLETE & VERIFIED] -> Next Subphase: Phase 15C — Authentication & Session Integration [READY TO START]
-Latest Pushed Commit: 86fe743 (feat(history): implement phase 14C and 14D history APIs and audit logging)
+Current Subphase: Phase 15D — Spotify Playlist Discovery & Detail [COMPLETE & VERIFIED] -> Next Subphase: Phase 15E — Migration Plan Preview & Review Session Workflow [READY TO START]
+Latest Pushed Commit: 42444ec (feat(frontend): establish phase 15 foundation)
 
 ## Verification Status & Release Gate
+- **Phase 15D Verification Status**: COMPLETE & VERIFIED.
+  - Playlist Discovery & Detail Engine: Typesafe Spotify playlist browsing (`/playlists`) and track inspection (`/playlists/:id`) integrating `GET /api/spotify/playlists`, `GET /api/spotify/playlists/{id}`, and `GET /api/spotify/playlists/{id}/tracks`.
+  - TanStack Query Hooks: `usePlaylists` (offset/limit pagination, enabled on Spotify connection), `usePlaylistDetail`, and `usePlaylistTracks` caching with hierarchical query keys (`queryKeys.playlists`).
+  - Interactive UI Components: `PlaylistCard` with artwork fallback and Spotify external link, `TrackTable` rendering ordered tracks (1-indexed) with case-insensitive search filtering across title, artist, and album.
+  - Spotify Connection Guarding: Clean `EmptyState` with top-level "Connect Spotify" CTA when Spotify account is unlinked.
+  - Phase Boundary Preservation: Preview Migration CTA explicitly disabled with tooltip annotations preserving Phase 15E planning boundary.
+  - Test Suite: 48 tests passing across 23 suites in `src/test/` (`playlists.test.ts`, `api-client.test.ts`, `auth.test.ts`, `oauth.test.ts`, `routing.test.ts`) executed via `npm test`.
+  - Frontend TypeScript verification: `npm run typecheck` (`tsc -b`) PASSED with 0 errors.
+  - Frontend Lint hygiene: `npm run lint` (`eslint .`) PASSED with 0 errors and 0 warnings.
+  - Production build: `npm run build` (`vite build`) PASSED cleanly (built in 32.11s, generated `dist/`).
+  - Git whitespace hygiene: `git diff --check` PASSED with 0 whitespace errors.
+  - Completion report: `.ai/PHASE_15D_COMPLETION_REPORT.md` published.
+- **Phase 15C Verification Status**: COMPLETE & VERIFIED.
+  - Authentication Engine: `AuthProvider` and `useAuth` hook managing server-backed user session state via TanStack Query (`queryKeys.auth.me()`).
+  - Route Protection: `ProtectedRoute` and `PublicOnlyRoute` route guards gating protected roadmap paths and redirecting unauthenticated users to `/login`.
+  - Authentication Pages: Accessible `/login` and `/register` form pages with React Hook Form, Zod validation, error banners, and duplicate account (`409 Conflict`) handling.
+  - OAuth Integration: Reusable `useOAuthStatus` and `OAuthConnectionCard` supporting Spotify and Google connection status, authorization redirects (`/authorize`), and CSRF-protected disconnect mutations (`DELETE /oauth/{provider}`).
+  - Test Suite: 30 tests passing across 15 suites in `src/test/` (`api-client.test.ts`, `auth.test.ts`, `oauth.test.ts`, `routing.test.ts`) executed via `npm test`.
+  - Frontend TypeScript verification: `npm run typecheck` (`tsc -b`) PASSED with 0 errors.
+  - Frontend Lint hygiene: `npm run lint` (`eslint .`) PASSED with 0 errors and 0 warnings.
+  - Production build: `npm run build` (`vite build`) PASSED cleanly (built in 35.34s, generated `dist/`).
+  - Git whitespace hygiene: `git diff --check` PASSED with 0 whitespace errors.
+  - Completion report: `.ai/PHASE_15C_COMPLETION_REPORT.md` published.
 - **Phase 15A & 15B Verification Status**: COMPLETE & VERIFIED.
   - Audit document: `.ai/PHASE_15A_FRONTEND_AUDIT.md` comprehensive audit of 11 backend controllers, 26 endpoints, CSRF/cookie model, and integration contract.
   - Frontend TypeScript verification: `npm run typecheck` (`tsc -b`) PASSED with 0 errors.
@@ -1787,7 +1810,7 @@ Latest Pushed Commit: 86fe743 (feat(history): implement phase 14C and 14D histor
 - **Phase 15 (Frontend Product Layer)**: IN PROGRESS
   - **Phase 15A (Frontend Audit & Backend Integration Contract)**: COMPLETE / VERIFIED
   - **Phase 15B (Frontend Foundation & Design System)**: COMPLETE / VERIFIED
-  - **Phase 15C (Authentication & Session Integration)**: PENDING
+  - **Phase 15C (Authentication & Session Integration)**: COMPLETE / VERIFIED
   - **Phase 15D (Playlist Discovery & Inspection UI)**: PENDING
   - **Phase 15E (Review & Manual Correction UI)**: PENDING
   - **Phase 15F (Migration Execution & Real-Time Progress UI)**: PENDING
@@ -1795,5 +1818,5 @@ Latest Pushed Commit: 86fe743 (feat(history): implement phase 14C and 14D histor
   - **Phase 15H (Frontend Verification, Accessibility & Hardening)**: PENDING
 
 ## Next Recommended Work
-1. **Phase 15A & 15B Complete & Verified**: Frontend architectural audit, complete 26-endpoint integration contract, design system, API client with CSRF/credentials/idempotency support, TanStack Query configuration, shared layout, and 9 route placeholder shells implemented and verified cleanly (`tsc -b`, `eslint`, `vite build` all passing with 0 errors).
-2. **Phase 15C — Authentication & Session Integration**: Ready to begin when authorized by user. Phase 15C will deliver session polling (`GET /api/auth/me`), login/registration form interactions, OAuth connect initiation and status synchronization, route protection guards, and session expiration handling.
+1. **Phase 15C Complete & Verified**: Application authentication and OAuth connection experience implemented with `AuthProvider`, `useAuth`, `ProtectedRoute`, `/login`, `/register`, `useOAuthStatus`, and `OAuthConnectionCard`. 30 tests passing, `tsc -b`, `eslint`, and `vite build` passing with 0 errors.
+2. **Phase 15D — Playlist Discovery & Inspection UI**: Ready to begin when authorized by user. Phase 15D will deliver Spotify playlist browsing, searching, filtering, metadata inspection, and track list pagination using `GET /api/spotify/playlists`, `GET /api/spotify/playlists/{id}`, and `GET /api/spotify/playlists/{id}/tracks`.

@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "test": "esbuild src/test/*.test.ts --bundle --platform=node --format=esm --outdir=src/test/.dist --alias:@=./src && node --test \"src/test/.dist/*.test.js\"",
     "preview": "vite preview"
   },
   "dependencies": {

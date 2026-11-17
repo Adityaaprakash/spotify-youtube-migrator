@@ -9,14 +9,16 @@ export interface NavItem {
   icon?: React.ComponentType<{ className?: string }>;
 }
 
+export type UserStatus = 'ACTIVE' | 'DISABLED';
+
 /**
- * Basic user profile contract matching backend UserResponse.
+ * User profile contract matching backend UserResponse.
  */
 export interface UserProfile {
   id: string;
   email: string;
-  displayName?: string | null;
-  createdAt: string;
+  displayName: string;
+  status: UserStatus;
 }
 
 /**

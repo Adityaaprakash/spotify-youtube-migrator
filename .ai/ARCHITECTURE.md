@@ -907,3 +907,53 @@ Controllers MUST NOT:
   - **Strict Phase 15B Boundary**:
     - Zero future-phase workflow mutations or live backend API calls implemented in foundation phase.
     - Route shells render structured placeholder interfaces with `PageHeader` and `EmptyState` explaining roadmap scope.
+
+## Authentication & Session Architecture (Phase 15C)
+
+- Directory: `frontend/src/features/auth/` and `frontend/src/features/oauth/`
+- Purpose: Delivers application session lifecycle management, user identity state, route protection guards, and external music provider (Spotify/Google) OAuth connection integration.
+- Architecture Rules:
+  - **Single Source of Truth (`AuthProvider` & `useAuth`)**:
+    - Backed by TanStack Query (`queryKeys.auth.me()`).
+    - Queries `GET /api/auth/me` on mount with `credentials: 'include'`.
+    - Distinguishes expected unauthenticated states (`401 Unauthorized` / `403 Forbidden`) from unexpected server/network failures. 401/403 responses cleanly yield `user = null` without triggering retries or error states.
+    - Temporary network errors preserve prior state and set an explicit error banner rather than falsely logging out the user.
+    - Exposes `user`, `isLoading`, `isAuthenticated`, `isSessionExpired`, `login`, `register`, `logout`, `refreshSession`, and `dismissSessionExpired`.
+  - **Login & Registration Lifecycle**:
+    - Forms built with React Hook Form and Zod schemas (`loginSchema`, `registerSchema`).
+    - Login maps `404 NOT_FOUND` to invalid credentials alert, maintaining user security.
+    - Registration maps `409 CONFLICT` to duplicate account field error on `email`.
+    - Successful registration immediately establishes an authenticated session (matching backend `AuthController.register` semantics) and transitions to `/dashboard`.
+    - Logout calls `POST /api/auth/logout` with CSRF protection, invalidates session query cache, clears OAuth cache, and navigates to `/login`.
+  - **Route Protection (`ProtectedRoute` and `PublicOnlyRoute`)**:
+    - `ProtectedRoute`: Gated on `!isLoading && isAuthenticated`. Holds rendering in `PageLoadingSkeleton` during session evaluation. Unauthenticated users are redirected to `/login` with `state: { from: location }`.
+    - `PublicOnlyRoute`: Prevents authenticated users from seeing `/login` or `/register`, redirecting to `/dashboard` or the prior intended destination.
+  - **External Provider OAuth Isolation (`useOAuthStatus` & `OAuthConnectionCard`)**:
+    - Strict decoupling: Application login is never conflated with music provider accounts.
+    - Status queried via `GET /api/oauth/{provider}` (`connected`, `providerUserId`, `expiresAt`, `status`).
+    - Authorize flow: Calls `GET /api/oauth/{provider}/authorize` to obtain `{ url: string }` and initiates a top-level browser redirect via `window.location.assign(url)`. Zero tokens or authorization codes are handled by client JavaScript.
+    - Disconnect flow: Calls `DELETE /api/oauth/{provider}` with CSRF header injection. Confirmed via modal dialog. Invalidates provider query cache on success.
+    - Reusable UI: `OAuthConnectionCard` renders status badges, user IDs, and connect/disconnect triggers in `SettingsPage` and `DashboardPage`. `AppHeader` displays live connection pills.
+
+## Spotify Playlist Discovery & Detail Architecture (Phase 15D)
+
+- Directory: `frontend/src/features/playlists/`
+- Purpose: Delivers Spotify playlist browsing, pagination, metadata inspection, and ordered track listing.
+- Architecture Rules:
+  - **Provider Connection Guard**:
+    - Queries `useOAuthStatus('spotify')` before issuing playlist queries.
+    - If Spotify is not connected, the UI halts background calls and renders a clean `EmptyState` with a "Connect Spotify" button.
+  - **Offset-Based Pagination Contract**:
+    - Backend `SpotifyController.getPlaylists` requires `limit` (max 50, default 20) and `offset` (0-indexed).
+    - Frontend implements pagination state (`offset`, `PAGE_SIZE = 20`) with Previous/Next controls, total playlist counts, and page indicators.
+    - Caching handled via `queryKeys.playlists.list({ limit, offset })` with 1-minute `staleTime`.
+  - **Source Track Ordering Invariant**:
+    - Backend `GET /api/spotify/playlists/{id}/tracks` returns source tracks in playlist order.
+    - `TrackTable` preserves and displays explicit 1-indexed track positions (`index + 1`).
+    - Interactive client-side search input allows filtering tracks by title, artist, or album without perturbing underlying ordering.
+  - **Graceful Metadata Fallbacks**:
+    - `PlaylistCard`: Handles missing artwork or failed image loading (`onError`) with a Spotify badge fallback.
+    - `formatDuration`: Safely converts millisecond timestamps to `m:ss` or `h:mm:ss`, handling missing or invalid durations as `-:--`.
+    - `sanitizeDescription`: Cleans up HTML tags and entities in playlist descriptions.
+  - **Strict Phase Boundary Enforcement**:
+    - Playlist detail page provides a "Preview Migration" CTA button, but it is explicitly disabled and annotated with informational guidance that review session workflows begin in Phase 15E. Zero calls are made to `/api/migrations/preview` or `/api/review-sessions`.

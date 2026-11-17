@@ -1,6 +1,6 @@
 import { ApiError, ApiException } from './types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || '/api';
 
 /**
  * Extracts the XSRF-TOKEN cookie value from document.cookie for CSRF protection.
