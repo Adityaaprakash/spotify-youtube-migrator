@@ -28,10 +28,11 @@ export function TrackTable({ tracks }: TrackTableProps) {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="relative w-full sm:w-72">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
           <Input
             type="text"
             placeholder="Search tracks, artists, albums..."
+            aria-label="Search tracks by title, artist, or album"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-9 pr-8 h-9 text-xs"
@@ -43,7 +44,7 @@ export function TrackTable({ tracks }: TrackTableProps) {
               className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground p-0.5 rounded transition-colors"
               aria-label="Clear search"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           )}
         </div>
@@ -71,8 +72,9 @@ export function TrackTable({ tracks }: TrackTableProps) {
                 <th className="py-3 px-4">Title & Artist</th>
                 <th className="py-3 px-4 hidden md:table-cell">Album</th>
                 <th className="py-3 px-4 text-right w-20">
-                  <span className="inline-flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5" />
+                  <span className="inline-flex items-center gap-1" title="Duration">
+                    <span className="sr-only">Duration</span>
+                    <Clock className="h-3.5 w-3.5" aria-hidden="true" />
                   </span>
                 </th>
               </tr>

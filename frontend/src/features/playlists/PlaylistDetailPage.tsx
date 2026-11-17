@@ -127,7 +127,7 @@ export function PlaylistDetailPage() {
                 {/* Artwork Placeholder / Thumbnail */}
                 <div className="h-32 w-32 md:h-36 md:w-36 rounded-lg bg-secondary/80 border border-border/60 flex flex-col items-center justify-center shrink-0 shadow-inner">
                   <Music className="h-12 w-12 text-spotify opacity-80" />
-                  <span className="text-[10px] uppercase font-semibold text-muted-foreground/70 tracking-widest mt-1">
+                  <span className="text-[10px] uppercase font-semibold text-muted-foreground tracking-widest mt-1">
                     Spotify
                   </span>
                 </div>

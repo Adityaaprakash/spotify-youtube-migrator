@@ -96,10 +96,11 @@ export function RegisterPage() {
                 autoComplete="name"
                 disabled={isSubmitting}
                 aria-invalid={Boolean(errors.displayName)}
+                aria-describedby={errors.displayName ? 'displayName-error' : undefined}
                 {...register('displayName')}
               />
               {errors.displayName && (
-                <p className="text-xs text-destructive mt-1">{errors.displayName.message}</p>
+                <p id="displayName-error" role="alert" className="text-xs text-destructive mt-1">{errors.displayName.message}</p>
               )}
             </div>
 
@@ -114,10 +115,11 @@ export function RegisterPage() {
                 autoComplete="email"
                 disabled={isSubmitting}
                 aria-invalid={Boolean(errors.email)}
+                aria-describedby={errors.email ? 'email-error' : undefined}
                 {...register('email')}
               />
               {errors.email && (
-                <p className="text-xs text-destructive mt-1">{errors.email.message}</p>
+                <p id="email-error" role="alert" className="text-xs text-destructive mt-1">{errors.email.message}</p>
               )}
             </div>
 
@@ -132,10 +134,11 @@ export function RegisterPage() {
                 autoComplete="new-password"
                 disabled={isSubmitting}
                 aria-invalid={Boolean(errors.password)}
+                aria-describedby={errors.password ? 'password-error' : undefined}
                 {...register('password')}
               />
               {errors.password && (
-                <p className="text-xs text-destructive mt-1">{errors.password.message}</p>
+                <p id="password-error" role="alert" className="text-xs text-destructive mt-1">{errors.password.message}</p>
               )}
             </div>
 
@@ -150,10 +153,11 @@ export function RegisterPage() {
                 autoComplete="new-password"
                 disabled={isSubmitting}
                 aria-invalid={Boolean(errors.confirmPassword)}
+                aria-describedby={errors.confirmPassword ? 'confirmPassword-error' : undefined}
                 {...register('confirmPassword')}
               />
               {errors.confirmPassword && (
-                <p className="text-xs text-destructive mt-1">{errors.confirmPassword.message}</p>
+                <p id="confirmPassword-error" role="alert" className="text-xs text-destructive mt-1">{errors.confirmPassword.message}</p>
               )}
             </div>
           </CardContent>

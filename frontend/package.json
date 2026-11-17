@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "esbuild src/test/*.test.ts --bundle --platform=node --format=esm --outdir=src/test/.dist --alias:@=./src && node --test \"src/test/.dist/*.test.js\"",
+    "test": "esbuild src/test/*.test.ts --bundle --platform=node --format=esm --packages=external --outdir=src/test/.dist --alias:@=./src && node --test \"src/test/.dist/*.test.js\"",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -24,15 +24,18 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@eslint/js": "^9.11.1",
     "@types/react": "^18.3.10",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.6.1",
+    "axe-core": "^4.14.1",
     "eslint": "^9.11.1",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.12",
     "globals": "^15.9.0",
+    "playwright": "^1.65.1",
     "postcss": "^8.5.29",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.5.3",

@@ -97,10 +97,11 @@ export function LoginPage() {
                 autoComplete="email"
                 disabled={isSubmitting}
                 aria-invalid={Boolean(errors.email)}
+                aria-describedby={errors.email ? 'email-error' : undefined}
                 {...register('email')}
               />
               {errors.email && (
-                <p className="text-xs text-destructive mt-1">{errors.email.message}</p>
+                <p id="email-error" role="alert" className="text-xs text-destructive mt-1">{errors.email.message}</p>
               )}
             </div>
 
@@ -117,10 +118,11 @@ export function LoginPage() {
                 autoComplete="current-password"
                 disabled={isSubmitting}
                 aria-invalid={Boolean(errors.password)}
+                aria-describedby={errors.password ? 'password-error' : undefined}
                 {...register('password')}
               />
               {errors.password && (
-                <p className="text-xs text-destructive mt-1">{errors.password.message}</p>
+                <p id="password-error" role="alert" className="text-xs text-destructive mt-1">{errors.password.message}</p>
               )}
             </div>
           </CardContent>

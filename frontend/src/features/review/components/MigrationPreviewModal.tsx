@@ -191,6 +191,7 @@ export function MigrationPreviewModal({
 
         <DialogFooter className="flex items-center justify-between gap-3 pt-3 border-t border-border/40">
           <Button
+            type="button"
             variant="ghost"
             size="sm"
             onClick={() => onOpenChange(false)}
@@ -200,6 +201,7 @@ export function MigrationPreviewModal({
           </Button>
 
           <Button
+            type="button"
             size="sm"
             disabled={!plan || createSessionMutation.isPending}
             onClick={handleStartReview}

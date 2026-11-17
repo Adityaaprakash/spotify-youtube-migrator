@@ -76,6 +76,7 @@ export function CandidateSearchDialog({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search by track title, artist, or YouTube keywords..."
+            aria-label="Search alternative candidate query"
             className="h-9 text-xs flex-1"
           />
           <Button

@@ -192,22 +192,24 @@ export function MigrationAuditTimeline({ executionId }: MigrationAuditTimelinePr
 
           <div className="flex items-center gap-1">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               disabled={data.first || isFetching}
               onClick={() => setPage(data.page - 1)}
               className="h-7 text-xs px-2.5 gap-1"
             >
-              <ChevronLeft className="h-3.5 w-3.5" /> Previous
+              <ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" /> Previous
             </Button>
             <Button
+              type="button"
               variant="outline"
               size="sm"
               disabled={data.last || isFetching}
               onClick={() => setPage(data.page + 1)}
               className="h-7 text-xs px-2.5 gap-1"
             >
-              Next <ChevronRight className="h-3.5 w-3.5" />
+              Next <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
             </Button>
           </div>
         </div>

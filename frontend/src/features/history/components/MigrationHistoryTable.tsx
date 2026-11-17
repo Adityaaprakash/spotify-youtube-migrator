@@ -76,7 +76,7 @@ export function MigrationHistoryTable({
                           <div className="font-semibold text-foreground line-clamp-1">
                             {item.sourcePlaylistTitle || 'Untitled Playlist'}
                           </div>
-                          <span className="text-[11px] text-muted-foreground/70 font-mono">
+                          <span className="text-[11px] text-muted-foreground font-mono">
                             {item.sourcePlaylistId}
                           </span>
                         </div>
@@ -90,9 +90,10 @@ export function MigrationHistoryTable({
                           href={item.destinationPlaylistUrl}
                           target="_blank"
                           rel="noreferrer noopener"
-                          className="inline-flex items-center gap-1 text-youtube hover:underline font-medium"
+                          aria-label={`Open destination playlist for ${item.sourcePlaylistTitle || 'migration'} on YouTube Music`}
+                          className="inline-flex items-center gap-1 text-youtube hover:underline font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
                         >
-                          YouTube Music <ExternalLink className="h-3 w-3" />
+                          YouTube Music <ExternalLink className="h-3 w-3" aria-hidden="true" />
                         </a>
                       ) : (
                         <span className="text-muted-foreground">
@@ -141,24 +142,32 @@ export function MigrationHistoryTable({
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
                       {active ? (
-                        <Link to={`/migrations/${item.migrationId}/progress`}>
+                        <Link
+                          to={`/migrations/${item.migrationId}/progress`}
+                          aria-label={`Watch live progress for ${item.sourcePlaylistTitle || 'migration'}`}
+                        >
                           <Button
+                            type="button"
                             variant="default"
                             size="sm"
                             className="h-8 gap-1.5 text-xs bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
                           >
-                            <PlaySquare className="h-3.5 w-3.5" />
+                            <PlaySquare className="h-3.5 w-3.5" aria-hidden="true" />
                             Live Progress
                           </Button>
                         </Link>
                       ) : (
-                        <Link to={`/migrations/${item.migrationId}`}>
+                        <Link
+                          to={`/migrations/${item.migrationId}`}
+                          aria-label={`View details and audit timeline for ${item.sourcePlaylistTitle || 'migration'}`}
+                        >
                           <Button
+                            type="button"
                             variant="outline"
                             size="sm"
                             className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
                           >
-                            Details <ArrowRight className="h-3 w-3" />
+                            Details <ArrowRight className="h-3 w-3" aria-hidden="true" />
                           </Button>
                         </Link>
                       )}

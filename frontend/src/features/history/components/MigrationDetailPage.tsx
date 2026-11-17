@@ -212,17 +212,25 @@ export function MigrationDetailPage() {
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               {execution.canResume ? (
                 <Button
+                  type="button"
                   size="sm"
                   onClick={() => setResumeDialogOpen(true)}
+                  aria-label={`Resume migration for ${execution.sourcePlaylistTitle || 'playlist'}`}
                   className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-xs shadow-md"
                 >
-                  <Play className="h-3.5 w-3.5" />
+                  <Play className="h-3.5 w-3.5" aria-hidden="true" />
                   Resume Migration
                 </Button>
               ) : active ? (
                 <Link to={`/migrations/${execution.executionId}/progress`}>
-                  <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-                    <PlaySquare className="h-3.5 w-3.5" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    aria-label={`Watch live progress for ${execution.sourcePlaylistTitle || 'migration'}`}
+                  >
+                    <PlaySquare className="h-3.5 w-3.5" aria-hidden="true" />
                     Live Progress
                   </Button>
                 </Link>
@@ -233,13 +241,15 @@ export function MigrationDetailPage() {
                   href={execution.destinationPlaylistUrl}
                   target="_blank"
                   rel="noreferrer noopener"
+                  aria-label={`Open destination playlist for ${execution.sourcePlaylistTitle || 'migration'} on YouTube Music`}
                 >
                   <Button
+                    type="button"
                     variant="outline"
                     size="sm"
                     className="gap-1.5 text-xs text-youtube border-youtube/30 hover:bg-youtube/10"
                   >
-                    <ExternalLink className="h-3.5 w-3.5" />
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                     YouTube Music
                   </Button>
                 </a>

@@ -41,6 +41,7 @@ export function ConfirmationDialog({
         </DialogHeader>
         <DialogFooter>
           <Button
+            type="button"
             variant="outline"
             disabled={isLoading}
             onClick={() => onOpenChange(false)}
@@ -48,6 +49,7 @@ export function ConfirmationDialog({
             {cancelLabel}
           </Button>
           <Button
+            type="button"
             variant={variant === 'destructive' ? 'destructive' : 'default'}
             isLoading={isLoading}
             onClick={onConfirm}

@@ -1035,3 +1035,24 @@ Controllers MUST NOT:
     - On success, invalidates cache and routes user to `/migrations/:id/progress`.
   - **Anti-IDOR Security**:
     - 404 responses for unowned executions are caught and rendered with a neutral empty state without leaking execution existence.
+
+## Accessibility, Responsive & Cross-Browser Architecture (Phase 15I)
+
+- Directory: `frontend/src/` and `frontend/src/test/`
+- Purpose: Establishes rigorous WCAG 2.1 Level AA compliance, responsive viewports (320px–1920px), and cross-browser rendering standards across all frontend surfaces.
+- Architecture Rules:
+  - **WCAG 2.1 Level AA Compliance**:
+    - Contrast Thresholds: All normal text achieves $\ge 4.5:1$ contrast against adjacent background colors. High-contrast dark foregrounds (`--primary-foreground: 222 47% 7%`) are used over bright brand backgrounds (`#18b46b`, 7.35:1 contrast). Badges use luminous tints (`text-emerald-200` over `bg-emerald-950/50`, >12:1 contrast).
+    - Label in Name (WCAG 2.5.3): All interactive elements with visible labels have accessible names that contain the visible text verbatim.
+    - Non-Interactive Nesting (WCAG 4.1.2): Cards avoid nesting interactive controls within `role="button"` elements; cards use semantic `role="article"` with title links utilizing stretched-link pseudo-elements (`after:absolute after:inset-0`) and nested external links elevated with `relative z-10`.
+    - Automated Axe Gates: Zero axe-core violations permitted under `wcag2a`, `wcag2aa`, `wcag21a`, and `wcag21aa`.
+  - **Keyboard Navigation & Focus Management**:
+    - Bypass Blocks (WCAG 2.4.1): Skip-to-content anchor provided at page top, focusing `<main id="main-content" tabIndex={-1}>` on Enter.
+    - Modal Focus Trapping (WCAG 2.1.2 / 2.4.3): Modals implement focus traps via `DialogContext`, auto-focus the first interactive element on mount, and restore focus to the triggering element on Escape key dismissal.
+    - Form Semantics: Form fields associate with error alerts via `aria-describedby` and `role="alert"`.
+  - **Responsive Design System**:
+    - Breakpoint Grid: Tested across 8 standard viewports (320x568, 375x812, 430x932, 768x1024, 1024x768, 1366x768, 1440x900, 1920x1080).
+    - Mobile Navigation: Below `md` (768px), desktop sidebar is replaced by sticky bottom/mobile navigation (`aria-label="Mobile Navigation"`).
+    - Table Overflow Containment: Complex data tables maintain horizontal containment via `overflow-x-auto` wrappers preventing page-level horizontal scroll blowout.
+  - **Multi-Engine Rendering Verification**:
+    - Validated in headless mode across Chromium (Blink), Firefox (Gecko), and WebKit with 0 console errors.

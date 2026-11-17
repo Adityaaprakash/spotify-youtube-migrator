@@ -162,10 +162,12 @@ export function ReviewTrackItem({
           <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
             {!isExcluded && activeCandidate && !isAccepted && (
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
                 disabled={isActionPending}
                 onClick={handleAcceptClick}
+                aria-label={`Accept Match for ${track.sourceTitle}`}
                 className="h-8 text-xs gap-1.5 border-emerald-500/40 hover:bg-emerald-500/10 hover:text-emerald-400"
               >
                 {isActionPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
@@ -174,10 +176,12 @@ export function ReviewTrackItem({
             )}
 
             <Button
+              type="button"
               variant="outline"
               size="sm"
               disabled={isActionPending}
               onClick={() => setSearchOpen(true)}
+              aria-label={activeCandidate ? `Find Alternative candidate for ${track.sourceTitle}` : `Search Candidate for ${track.sourceTitle}`}
               className="h-8 text-xs gap-1.5"
             >
               <Search className="h-3 w-3" />
@@ -186,20 +190,24 @@ export function ReviewTrackItem({
 
             {!isExcluded ? (
               <Button
+                type="button"
                 variant="ghost"
                 size="sm"
                 disabled={isActionPending}
                 onClick={handleExcludeClick}
+                aria-label={`Exclude ${track.sourceTitle} from migration`}
                 className="h-8 text-xs gap-1 text-muted-foreground hover:text-destructive"
               >
                 <Ban className="h-3 w-3" /> Exclude
               </Button>
             ) : (
               <Button
+                type="button"
                 variant="ghost"
                 size="sm"
                 disabled={isActionPending}
                 onClick={handleAcceptClick}
+                aria-label={`Restore Track: ${track.sourceTitle}`}
                 className="h-8 text-xs gap-1 text-muted-foreground hover:text-foreground"
               >
                 Restore Track

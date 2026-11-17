@@ -23,7 +23,7 @@ function getStatusBadge(status: MigrationExecutionStatus) {
       );
     case 'RUNNING':
       return (
-        <Badge variant="default" size="sm" className="gap-1.5 font-semibold animate-pulse">
+        <Badge variant="default" size="sm" className="gap-1.5 font-semibold">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Inserting Tracks...
         </Badge>
       );
@@ -82,7 +82,7 @@ export function LiveProgressBar({ progress }: LiveProgressBarProps) {
   return (
     <div className="space-y-4 rounded-xl border border-border/80 bg-card p-6 shadow-sm">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="space-y-1">
+        <div className="space-y-1" aria-live="polite" aria-atomic="true">
           <div className="flex items-center gap-2.5">
             <h3 className="text-lg font-bold text-foreground">Live Migration Progress</h3>
             {getStatusBadge(progress.status)}
@@ -109,7 +109,14 @@ export function LiveProgressBar({ progress }: LiveProgressBarProps) {
       </div>
 
       {/* Progress track */}
-      <div className="h-3 w-full bg-secondary rounded-full overflow-hidden p-0.5">
+      <div
+        role="progressbar"
+        aria-valuenow={percentage}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Migration execution progress"
+        className="h-3 w-full bg-secondary rounded-full overflow-hidden p-0.5"
+      >
         <div
           className={`h-full rounded-full transition-all duration-500 ease-out ${
             isComplete

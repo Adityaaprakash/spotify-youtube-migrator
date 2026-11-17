@@ -16,7 +16,12 @@ export const Label = forwardRef<HTMLLabelElement, LabelProps>(
       {...props}
     >
       {children}
-      {required && <span className="text-destructive font-bold">*</span>}
+      {required && (
+        <>
+          <span className="text-destructive font-bold" aria-hidden="true">*</span>
+          <span className="sr-only">(required)</span>
+        </>
+      )}
     </label>
   )
 );

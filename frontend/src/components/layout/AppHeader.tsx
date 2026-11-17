@@ -25,13 +25,18 @@ export function AppHeader() {
         </Link>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <Link to="/settings" className="hover:opacity-85 transition-opacity">
+          <Link
+            to="/settings"
+            aria-label={`Spotify connection: ${spotify.isConnected ? 'Connected' : 'Offline'}`}
+            className="hover:opacity-85 transition-opacity"
+          >
             <Badge
               variant={spotify.isConnected ? 'spotify' : 'outline'}
               size="sm"
               className="gap-1.5"
             >
               <span
+                aria-hidden="true"
                 className={`h-1.5 w-1.5 rounded-full ${
                   spotify.isConnected ? 'bg-white' : 'bg-muted-foreground'
                 }`}
@@ -41,13 +46,18 @@ export function AppHeader() {
             </Badge>
           </Link>
 
-          <Link to="/settings" className="hover:opacity-85 transition-opacity">
+          <Link
+            to="/settings"
+            aria-label={`YouTube Music connection: ${google.isConnected ? 'Connected' : 'Offline'}`}
+            className="hover:opacity-85 transition-opacity"
+          >
             <Badge
               variant={google.isConnected ? 'youtube' : 'outline'}
               size="sm"
               className="gap-1.5"
             >
               <span
+                aria-hidden="true"
                 className={`h-1.5 w-1.5 rounded-full ${
                   google.isConnected ? 'bg-white' : 'bg-muted-foreground'
                 }`}

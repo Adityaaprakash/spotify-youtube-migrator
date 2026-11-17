@@ -105,6 +105,7 @@ export function ResumeMigrationDialog({
 
         <DialogFooter className="gap-2">
           <Button
+            type="button"
             variant="outline"
             size="sm"
             disabled={isPending}
@@ -113,6 +114,7 @@ export function ResumeMigrationDialog({
             Cancel
           </Button>
           <Button
+            type="button"
             size="sm"
             disabled={isPending}
             onClick={handleConfirm}

@@ -29,7 +29,7 @@ function getTrackStatusBadge(status: string) {
       );
     case 'ADDING':
       return (
-        <Badge variant="default" size="sm" className="gap-1 text-[10px] animate-pulse">
+        <Badge variant="default" size="sm" className="gap-1 text-[10px]">
           <Loader2 className="h-3 w-3 animate-spin" /> Adding...
         </Badge>
       );
@@ -85,19 +85,22 @@ export function ExecutionTrackTable({ tracks }: ExecutionTrackTableProps) {
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div className="relative w-full sm:w-72">
-          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" aria-hidden="true" />
           <Input
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Filter executed tracks..."
+            aria-label="Filter executed tracks"
             className="pl-8 pr-8 h-8 text-xs"
           />
           {searchTerm && (
             <button
+              type="button"
               onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground"
+              className="absolute right-2.5 top-2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
+              aria-label="Clear filter"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           )}
         </div>

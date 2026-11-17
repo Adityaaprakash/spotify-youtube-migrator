@@ -27,12 +27,14 @@ export function ReviewProgressSummaryCard({
 }: ReviewProgressSummaryCardProps) {
   const isCompleted = sessionStatus === 'COMPLETED';
   const isEligible = progress.eligibleForCompletion || isCompleted;
-  const resolvedCount =
-    progress.totalTracks - progress.remainingRequiredDecisions - progress.unresolvedConflictCount;
-  const progressPercent =
-    progress.totalTracks > 0
-      ? Math.min(100, Math.round((resolvedCount / progress.totalTracks) * 100))
-      : 0;
+  const remaining = Number(progress.remainingRequiredDecisions ?? (progress as unknown as { awaitingReviewCount?: number }).awaitingReviewCount ?? 0);
+  const conflicts = Number(progress.unresolvedConflictCount ?? 0);
+  const total = Number(progress.totalTracks ?? 0);
+  const resolvedCount = (progress as unknown as { resolvedCount?: number }).resolvedCount !== undefined
+    ? Number((progress as unknown as { resolvedCount?: number }).resolvedCount)
+    : Math.max(0, total - remaining - conflicts);
+  const rawPercent = total > 0 ? Math.round((resolvedCount / total) * 100) : 0;
+  const progressPercent = Number.isFinite(rawPercent) ? Math.min(100, Math.max(0, rawPercent)) : 0;
 
   return (
     <Card className="border-border/80 bg-card shadow-sm overflow-hidden">
@@ -98,7 +100,14 @@ export function ReviewProgressSummaryCard({
               {progress.totalTracks - progress.remainingRequiredDecisions} of {progress.totalTracks} tracks ready
             </span>
           </div>
-          <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
+          <div
+            role="progressbar"
+            aria-valuenow={progressPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Track review resolution progress"
+            className="h-2 w-full bg-secondary rounded-full overflow-hidden"
+          >
             <div
               className={`h-full transition-all duration-300 rounded-full ${
                 isEligible ? 'bg-emerald-500' : 'bg-primary'

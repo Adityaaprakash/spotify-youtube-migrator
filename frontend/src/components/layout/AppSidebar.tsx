@@ -40,7 +40,7 @@ export function AppSidebar() {
         <div className="px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
           Navigation
         </div>
-        <nav className="space-y-1">
+        <nav aria-label="Sidebar Navigation" className="space-y-1">
           {navigationItems.map((item) => (
             <NavLink
               key={item.href}

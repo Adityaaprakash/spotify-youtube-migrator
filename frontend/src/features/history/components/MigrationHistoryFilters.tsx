@@ -35,6 +35,8 @@ export function MigrationHistoryFilters({
         return (
           <Button
             key={option.value || 'all'}
+            type="button"
+            aria-pressed={isActive}
             variant={isActive ? 'default' : 'outline'}
             size="sm"
             disabled={isLoading}
