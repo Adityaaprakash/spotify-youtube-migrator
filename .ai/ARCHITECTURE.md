@@ -999,3 +999,39 @@ Controllers MUST NOT:
     - `GET /api/migrations/{id}` retrieves aggregate migration metrics and destination YouTube playlist URLs upon completion.
     - `ExecutionSummaryCard` provides direct external links to YouTube Music and diagnostic failure summaries.
     - Anti-IDOR non-disclosure: 404 responses for unowned executions are rendered with neutral empty states without leaking metadata.
+
+## Migration History Architecture (Phase 15G)
+
+- Directory: `frontend/src/features/history/`
+- Purpose: Delivers paginated migration history, status filtering, execution details, and navigation between active runs and historical records.
+- Architecture Rules:
+  - **Paged History Contract**:
+    - Backend `MigrationHistoryController` exposes `GET /api/migrations` (and `/api/migrations/history`) accepting `page` (0-indexed), `size`, `status`, and `sort`.
+    - Returns `PagedResponse<MigrationHistoryItemResponse>` with `content`, `page`, `size`, `totalElements`, and `totalPages`.
+    - Client hook `useMigrationHistory(params)` caches data under `queryKeys.migrations.history(params)` with 30s `staleTime`.
+  - **Status Badge & Visual Classification**:
+    - `MigrationStatusBadge` encapsulates color-coding and icons for all 10 `MigrationExecutionStatus` states.
+    - Status filtering component `MigrationHistoryFilters` allows one-click filtering.
+  - **Contextual Actions & Navigation**:
+    - Active executions (`RUNNING`, `QUEUED`, `ALLOCATING_DESTINATION`) display direct CTA to `/migrations/:id/progress`.
+    - Terminal executions display CTA to `/migrations/:id` detail view.
+
+## Audit Timeline & Safe Recovery Architecture (Phase 15H)
+
+- Directory: `frontend/src/features/history/`
+- Purpose: Delivers chronological state transition audit timelines, historical track outcomes, and safe recovery/resumption for eligible executions.
+- Architecture Rules:
+  - **Chronological Audit Timeline**:
+    - `GET /api/migrations/{id}/history` returns `PagedResponse<MigrationAuditEventResponse>` ordered by default as `createdAt,asc`.
+    - `MigrationAuditTimeline` visualizes events with actor indicators (`USER`, `WORKER`, `SYSTEM`), state transitions (`previousState -> newState`), reason diagnostics, and correlation IDs.
+  - **Itemized Historical Track Outcomes**:
+    - `GET /api/migrations/{id}/tracks` returns list ordered by `targetPosition ASC`.
+    - Reuses `ExecutionTrackTable` to inspect track decisions, match scores, attempt counts, and error messages.
+  - **Safe Resume & Recovery Invariants**:
+    - Controlled by `canResume` boolean from `MigrationExecutionResponse`.
+    - User clicks "Resume Migration" triggering `ResumeMigrationDialog` explaining track skipping and playlist reuse.
+    - Mutating call `POST /api/migrations/{id}/resume` transmits CSRF token (`X-XSRF-TOKEN`).
+    - Backend rejects invalid resumption attempts with `409 CONFLICT` (if already `RUNNING`, `COMPLETED`, `ROLLED_BACK`, or if `uncertainInsertions > 0`), which the UI handles cleanly via an inline error banner.
+    - On success, invalidates cache and routes user to `/migrations/:id/progress`.
+  - **Anti-IDOR Security**:
+    - 404 responses for unowned executions are caught and rendered with a neutral empty state without leaking execution existence.

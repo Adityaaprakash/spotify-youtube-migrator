@@ -3,10 +3,27 @@
 Last Updated: 2026-11-17
 
 Current Phase: Phase 15 — Frontend Product Layer [IN PROGRESS]
-Current Subphase: Phase 15E (Migration Preview & Review) & Phase 15F (Execution & Live Progress) [COMPLETE & VERIFIED] -> Next Subphase: Phase 15G — History, Analytics & Rollback UI [READY TO START]
+Current Subphase: Phase 15G (Migration History) & Phase 15H (Audit Timeline & Safe Recovery) [COMPLETE & VERIFIED] -> Next Subphase: Phase 15 Review & Commit / Phase 16 [PENDING]
 Latest Pushed Commit: 89a9e2d (feat(frontend): implement Phase 15C auth & 15D playlist discovery)
 
 ## Verification Status & Release Gate
+- **Phase 15H Verification Status**: COMPLETE & VERIFIED.
+  - Chronological Audit Timeline: `GET /api/migrations/{id}/history` paginated audit events with event badges, actor classification (`USER`, `WORKER`, `SYSTEM`), explicit state transitions (`previousState -> newState`), diagnostic reasons, and correlation IDs.
+  - Itemized Historical Track Outcomes: `GET /api/migrations/{id}/tracks` ordered by canonical target position (`targetPosition ASC`) with match details, attempt counts, and error diagnostic messages.
+  - Safe Resume & Recovery: `POST /api/migrations/{id}/resume` CSRF-protected mutation enabled strictly when `execution.canResume` is true; skips already inserted tracks, reuses existing destination playlist, prevents resumption on active/terminal/uncertain executions (409 Conflict), and routes directly to `/migrations/:id/progress`.
+  - Anti-IDOR Security: 404 non-disclosure for unowned executions across timeline, track outcomes, and resume triggers.
+  - Test Suite: 8 dedicated tests in `src/test/timeline-and-resume.test.ts` (83 total frontend tests passing across 40 suites).
+  - TypeScript & Lint: 0 type errors, 0 lint warnings.
+  - Production build: `npm run build` PASSED cleanly in 32.56s.
+  - Completion report: `.ai/PHASE_15H_COMPLETION_REPORT.md` published.
+- **Phase 15G Verification Status**: COMPLETE & VERIFIED.
+  - Paged Migration History: `GET /api/migrations` (and `/api/migrations/history`) with 0-indexed pagination, reverse-chronological ordering, and status filtering (`INITIALIZED`, `QUEUED`, `ALLOCATING_DESTINATION`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `ROLLED_BACK`, `PARTIALLY_COMPLETED`, `RECOVERY_REQUIRED`).
+  - Migration History Table: Responsive table rendering source/destination playlist info with external YouTube link, status chips, track outcome metrics (`successful / totalSourceTracks`), timestamps, and contextual actions ("Live Progress" for active, "Details" for terminal).
+  - Authoritative Execution Detail: `GET /api/migrations/{id}` powering `/migrations/:id` with aggregate metrics, failure summary banner, active progress link, and tabbed view for Track Outcomes and Audit Timeline.
+  - Test Suite: 6 dedicated tests in `src/test/history.test.ts` (83 total frontend tests passing across 40 suites).
+  - TypeScript & Lint: 0 type errors, 0 lint warnings.
+  - Production build: `npm run build` PASSED cleanly in 32.56s.
+  - Completion report: `.ai/PHASE_15G_COMPLETION_REPORT.md` published.
 - **Phase 15F Verification Status**: COMPLETE & VERIFIED.
   - Execution Submission & Idempotency: `POST /api/migrations` dispatching approved, completed review sessions with fresh RFC 4122 UUID `Idempotency-Key` headers preventing duplicate executions.
   - Live Real-Time Progress: `useMigrationProgress` polling `GET /api/migrations/{id}/progress` every 1,500 ms with automatic safe cessation on terminal statuses (`COMPLETED`, `FAILED`, `ROLLED_BACK`, `PARTIALLY_COMPLETED`, `RECOVERY_REQUIRED`).
@@ -1831,12 +1848,12 @@ Latest Pushed Commit: 89a9e2d (feat(frontend): implement Phase 15C auth & 15D pl
   - **Phase 15A (Frontend Audit & Backend Integration Contract)**: COMPLETE / VERIFIED
   - **Phase 15B (Frontend Foundation & Design System)**: COMPLETE / VERIFIED
   - **Phase 15C (Authentication & Session Integration)**: COMPLETE / VERIFIED
-  - **Phase 15D (Playlist Discovery & Inspection UI)**: PENDING
-  - **Phase 15E (Review & Manual Correction UI)**: PENDING
-  - **Phase 15F (Migration Execution & Real-Time Progress UI)**: PENDING
-  - **Phase 15G (History, Analytics & Rollback UI)**: PENDING
-  - **Phase 15H (Frontend Verification, Accessibility & Hardening)**: PENDING
+  - **Phase 15D (Playlist Discovery & Inspection UI)**: COMPLETE / VERIFIED
+  - **Phase 15E (Review & Manual Correction UI)**: COMPLETE / VERIFIED
+  - **Phase 15F (Migration Execution & Real-Time Progress UI)**: COMPLETE / VERIFIED
+  - **Phase 15G (Migration History UI)**: COMPLETE / VERIFIED
+  - **Phase 15H (Audit Timeline, Safe Recovery & Frontend Hardening)**: IMPLEMENTATION VERIFIED (Hardening/WCAG 2.1 AA/Freeze PENDING)
 
 ## Next Recommended Work
-1. **Phase 15C Complete & Verified**: Application authentication and OAuth connection experience implemented with `AuthProvider`, `useAuth`, `ProtectedRoute`, `/login`, `/register`, `useOAuthStatus`, and `OAuthConnectionCard`. 30 tests passing, `tsc -b`, `eslint`, and `vite build` passing with 0 errors.
-2. **Phase 15D — Playlist Discovery & Inspection UI**: Ready to begin when authorized by user. Phase 15D will deliver Spotify playlist browsing, searching, filtering, metadata inspection, and track list pagination using `GET /api/spotify/playlists`, `GET /api/spotify/playlists/{id}`, and `GET /api/spotify/playlists/{id}/tracks`.
+1. **Phase 15G & Phase 15H Implementation Complete & Verified**: Migration history browsing, filtering, pagination, execution details, itemized track outcomes, chronological audit timeline, and safe resume/recovery implemented and verified with 83 automated frontend tests, zero TypeScript errors, zero lint warnings, and clean production build.
+2. **Phase 15H Final Verification & Phase Freeze**: Execute WCAG 2.1 AA accessibility audit, responsive and cross-browser testing, and formal Phase 15 freeze before proceeding to Phase 16.

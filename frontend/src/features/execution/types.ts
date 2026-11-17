@@ -101,6 +101,7 @@ export interface MigrationExecutionDetail {
   failedInsertions: number;
   uncertainInsertions: number;
   skippedInsertions: number;
+  rolledBackInsertions?: number;
   fullySuccessful: boolean;
   canResume: boolean;
   canRollback: boolean;

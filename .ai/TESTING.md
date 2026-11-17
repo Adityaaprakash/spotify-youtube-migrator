@@ -1481,3 +1481,48 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 ### 5. Git Whitespace Hygiene
 - **Command**: `git diff --check`
 - **Outcome**: **PASSED** with 0 trailing whitespace violations and 0 newline warnings.
+
+---
+
+## Phase 15G & Phase 15H Migration History, Audit Timeline & Safe Recovery Testing Scope
+
+### 1. Unit & Contract Test Suite (`npm test`)
+- **Command**: `npm test` (`esbuild src/test/*.test.ts --bundle --platform=node --format=esm --outdir=src/test/.dist --alias:@=./src && node --test "src/test/.dist/*.test.js"`)
+- **Outcome**: **PASSED** with **83 tests passing across 40 suites in 477ms** (0 failures, 0 errors, 0 skipped).
+- **Test Suites Delivered for Phase 15G** (`src/test/history.test.ts` - 6 tests across 2 suites):
+  1. `Migration History API (GET /api/migrations)`:
+     - `retrieves paginated migration history with correct metadata`: Validates `page=0&size=20&sort=createdAt%2Cdesc`, content items, page size, totalElements, and totalPages.
+     - `filters migration history by execution status`: Validates querying with status parameter (`status=COMPLETED`).
+     - `handles empty migration history response`: Validates empty content array.
+     - `renders correct status badges across all 10 execution statuses`: Validates status rendering safety for all 10 enum values.
+  2. `Migration History Detail (GET /api/migrations/:id)`:
+     - `retrieves complete execution details for historical record`: Validates execution details, timestamps, metrics, destination URL, and `canResume` flag.
+     - `handles 404 anti-IDOR non-disclosure gracefully`: Validates 404 error envelope when unowned execution is requested.
+- **Test Suites Delivered for Phase 15H** (`src/test/timeline-and-resume.test.ts` - 8 tests across 3 suites):
+  1. `Chronological Audit Timeline (GET /api/migrations/:id/history)`:
+     - `retrieves chronological audit events for migration execution`: Validates 0-indexed pagination, event order, actor classification, previousState/newState transitions, and correlation IDs.
+     - `handles 404 anti-IDOR non-disclosure on audit timeline`: Validates 404 error envelope when unowned timeline is requested.
+  2. `Historical Track Outcomes (GET /api/migrations/:id/tracks)`:
+     - `retrieves track outcomes ordered by target position with match details`: Validates canonical target position ordering, destination metadata, and match scores.
+  3. `Safe Resume and Recovery (POST /api/migrations/:id/resume)`:
+     - `resumes eligible unfinished migration execution transmitting CSRF header`: Validates `X-XSRF-TOKEN` injection, successful response, and state transition to running.
+     - `rejects resume when execution is already RUNNING with 409 Conflict`: Validates conflict propagation.
+     - `rejects resume when execution is already COMPLETED with 409 Conflict`: Validates conflict propagation on terminal state.
+     - `rejects resume when execution has been ROLLED_BACK with 409 Conflict`: Validates conflict propagation on rolled back state.
+     - `handles 404 anti-IDOR non-disclosure when resuming unowned execution`: Validates 404 non-disclosure on unowned execution.
+
+### 2. Static Type Checking (`npm run typecheck`)
+- **Command**: `npm run typecheck` (`tsc --noEmit`)
+- **Outcome**: **PASSED** with **0 type errors**.
+
+### 3. ESLint Static Analysis (`npm run lint`)
+- **Command**: `npm run lint` (`eslint .`)
+- **Outcome**: **PASSED** with **0 errors and 0 warnings**.
+
+### 4. Production Build Verification (`npm run build`)
+- **Command**: `npm run build` (`vite build`)
+- **Outcome**: **PASSED** cleanly in 32.56s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
+
+### 5. Git Whitespace Hygiene
+- **Command**: `git diff --check`
+- **Outcome**: **PASSED** with 0 trailing whitespace violations and 0 newline warnings.
