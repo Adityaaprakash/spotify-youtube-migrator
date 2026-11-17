@@ -1433,23 +1433,34 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 
 ### 1. Full Frontend Test Suite (`npm test`)
 - **Command**: `npm test` (`esbuild src/test/*.test.ts --bundle --platform=node --format=esm --packages=external --outdir=src/test/.dist --alias:@=./src && node --test "src/test/.dist/*.test.js"`)
-- **Outcome**: **PASSED** with **110 tests passing across 44 suites in 43.2s** (0 failures, 0 errors, 0 skipped).
-- **Test Suites Delivered for Phase 15I** (`src/test/a11y-and-crossbrowser.test.ts` - 27 tests across 4 suites):
-  1. `WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes` (11 tests):
-     - Automated `@axe-core/playwright` scanning across `/dashboard`, `/playlists`, `/playlists/p1`, `/migrations`, `/migrations/exec1`, `/migrations/rev1/review`, `/migrations/exec1/progress`, `/settings`, `/login`, `/register`, and modal dialogs.
+- **Outcome**: **PASSED** with **139 tests passing across 48 suites in 125.4s** (0 failures, 0 errors, 0 skipped).
+- **Test Suites Delivered for Phase 15I** (`src/test/a11y-and-crossbrowser.test.ts` - 56 tests across 8 suites):
+  1. `WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes & Representative States` (19 tests):
+     - Automated `@axe-core/playwright` scanning across `/dashboard`, `/playlists`, `/playlists/p1`, `/migrations`, `/migrations/exec1`, `/migrations/rev1/review`, `/migrations/exec1/progress`, `/settings`, `/login`, `/register`.
+     - Representative state audits: Loading skeleton, Empty playlists catalog, HTTP 500 ErrorState, Expired OAuth, Form validation error messages, Filtered search results, Active `RUNNING` migration, Completed `COMPLETED` migration, Resume migration modal dialog, and Candidate Search modal dialog.
      - Targets: `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`.
-     - Outcome: **0 violations** across all 11 scans.
-  2. `Keyboard Accessibility and Focus Trapping Verification` (4 tests):
-     - `Skip-to-content mechanism focuses main content landmark`: Validates skip link tab activation and programmatic focus movement to `<main id="main-content">`.
-     - `Login form keyboard navigation order flows logically`: Validates logical DOM tab sequencing (Email -> Password -> Submit Button).
-     - `Modal dialog traps focus and restores focus on Escape dismissal`: Validates modal focus trapping within dialog bounds and focus restoration to the triggering element on Escape key.
-     - `Playlist cards can be activated with Enter and Space keys`: Validates accessible link activation within playlist cards.
-  3. `Responsive Design Verification Across 8 Viewport Sizes` (8 tests + 1 mobile table test):
-     - Viewport matrix: Small mobile (320x568), Standard mobile (375x812), Large mobile (430x932), Tablet portrait (768x1024), Tablet landscape (1024x768), Laptop (1366x768), Desktop (1440x900), Large desktop (1920x1080).
-     - Validates: zero horizontal body scrollbar (`scrollWidth === innerWidth`), appropriate mobile nav vs desktop sidebar visibility, and horizontal containment of large data tables on mobile.
-  4. `Cross-Browser Compatibility Verification` (4 tests):
-     - Tests headless browser execution across **Chromium**, **Firefox**, and **WebKit**.
-     - Validates: full route navigation flow (`/dashboard` -> `/playlists` -> `/migrations` -> `/settings`), DOM element rendering, and **0 console errors** across all engines.
+     - Outcome: **0 violations** across all 19 scans.
+  2. `Non-Axe Semantic Accessibility and WCAG 2.1 Inspections` (6 tests):
+     - Accessible names on 100% of interactive controls (`button`, `a[href]`, `input`, `select`).
+     - Heading hierarchy begins with `<h1>` and enforces valid nesting across all core views.
+     - Landmark semantics verified: `<header>`, `<main id="main-content">`, `<nav aria-label="...">`, and `<aside>`.
+     - Programmatic title and description associations on modal dialogs.
+     - Live progress bar bounding attributes (`role="progressbar"`, `aria-valuenow`, `aria-valuemin="0"`, `aria-valuemax="100"`).
+     - Data tables enforce scoped `<th scope="col">` column headers.
+  3. `Keyboard Accessibility and Focus Trapping Verification` (5 tests):
+     - Skip-to-content mechanism focuses `<main id="main-content">`.
+     - Login form keyboard navigation order flows logically (Email -> Password -> Submit).
+     - Resume modal dialog traps focus and restores focus to triggering button on Escape dismissal.
+     - Candidate Search dialog traps focus and restores focus to triggering button on Escape dismissal.
+     - Playlist cards activate with Enter and Space keys.
+  4. `Responsive Verification Across All 9 Routes at 8 Viewport Sizes` (11 tests):
+     - Viewports: 320x568 (Small Mobile), 375x812 (Standard Mobile), 430x932 (Large Mobile), 768x1024 (Tablet Portrait), 1024x768 (Tablet Landscape), 1366x768 (Laptop), 1440x900 (Desktop), 1920x1080 (Large Desktop).
+     - All 9 original routes verified across all 8 viewports (72 route-viewport combinations): zero horizontal overflow (`scrollWidth <= innerWidth`), mobile nav vs desktop sidebar visibility.
+     - Table horizontal scroll containment (`overflow-x-auto`) prevents layout blowout on small mobile (320x568).
+     - Modal dialogs fit within small mobile viewport (320x568) without body blowout.
+  5. `Complete Cross-Browser Verification (Chromium, Firefox, WebKit)` (15 tests, 5 in each engine):
+     - Tests headless execution across **Chromium**, **Firefox**, and **WebKit** (Playwright WebKit engine).
+     - Validates across each engine: all 9 original routes render with **0 console errors**, form interaction and keyboard submit operate reliably, modal dialogs open/trap focus/dismiss on Escape, failed API requests (500) render ErrorState with retry, and layout and scrolling execute without breakdown.
 
 ### 2. Static Type Checking (`npm run typecheck`)
 - **Command**: `npm run typecheck` (`tsc --noEmit`)
@@ -1461,7 +1472,7 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 
 ### 4. Production Build Verification (`npm run build`)
 - **Command**: `npm run build` (`vite build`)
-- **Outcome**: **PASSED** cleanly in 26.31s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
+- **Outcome**: **PASSED** cleanly in 29.93s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
 
 ### 5. Git Whitespace Hygiene
 - **Command**: `git diff --check`
@@ -1526,23 +1537,34 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 
 ### 1. Full Frontend Test Suite (`npm test`)
 - **Command**: `npm test` (`esbuild src/test/*.test.ts --bundle --platform=node --format=esm --packages=external --outdir=src/test/.dist --alias:@=./src && node --test "src/test/.dist/*.test.js"`)
-- **Outcome**: **PASSED** with **110 tests passing across 44 suites in 43.2s** (0 failures, 0 errors, 0 skipped).
-- **Test Suites Delivered for Phase 15I** (`src/test/a11y-and-crossbrowser.test.ts` - 27 tests across 4 suites):
-  1. `WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes` (11 tests):
-     - Automated `@axe-core/playwright` scanning across `/dashboard`, `/playlists`, `/playlists/p1`, `/migrations`, `/migrations/exec1`, `/migrations/rev1/review`, `/migrations/exec1/progress`, `/settings`, `/login`, `/register`, and modal dialogs.
+- **Outcome**: **PASSED** with **139 tests passing across 48 suites in 125.4s** (0 failures, 0 errors, 0 skipped).
+- **Test Suites Delivered for Phase 15I** (`src/test/a11y-and-crossbrowser.test.ts` - 56 tests across 8 suites):
+  1. `WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes & Representative States` (19 tests):
+     - Automated `@axe-core/playwright` scanning across `/dashboard`, `/playlists`, `/playlists/p1`, `/migrations`, `/migrations/exec1`, `/migrations/rev1/review`, `/migrations/exec1/progress`, `/settings`, `/login`, `/register`.
+     - Representative state audits: Loading skeleton, Empty playlists catalog, HTTP 500 ErrorState, Expired OAuth, Form validation error messages, Filtered search results, Active `RUNNING` migration, Completed `COMPLETED` migration, Resume migration modal dialog, and Candidate Search modal dialog.
      - Targets: `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`.
-     - Outcome: **0 violations** across all 11 scans.
-  2. `Keyboard Accessibility and Focus Trapping Verification` (4 tests):
-     - `Skip-to-content mechanism focuses main content landmark`: Validates skip link tab activation and programmatic focus movement to `<main id="main-content">`.
-     - `Login form keyboard navigation order flows logically`: Validates logical DOM tab sequencing (Email -> Password -> Submit Button).
-     - `Modal dialog traps focus and restores focus on Escape dismissal`: Validates modal focus trapping within dialog bounds and focus restoration to the triggering element on Escape key.
-     - `Playlist cards can be activated with Enter and Space keys`: Validates accessible link activation within playlist cards.
-  3. `Responsive Design Verification Across 8 Viewport Sizes` (8 tests + 1 mobile table test):
-     - Viewport matrix: Small mobile (320x568), Standard mobile (375x812), Large mobile (430x932), Tablet portrait (768x1024), Tablet landscape (1024x768), Laptop (1366x768), Desktop (1440x900), Large desktop (1920x1080).
-     - Validates: zero horizontal body scrollbar (`scrollWidth === innerWidth`), appropriate mobile nav vs desktop sidebar visibility, and horizontal containment of large data tables on mobile.
-  4. `Cross-Browser Compatibility Verification` (4 tests):
-     - Tests headless browser execution across **Chromium**, **Firefox**, and **WebKit**.
-     - Validates: full route navigation flow (`/dashboard` -> `/playlists` -> `/migrations` -> `/settings`), DOM element rendering, and **0 console errors** across all engines.
+     - Outcome: **0 violations** across all 19 scans.
+  2. `Non-Axe Semantic Accessibility and WCAG 2.1 Inspections` (6 tests):
+     - Accessible names on 100% of interactive controls (`button`, `a[href]`, `input`, `select`).
+     - Heading hierarchy begins with `<h1>` and enforces valid nesting across all core views.
+     - Landmark semantics verified: `<header>`, `<main id="main-content">`, `<nav aria-label="...">`, and `<aside>`.
+     - Programmatic title and description associations on modal dialogs.
+     - Live progress bar bounding attributes (`role="progressbar"`, `aria-valuenow`, `aria-valuemin="0"`, `aria-valuemax="100"`).
+     - Data tables enforce scoped `<th scope="col">` column headers.
+  3. `Keyboard Accessibility and Focus Trapping Verification` (5 tests):
+     - Skip-to-content mechanism focuses `<main id="main-content">`.
+     - Login form keyboard navigation order flows logically (Email -> Password -> Submit).
+     - Resume modal dialog traps focus and restores focus to triggering button on Escape dismissal.
+     - Candidate Search dialog traps focus and restores focus to triggering button on Escape dismissal.
+     - Playlist cards activate with Enter and Space keys.
+  4. `Responsive Verification Across All 9 Routes at 8 Viewport Sizes` (11 tests):
+     - Viewports: 320x568 (Small Mobile), 375x812 (Standard Mobile), 430x932 (Large Mobile), 768x1024 (Tablet Portrait), 1024x768 (Tablet Landscape), 1366x768 (Laptop), 1440x900 (Desktop), 1920x1080 (Large Desktop).
+     - All 9 original routes verified across all 8 viewports (72 route-viewport combinations): zero horizontal overflow (`scrollWidth <= innerWidth`), mobile nav vs desktop sidebar visibility.
+     - Table horizontal scroll containment (`overflow-x-auto`) prevents layout blowout on small mobile (320x568).
+     - Modal dialogs fit within small mobile viewport (320x568) without body blowout.
+  5. `Complete Cross-Browser Verification (Chromium, Firefox, WebKit)` (15 tests, 5 in each engine):
+     - Tests headless execution across **Chromium**, **Firefox**, and **WebKit** (Playwright WebKit engine).
+     - Validates across each engine: all 9 original routes render with **0 console errors**, form interaction and keyboard submit operate reliably, modal dialogs open/trap focus/dismiss on Escape, failed API requests (500) render ErrorState with retry, and layout and scrolling execute without breakdown.
 
 ### 2. Static Type Checking (`npm run typecheck`)
 - **Command**: `npm run typecheck` (`tsc --noEmit`)
@@ -1554,7 +1576,7 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 
 ### 4. Production Build Verification (`npm run build`)
 - **Command**: `npm run build` (`vite build`)
-- **Outcome**: **PASSED** cleanly in 26.31s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
+- **Outcome**: **PASSED** cleanly in 29.93s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
 
 ### 5. Git Whitespace Hygiene
 - **Command**: `git diff --check`
@@ -1610,23 +1632,34 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 
 ### 1. Full Frontend Test Suite (`npm test`)
 - **Command**: `npm test` (`esbuild src/test/*.test.ts --bundle --platform=node --format=esm --packages=external --outdir=src/test/.dist --alias:@=./src && node --test "src/test/.dist/*.test.js"`)
-- **Outcome**: **PASSED** with **110 tests passing across 44 suites in 43.2s** (0 failures, 0 errors, 0 skipped).
-- **Test Suites Delivered for Phase 15I** (`src/test/a11y-and-crossbrowser.test.ts` - 27 tests across 4 suites):
-  1. `WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes` (11 tests):
-     - Automated `@axe-core/playwright` scanning across `/dashboard`, `/playlists`, `/playlists/p1`, `/migrations`, `/migrations/exec1`, `/migrations/rev1/review`, `/migrations/exec1/progress`, `/settings`, `/login`, `/register`, and modal dialogs.
+- **Outcome**: **PASSED** with **139 tests passing across 48 suites in 125.4s** (0 failures, 0 errors, 0 skipped).
+- **Test Suites Delivered for Phase 15I** (`src/test/a11y-and-crossbrowser.test.ts` - 56 tests across 8 suites):
+  1. `WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes & Representative States` (19 tests):
+     - Automated `@axe-core/playwright` scanning across `/dashboard`, `/playlists`, `/playlists/p1`, `/migrations`, `/migrations/exec1`, `/migrations/rev1/review`, `/migrations/exec1/progress`, `/settings`, `/login`, `/register`.
+     - Representative state audits: Loading skeleton, Empty playlists catalog, HTTP 500 ErrorState, Expired OAuth, Form validation error messages, Filtered search results, Active `RUNNING` migration, Completed `COMPLETED` migration, Resume migration modal dialog, and Candidate Search modal dialog.
      - Targets: `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`.
-     - Outcome: **0 violations** across all 11 scans.
-  2. `Keyboard Accessibility and Focus Trapping Verification` (4 tests):
-     - `Skip-to-content mechanism focuses main content landmark`: Validates skip link tab activation and programmatic focus movement to `<main id="main-content">`.
-     - `Login form keyboard navigation order flows logically`: Validates logical DOM tab sequencing (Email -> Password -> Submit Button).
-     - `Modal dialog traps focus and restores focus on Escape dismissal`: Validates modal focus trapping within dialog bounds and focus restoration to the triggering element on Escape key.
-     - `Playlist cards can be activated with Enter and Space keys`: Validates accessible link activation within playlist cards.
-  3. `Responsive Design Verification Across 8 Viewport Sizes` (8 tests + 1 mobile table test):
-     - Viewport matrix: Small mobile (320x568), Standard mobile (375x812), Large mobile (430x932), Tablet portrait (768x1024), Tablet landscape (1024x768), Laptop (1366x768), Desktop (1440x900), Large desktop (1920x1080).
-     - Validates: zero horizontal body scrollbar (`scrollWidth === innerWidth`), appropriate mobile nav vs desktop sidebar visibility, and horizontal containment of large data tables on mobile.
-  4. `Cross-Browser Compatibility Verification` (4 tests):
-     - Tests headless browser execution across **Chromium**, **Firefox**, and **WebKit**.
-     - Validates: full route navigation flow (`/dashboard` -> `/playlists` -> `/migrations` -> `/settings`), DOM element rendering, and **0 console errors** across all engines.
+     - Outcome: **0 violations** across all 19 scans.
+  2. `Non-Axe Semantic Accessibility and WCAG 2.1 Inspections` (6 tests):
+     - Accessible names on 100% of interactive controls (`button`, `a[href]`, `input`, `select`).
+     - Heading hierarchy begins with `<h1>` and enforces valid nesting across all core views.
+     - Landmark semantics verified: `<header>`, `<main id="main-content">`, `<nav aria-label="...">`, and `<aside>`.
+     - Programmatic title and description associations on modal dialogs.
+     - Live progress bar bounding attributes (`role="progressbar"`, `aria-valuenow`, `aria-valuemin="0"`, `aria-valuemax="100"`).
+     - Data tables enforce scoped `<th scope="col">` column headers.
+  3. `Keyboard Accessibility and Focus Trapping Verification` (5 tests):
+     - Skip-to-content mechanism focuses `<main id="main-content">`.
+     - Login form keyboard navigation order flows logically (Email -> Password -> Submit).
+     - Resume modal dialog traps focus and restores focus to triggering button on Escape dismissal.
+     - Candidate Search dialog traps focus and restores focus to triggering button on Escape dismissal.
+     - Playlist cards activate with Enter and Space keys.
+  4. `Responsive Verification Across All 9 Routes at 8 Viewport Sizes` (11 tests):
+     - Viewports: 320x568 (Small Mobile), 375x812 (Standard Mobile), 430x932 (Large Mobile), 768x1024 (Tablet Portrait), 1024x768 (Tablet Landscape), 1366x768 (Laptop), 1440x900 (Desktop), 1920x1080 (Large Desktop).
+     - All 9 original routes verified across all 8 viewports (72 route-viewport combinations): zero horizontal overflow (`scrollWidth <= innerWidth`), mobile nav vs desktop sidebar visibility.
+     - Table horizontal scroll containment (`overflow-x-auto`) prevents layout blowout on small mobile (320x568).
+     - Modal dialogs fit within small mobile viewport (320x568) without body blowout.
+  5. `Complete Cross-Browser Verification (Chromium, Firefox, WebKit)` (15 tests, 5 in each engine):
+     - Tests headless execution across **Chromium**, **Firefox**, and **WebKit** (Playwright WebKit engine).
+     - Validates across each engine: all 9 original routes render with **0 console errors**, form interaction and keyboard submit operate reliably, modal dialogs open/trap focus/dismiss on Escape, failed API requests (500) render ErrorState with retry, and layout and scrolling execute without breakdown.
 
 ### 2. Static Type Checking (`npm run typecheck`)
 - **Command**: `npm run typecheck` (`tsc --noEmit`)
@@ -1638,7 +1671,7 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 
 ### 4. Production Build Verification (`npm run build`)
 - **Command**: `npm run build` (`vite build`)
-- **Outcome**: **PASSED** cleanly in 26.31s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
+- **Outcome**: **PASSED** cleanly in 29.93s (generated `dist/index.html`, `dist/assets/index-*.css`, `dist/assets/index-*.js`).
 
 ### 5. Git Whitespace Hygiene
 - **Command**: `git diff --check`

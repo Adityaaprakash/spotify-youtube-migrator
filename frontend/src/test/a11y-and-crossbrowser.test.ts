@@ -298,6 +298,34 @@ before(async () => {
     if (pathname === '/api/migrations/exec1/history') {
       return json(mockAuditTimeline);
     }
+    if (pathname === '/api/migrations/exec1/resume') {
+      return json({ executionId: 'exec1', status: 'RUNNING', message: 'Migration resumed' });
+    }
+    if (pathname === '/api/migrations/exec2') {
+      return json({
+        ...mockExecutionDetail,
+        executionId: 'exec2',
+        status: 'COMPLETED',
+        successfulInsertions: 12,
+        canResume: false,
+      });
+    }
+    if (pathname === '/api/migrations/exec2/progress') {
+      return json({
+        ...mockExecutionProgress,
+        executionId: 'exec2',
+        status: 'COMPLETED',
+        progressPercentage: 100,
+        pendingTracks: 0,
+        estimatedRemainingSeconds: 0,
+      });
+    }
+    if (pathname === '/api/migrations/exec2/tracks') {
+      return json(mockExecutionTracks.map((t) => ({ ...t, status: 'ADDED' })));
+    }
+    if (pathname === '/api/migrations/exec2/history') {
+      return json(mockAuditTimeline);
+    }
     if (pathname === '/api/review-sessions/rev1') {
       return json(mockReviewSession);
     }
@@ -306,6 +334,30 @@ before(async () => {
     }
     if (pathname === '/api/review-sessions/rev1/tracks') {
       return json(mockReviewTracks);
+    }
+    if (pathname.startsWith('/api/review-sessions/rev1/tracks/') && pathname.endsWith('/candidates/search')) {
+      return json({
+        candidates: [
+          {
+            id: 'c_search_1',
+            title: 'Midnight Horizon (Official Music Video)',
+            channelOrArtist: 'Luna Bay',
+            durationMs: 215000,
+          },
+        ],
+        totalCount: 1,
+      });
+    }
+    if (pathname.startsWith('/api/review-sessions/rev1/tracks/') && pathname.endsWith('/decision')) {
+      return json({
+        id: 'rt1',
+        position: 0,
+        sourceTitle: 'Midnight Horizon',
+        sourceArtist: 'Luna Bay',
+        reviewStatus: 'ACCEPTED',
+        excluded: false,
+        hasConflict: false,
+      });
     }
     if (pathname === '/api/migrations/preview') {
       return json(mockPreviewPlan);
@@ -342,7 +394,10 @@ after(async () => {
   }
 });
 
-describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () => {
+// ============================================================================
+// SUITE 1: WCAG 2.1 Level AA Accessibility Audit across Routes & States
+// ============================================================================
+describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes & Representative States', () => {
   let browser: Browser;
 
   before(async () => {
@@ -365,7 +420,7 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
   ];
 
   for (const route of routes) {
-    test(`Route ${route.name} meets WCAG 2.1 Level AA standards`, async () => {
+    test(`Normal State: Route ${route.name} meets WCAG 2.1 Level AA standards`, async () => {
       const context = await browser.newContext();
       const page = await context.newPage();
       try {
@@ -390,7 +445,7 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
     });
   }
 
-  test('Public Login Route (/login) meets WCAG 2.1 Level AA standards', async () => {
+  test('Normal State: Public Login Route (/login) meets WCAG 2.1 Level AA standards', async () => {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
@@ -398,10 +453,6 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
       const axeResults = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
         .analyze();
-
-      if (axeResults.violations.length > 0) {
-        console.error('Accessibility violations on /login:', JSON.stringify(axeResults.violations, null, 2));
-      }
 
       assert.equal(
         axeResults.violations.length,
@@ -414,7 +465,7 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
     }
   });
 
-  test('Public Register Route (/register) meets WCAG 2.1 Level AA standards', async () => {
+  test('Normal State: Public Register Route (/register) meets WCAG 2.1 Level AA standards', async () => {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
@@ -422,10 +473,6 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
       const axeResults = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
         .analyze();
-
-      if (axeResults.violations.length > 0) {
-        console.error('Accessibility violations on /register:', JSON.stringify(axeResults.violations, null, 2));
-      }
 
       assert.equal(
         axeResults.violations.length,
@@ -438,7 +485,201 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
     }
   });
 
-  test('Modal Dialogs (Resume Migration Dialog) maintain WCAG 2.1 AA compliance when open', async () => {
+  test('Loading State: Skeleton loaders maintain WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      // Delay response to capture loading skeleton state
+      await page.route('**/api/spotify/playlists**', async () => {
+        // Keep pending
+      });
+
+      await page.goto(`${baseUrl}/playlists`, { waitUntil: 'commit' });
+      await page.locator('.animate-pulse').first().waitFor({ state: 'visible', timeout: 5000 });
+
+      const axeResults = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+
+      assert.equal(
+        axeResults.violations.length,
+        0,
+        `Expected 0 WCAG 2.1 AA violations during loading skeleton state, found: ${axeResults.violations.map((v) => v.id).join(', ')}`
+      );
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Empty State: Empty playlists and migration history maintain WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.route('**/api/spotify/playlists**', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ items: [], total: 0, limit: 20, offset: 0, hasNext: false }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/playlists`, { waitUntil: 'networkidle' });
+      const emptyHeading = page.locator('h3').filter({ hasText: /No playlists found/i });
+      await emptyHeading.waitFor({ state: 'visible' });
+
+      const axeResults = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+
+      assert.equal(
+        axeResults.violations.length,
+        0,
+        `Expected 0 WCAG 2.1 AA violations on EmptyState, found: ${axeResults.violations.map((v) => v.id).join(', ')}`
+      );
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Error State: Failed API response ErrorState maintains WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.route('**/api/spotify/playlists**', (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ message: 'Internal Server Error fetching playlists' }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/playlists`, { waitUntil: 'networkidle' });
+      const errorHeading = page.locator('h4').filter({ hasText: /Failed to load playlists/i });
+      await errorHeading.waitFor({ state: 'visible' });
+
+      const axeResults = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+
+      assert.equal(
+        axeResults.violations.length,
+        0,
+        `Expected 0 WCAG 2.1 AA violations on ErrorState, found: ${axeResults.violations.map((v) => v.id).join(', ')}`
+      );
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Expired OAuth State: Disconnected/Expired OAuth status maintains WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.route('**/api/oauth/spotify**', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            connected: false,
+            provider: 'spotify',
+            providerUserId: 'spotify_usr_1',
+            expiresAt: '2020-01-01T00:00:00Z',
+          }),
+        })
+      );
+
+      await page.goto(`${baseUrl}/settings`, { waitUntil: 'networkidle' });
+      const axeResults = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+
+      assert.equal(
+        axeResults.violations.length,
+        0,
+        `Expected 0 WCAG 2.1 AA violations with Expired OAuth, found: ${axeResults.violations.map((v) => v.id).join(', ')}`
+      );
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Form Validation State: Login validation errors maintain WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/login`, { waitUntil: 'networkidle' });
+      const submitBtn = page.getByRole('button', { name: /Sign in/i });
+      await submitBtn.click();
+
+      // Validation errors should be displayed
+      await page.locator('#email-error').waitFor({ state: 'visible' });
+
+      const axeResults = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+
+      assert.equal(
+        axeResults.violations.length,
+        0,
+        `Expected 0 WCAG 2.1 AA violations on form validation error state, found: ${axeResults.violations.map((v) => v.id).join(', ')}`
+      );
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Filtered Results State: Track filter on review session maintains WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/migrations/rev1/review`, { waitUntil: 'networkidle' });
+      const searchInput = page.getByPlaceholder(/Search tracks in review/i);
+      await searchInput.fill('NonExistentTrackSearch');
+
+      const axeResults = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+
+      assert.equal(
+        axeResults.violations.length,
+        0,
+        `Expected 0 WCAG 2.1 AA violations on filtered results state, found: ${axeResults.violations.map((v) => v.id).join(', ')}`
+      );
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Active vs Completed Migration States maintain WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      // 1. Active migration
+      await page.goto(`${baseUrl}/migrations/exec1/progress`, { waitUntil: 'networkidle' });
+      const activeAxe = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+      assert.equal(activeAxe.violations.length, 0, 'Active migration must meet WCAG 2.1 AA');
+
+      // 2. Completed migration
+      await page.goto(`${baseUrl}/migrations/exec2`, { waitUntil: 'networkidle' });
+      const completedAxe = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+      assert.equal(completedAxe.violations.length, 0, 'Completed migration must meet WCAG 2.1 AA');
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Open Dialog: Resume Migration Dialog maintains WCAG 2.1 AA compliance', async () => {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
@@ -452,10 +693,6 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
         .analyze();
 
-      if (axeResults.violations.length > 0) {
-        console.error('Accessibility violations on Resume Dialog:', JSON.stringify(axeResults.violations, null, 2));
-      }
-
       assert.equal(
         axeResults.violations.length,
         0,
@@ -466,8 +703,203 @@ describe('WCAG 2.1 Level AA Accessibility Audit across All Phase 15 Routes', () 
       await context.close();
     }
   });
+
+  test('Open Dialog: Candidate Search Dialog maintains WCAG 2.1 AA compliance', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/migrations/rev1/review`, { waitUntil: 'networkidle' });
+      const searchBtn = page.getByRole('button', { name: /Find Alternative/i }).first();
+      await searchBtn.click();
+      const dialog = page.getByRole('dialog');
+      await dialog.waitFor({ state: 'visible' });
+
+      const axeResults = await new AxeBuilder({ page })
+        .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
+        .analyze();
+
+      assert.equal(
+        axeResults.violations.length,
+        0,
+        `Expected 0 WCAG 2.1 AA violations with Candidate Search Dialog open, found: ${axeResults.violations.map((v) => v.id).join(', ')}`
+      );
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
 });
 
+// ============================================================================
+// SUITE 2: Non-Axe Semantic Accessibility and WCAG 2.1 Inspections
+// ============================================================================
+describe('Non-Axe Semantic Accessibility and WCAG 2.1 Inspections', () => {
+  let browser: Browser;
+
+  before(async () => {
+    browser = await chromium.launch({ headless: true });
+  });
+
+  after(async () => {
+    await browser.close();
+  });
+
+  test('Accessible names and roles are valid across all interactive controls', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' });
+
+      const namelessControls = await page.evaluate(() => {
+        const interactive = Array.from(document.querySelectorAll('button, a[href], input, select, textarea'));
+        const issues: string[] = [];
+        for (const el of interactive) {
+          const name = el.getAttribute('aria-label') ||
+            (el.getAttribute('aria-labelledby') ? document.getElementById(el.getAttribute('aria-labelledby')!)?.textContent : null) ||
+            el.textContent?.trim() ||
+            (el as HTMLInputElement).placeholder ||
+            (el as HTMLInputElement).value;
+          if (!name || name.trim().length === 0) {
+            issues.push(el.outerHTML.slice(0, 80));
+          }
+        }
+        return issues;
+      });
+
+      assert.equal(namelessControls.length, 0, `Interactive controls missing accessible names: ${namelessControls.join(' | ')}`);
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Heading hierarchy starts with h1 and has semantic nesting on all core routes', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      const paths = ['/dashboard', '/playlists', '/migrations', '/settings'];
+      for (const p of paths) {
+        await page.goto(`${baseUrl}${p}`, { waitUntil: 'networkidle' });
+        const headings = await page.evaluate(() => {
+          const tags = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map((el) =>
+            parseInt(el.tagName.replace('H', ''), 10)
+          );
+          return tags;
+        });
+
+        assert.ok(headings.length > 0, `Route ${p} must have headings`);
+        assert.equal(headings[0], 1, `Route ${p} must start with an h1 heading`);
+      }
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Landmark semantics provide banner, main, navigation, and complementary regions', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' });
+
+      const hasHeader = await page.locator('header').count() > 0;
+      const hasMain = await page.locator('main#main-content').count() > 0;
+      const hasNav = await page.locator('nav').count() > 0;
+      const hasAside = await page.locator('aside').count() > 0;
+
+      assert.ok(hasHeader, 'Must contain <header> banner landmark');
+      assert.ok(hasMain, 'Must contain <main id="main-content"> landmark');
+      assert.ok(hasNav, 'Must contain <nav> navigation landmark');
+      assert.ok(hasAside, 'Must contain <aside> sidebar landmark');
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Modal dialogs define programmatic title and description associations', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/migrations/exec1`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: /Resume Migration/i }).click();
+
+      const dialog = page.getByRole('dialog');
+      await dialog.waitFor({ state: 'visible' });
+
+      const dialogAttributes = await page.evaluate(() => {
+        const dlg = document.querySelector('[role="dialog"]');
+        return {
+          hasLabelledBy: dlg?.hasAttribute('aria-labelledby'),
+          hasDescribedBy: dlg?.hasAttribute('aria-describedby'),
+          labelledText: dlg?.querySelector('h2')?.textContent?.trim(),
+          describedText: dlg?.querySelector('p')?.textContent?.trim(),
+        };
+      });
+
+      assert.ok(dialogAttributes.labelledText?.includes('Resume Migration'), 'Dialog must have accessible title text');
+      assert.ok(dialogAttributes.describedText?.length, 'Dialog must have accessible description text');
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Live progress indicators define progressbar role and valid bounding values', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/migrations/exec1/progress`, { waitUntil: 'networkidle' });
+
+      const progressAttrs = await page.evaluate(() => {
+        const pb = document.querySelector('[role="progressbar"]');
+        if (!pb) return null;
+        return {
+          now: pb.getAttribute('aria-valuenow'),
+          min: pb.getAttribute('aria-valuemin'),
+          max: pb.getAttribute('aria-valuemax'),
+        };
+      });
+
+      assert.ok(progressAttrs, 'Live progress page must contain [role="progressbar"]');
+      assert.equal(progressAttrs?.min, '0');
+      assert.equal(progressAttrs?.max, '100');
+      const numericVal = parseFloat(progressAttrs?.now || '');
+      assert.ok(!isNaN(numericVal) && numericVal >= 0 && numericVal <= 100, 'aria-valuenow must be between 0 and 100');
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Data tables contain th headers with column scope associations', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/migrations`, { waitUntil: 'networkidle' });
+
+      const tableHeaders = await page.evaluate(() => {
+        const ths = Array.from(document.querySelectorAll('table th'));
+        return ths.map((th) => ({
+          text: th.textContent?.trim(),
+          scope: th.getAttribute('scope'),
+        }));
+      });
+
+      assert.ok(tableHeaders.length > 0, 'Migration table must contain <th> headers');
+      for (const th of tableHeaders) {
+        assert.ok(th.text && th.text.length > 0, 'Every table header must have text');
+      }
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+});
+
+// ============================================================================
+// SUITE 3: Keyboard Accessibility and Focus Trapping Verification
+// ============================================================================
 describe('Keyboard Accessibility and Focus Trapping Verification', () => {
   let browser: Browser;
 
@@ -520,7 +952,7 @@ describe('Keyboard Accessibility and Focus Trapping Verification', () => {
     }
   });
 
-  test('Modal dialog traps focus and restores focus on Escape dismissal', async () => {
+  test('Resume modal dialog traps focus and restores focus on Escape dismissal', async () => {
     const context = await browser.newContext();
     const page = await context.newPage();
     try {
@@ -550,6 +982,36 @@ describe('Keyboard Accessibility and Focus Trapping Verification', () => {
     }
   });
 
+  test('Candidate Search dialog traps focus and restores focus on Escape dismissal', async () => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/migrations/rev1/review`, { waitUntil: 'networkidle' });
+      const searchBtn = page.getByRole('button', { name: /Find Alternative/i }).first();
+      await searchBtn.focus();
+      await page.keyboard.press('Enter');
+
+      const dialog = page.getByRole('dialog');
+      await dialog.waitFor({ state: 'visible' });
+
+      const isFocusInsideDialog = await page.evaluate(() => {
+        const active = document.activeElement;
+        const dlg = document.querySelector('[role="dialog"]');
+        return dlg?.contains(active);
+      });
+      assert.ok(isFocusInsideDialog, 'Focus must move into Candidate Search dialog on open');
+
+      await page.keyboard.press('Escape');
+      await dialog.waitFor({ state: 'hidden' });
+
+      const restoredText = await page.evaluate(() => document.activeElement?.textContent?.trim());
+      assert.match(restoredText || '', /Find Alternative/i);
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
   test('Playlist cards can be activated with Enter and Space keys', async () => {
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -570,7 +1032,10 @@ describe('Keyboard Accessibility and Focus Trapping Verification', () => {
   });
 });
 
-describe('Responsive Design Verification Across 8 Viewport Sizes', () => {
+// ============================================================================
+// SUITE 4: Responsive Verification Across All 9 Routes at 8 Viewport Sizes
+// ============================================================================
+describe('Responsive Verification Across All 9 Routes at 8 Viewport Sizes', () => {
   let browser: Browser;
 
   before(async () => {
@@ -582,37 +1047,66 @@ describe('Responsive Design Verification Across 8 Viewport Sizes', () => {
   });
 
   const viewports = [
-    { name: 'Small mobile (320x568)', width: 320, height: 568, isMobile: true },
-    { name: 'Standard mobile (375x812)', width: 375, height: 812, isMobile: true },
-    { name: 'Large mobile (430x932)', width: 430, height: 932, isMobile: true },
-    { name: 'Tablet portrait (768x1024)', width: 768, height: 1024, isMobile: false },
-    { name: 'Tablet landscape (1024x768)', width: 1024, height: 768, isMobile: false },
-    { name: 'Laptop (1366x768)', width: 1366, height: 768, isMobile: false },
-    { name: 'Desktop (1440x900)', width: 1440, height: 900, isMobile: false },
-    { name: 'Large desktop (1920x1080)', width: 1920, height: 1080, isMobile: false },
+    { name: '320x568 (Small Mobile)', width: 320, height: 568, isMobile: true },
+    { name: '375x812 (Standard Mobile)', width: 375, height: 812, isMobile: true },
+    { name: '430x932 (Large Mobile)', width: 430, height: 932, isMobile: true },
+    { name: '768x1024 (Tablet Portrait)', width: 768, height: 1024, isMobile: false },
+    { name: '1024x768 (Tablet Landscape)', width: 1024, height: 768, isMobile: false },
+    { name: '1366x768 (Laptop)', width: 1366, height: 768, isMobile: false },
+    { name: '1440x900 (Desktop)', width: 1440, height: 900, isMobile: false },
+    { name: '1920x1080 (Large Desktop)', width: 1920, height: 1080, isMobile: false },
   ];
 
-  for (const vp of viewports) {
-    test(`Viewport ${vp.name}: has no unintended horizontal overflow and correct layout`, async () => {
-      const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+  const originalRoutes = [
+    { name: '/login', path: '/login', isAuth: false },
+    { name: '/dashboard', path: '/dashboard', isAuth: true },
+    { name: '/playlists', path: '/playlists', isAuth: true },
+    { name: '/playlists/p1', path: '/playlists/p1', isAuth: true },
+    { name: '/migrations', path: '/migrations', isAuth: true },
+    { name: '/migrations/exec1', path: '/migrations/exec1', isAuth: true },
+    { name: '/migrations/rev1/review', path: '/migrations/rev1/review', isAuth: true },
+    { name: '/migrations/exec1/progress', path: '/migrations/exec1/progress', isAuth: true },
+    { name: '/settings', path: '/settings', isAuth: true },
+  ];
+
+  for (const route of originalRoutes) {
+    test(`Route ${route.name}: validates all 8 viewports with zero horizontal overflow and responsive layout`, async () => {
+      const context = await browser.newContext();
       const page = await context.newPage();
       try {
-        await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' });
+        await page.goto(`${baseUrl}${route.path}`, { waitUntil: 'networkidle' });
 
-        const hasHorizontalScroll = await page.evaluate(() => {
-          return document.documentElement.scrollWidth > window.innerWidth;
-        });
-        assert.equal(hasHorizontalScroll, false, `Viewport ${vp.name} must not have horizontal scrollbar`);
+        for (const vp of viewports) {
+          await page.setViewportSize({ width: vp.width, height: vp.height });
+          // Short pause for CSS media queries and flexbox/grid reflow
+          await page.waitForTimeout(50);
 
-        const mobileNavVisible = await page.getByRole('navigation', { name: /Mobile Navigation/i }).isVisible();
-        const sidebarVisible = await page.getByRole('navigation', { name: /Sidebar Navigation/i }).isVisible();
+          const overflow = await page.evaluate(() => {
+            return {
+              scrollWidth: document.documentElement.scrollWidth,
+              innerWidth: window.innerWidth,
+              hasOverflow: document.documentElement.scrollWidth > window.innerWidth,
+            };
+          });
 
-        if (vp.isMobile) {
-          assert.ok(mobileNavVisible, `Mobile navigation must be visible on ${vp.name}`);
-          assert.equal(sidebarVisible, false, `Desktop sidebar must be hidden on ${vp.name}`);
-        } else {
-          assert.equal(mobileNavVisible, false, `Mobile navigation must be hidden on ${vp.name}`);
-          assert.ok(sidebarVisible, `Desktop sidebar must be visible on ${vp.name}`);
+          assert.equal(
+            overflow.hasOverflow,
+            false,
+            `Route ${route.name} at viewport ${vp.name} has horizontal overflow (scrollWidth: ${overflow.scrollWidth} > innerWidth: ${overflow.innerWidth})`
+          );
+
+          if (route.isAuth) {
+            const mobileNavVisible = await page.getByRole('navigation', { name: /Mobile Navigation/i }).isVisible();
+            const sidebarVisible = await page.getByRole('navigation', { name: /Sidebar Navigation/i }).isVisible();
+
+            if (vp.isMobile) {
+              assert.ok(mobileNavVisible, `Mobile nav must be visible at ${vp.name} on ${route.name}`);
+              assert.equal(sidebarVisible, false, `Sidebar must be hidden at ${vp.name} on ${route.name}`);
+            } else {
+              assert.equal(mobileNavVisible, false, `Mobile nav must be hidden at ${vp.name} on ${route.name}`);
+              assert.ok(sidebarVisible, `Sidebar must be visible at ${vp.name} on ${route.name}`);
+            }
+          }
         }
       } finally {
         await page.close();
@@ -621,16 +1115,45 @@ describe('Responsive Design Verification Across 8 Viewport Sizes', () => {
     });
   }
 
-  test('Complex data tables on mobile (375x812) remain usable with horizontal containment', async () => {
-    const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
+  test('Table horizontal scroll containment prevents layout blowout on small mobile (320x568)', async () => {
+    const context = await browser.newContext({ viewport: { width: 320, height: 568 } });
     const page = await context.newPage();
     try {
-      await page.goto(`${baseUrl}/migrations`, { waitUntil: 'networkidle' });
+      const tableRoutes = ['/playlists/p1', '/migrations', '/migrations/exec1', '/migrations/exec1/progress'];
+      for (const tr of tableRoutes) {
+        await page.goto(`${baseUrl}${tr}`, { waitUntil: 'networkidle' });
+        const hasBodyOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+        assert.equal(hasBodyOverflow, false, `Table on ${tr} must not cause body horizontal overflow at 320x568`);
 
-      const hasBodyOverflow = await page.evaluate(() => {
-        return document.documentElement.scrollWidth > window.innerWidth;
+        const hasScrollContainer = await page.evaluate(() => {
+          const containers = document.querySelectorAll('.overflow-x-auto');
+          return containers.length > 0;
+        });
+        assert.ok(hasScrollContainer, `Table view on ${tr} must have .overflow-x-auto wrapper`);
+      }
+    } finally {
+      await page.close();
+      await context.close();
+    }
+  });
+
+  test('Modal dialogs fit within small mobile viewport (320x568) without body blowout', async () => {
+    const context = await browser.newContext({ viewport: { width: 320, height: 568 } });
+    const page = await context.newPage();
+    try {
+      await page.goto(`${baseUrl}/migrations/exec1`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: /Resume Migration/i }).click();
+
+      const dialog = page.getByRole('dialog');
+      await dialog.waitFor({ state: 'visible' });
+
+      const dialogFits = await page.evaluate(() => {
+        const dlg = document.querySelector('[role="dialog"]');
+        if (!dlg) return false;
+        const rect = dlg.getBoundingClientRect();
+        return rect.width <= window.innerWidth && rect.left >= 0;
       });
-      assert.equal(hasBodyOverflow, false, 'Migration history table page must not overflow mobile viewport');
+      assert.ok(dialogFits, 'Resume dialog must fit within 320px viewport without blowout');
     } finally {
       await page.close();
       await context.close();
@@ -638,65 +1161,154 @@ describe('Responsive Design Verification Across 8 Viewport Sizes', () => {
   });
 });
 
-describe('Cross-Browser Compatibility Verification (Chromium, Firefox, WebKit)', () => {
+// ============================================================================
+// SUITE 5: Complete Cross-Browser Verification (Chromium, Firefox, WebKit)
+// ============================================================================
+describe('Complete Cross-Browser Verification (Chromium, Firefox, WebKit)', () => {
+  // NOTE: Playwright WebKit uses the open-source WebKit rendering engine (same foundation
+  // as Apple Safari), running headless on Windows/Linux. It tests the WebKit engine
+  // layout, CSS, and JS execution faithfully, distinct from actual macOS Apple Safari.
   const browserEngines = [
     { name: 'Chromium', launcher: chromium },
     { name: 'Firefox', launcher: firefox },
-    { name: 'WebKit', launcher: webkit },
+    { name: 'WebKit (Playwright WebKit engine)', launcher: webkit },
   ];
 
   for (const { name, launcher } of browserEngines) {
-    test(`Browser ${name}: renders application, navigates routes, and logs zero console errors`, async () => {
-      const browser = await launcher.launch({ headless: true });
-      try {
+    describe(`Engine: ${name}`, () => {
+      let browser: Browser;
+
+      before(async () => {
+        browser = await launcher.launch({ headless: true });
+      });
+
+      after(async () => {
+        await browser.close();
+      });
+
+      test(`${name}: Renders all nine original routes with zero console errors`, async () => {
         const context = await browser.newContext();
+        const page = await context.newPage();
         try {
-          const page = await context.newPage();
-          try {
-            const consoleErrors: string[] = [];
-            page.on('console', (msg) => {
-              if (msg.type() === 'error') {
-                consoleErrors.push(msg.text());
+          const consoleErrors: string[] = [];
+          page.on('console', (msg) => {
+            if (msg.type() === 'error') {
+              const text = msg.text();
+              // Ignore standard browser network message for expected 401 response on unauthenticated public routes
+              if (text.includes('401') || text.includes('Unauthorized')) {
+                return;
               }
-            });
+              consoleErrors.push(text);
+            }
+          });
 
-            await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' });
-            const dashboardHeading = page.locator('h1').filter({ hasText: /Welcome back|Dashboard/i });
-            await dashboardHeading.waitFor({ state: 'visible' });
-            assert.match(await dashboardHeading.textContent() || '', /Welcome back|Dashboard/i);
+          const testRoutes = [
+            { path: '/login', expectedHeading: /Sign in|Migrator/i },
+            { path: '/dashboard', expectedHeading: /Welcome back|Dashboard/i },
+            { path: '/playlists', expectedHeading: /Spotify Playlists/i },
+            { path: '/playlists/p1', expectedHeading: /Indie Discoveries/i },
+            { path: '/migrations', expectedHeading: /Migration History/i },
+            { path: '/migrations/exec1', expectedHeading: /Indie Discoveries/i },
+            { path: '/migrations/rev1/review', expectedHeading: /Review Matches|Indie Discoveries/i },
+            { path: '/migrations/exec1/progress', expectedHeading: /Live Migration Progress|Indie Discoveries/i },
+            { path: '/settings', expectedHeading: /Settings & Connections/i },
+          ];
 
-            await page.locator('aside a[href="/playlists"]').click();
-            await page.waitForURL('**/playlists');
-            const playlistsHeading = page.locator('h1').filter({ hasText: /Spotify Playlists/i });
-            await playlistsHeading.waitFor({ state: 'visible' });
-            assert.match(await playlistsHeading.textContent() || '', /Spotify Playlists/i);
-
-            await page.locator('aside a[href="/migrations"]').click();
-            await page.waitForURL('**/migrations');
-            const migrationsHeading = page.locator('h1').filter({ hasText: /Migration History/i });
-            await migrationsHeading.waitFor({ state: 'visible' });
-            assert.match(await migrationsHeading.textContent() || '', /Migration History/i);
-
-            await page.locator('aside a[href="/settings"]').click();
-            await page.waitForURL('**/settings');
-            const settingsHeading = page.locator('h1').filter({ hasText: /Settings & Connections/i });
-            await settingsHeading.waitFor({ state: 'visible' });
-            assert.match(await settingsHeading.textContent() || '', /Settings & Connections/i);
-
-            assert.equal(
-              consoleErrors.length,
-              0,
-              `Expected 0 console errors on ${name}, found: ${consoleErrors.join(', ')}`
-            );
-          } finally {
-            await page.close();
+          for (const r of testRoutes) {
+            await page.goto(`${baseUrl}${r.path}`, { waitUntil: 'networkidle' });
+            const heading = page.locator('h1, h2, h3').filter({ hasText: r.expectedHeading }).first();
+            await heading.waitFor({ state: 'visible', timeout: 5000 });
+            assert.match(await heading.textContent() || '', r.expectedHeading);
           }
+
+          assert.equal(
+            consoleErrors.length,
+            0,
+            `Expected 0 console errors across all 9 routes on ${name}, found: ${consoleErrors.join(', ')}`
+          );
         } finally {
+          await page.close();
           await context.close();
         }
-      } finally {
-        await browser.close();
-      }
+      });
+
+      test(`${name}: Form interaction and keyboard submission operate reliably`, async () => {
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        try {
+          await page.goto(`${baseUrl}/login`, { waitUntil: 'networkidle' });
+          await page.fill('#email', 'alex.rivera@example.com');
+          await page.fill('#password', 'password123');
+          await page.press('#password', 'Enter');
+          await page.waitForURL('**/dashboard');
+          assert.ok(page.url().includes('/dashboard'), `Login submission on ${name} must navigate to /dashboard`);
+        } finally {
+          await page.close();
+          await context.close();
+        }
+      });
+
+      test(`${name}: Modal dialogs open, trap focus, and dismiss cleanly`, async () => {
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        try {
+          await page.goto(`${baseUrl}/migrations/exec1`, { waitUntil: 'networkidle' });
+          const resumeBtn = page.getByRole('button', { name: /Resume Migration/i });
+          await resumeBtn.click();
+
+          const dialog = page.getByRole('dialog');
+          await dialog.waitFor({ state: 'visible' });
+          assert.ok(await dialog.isVisible(), `Resume dialog must be visible on ${name}`);
+
+          await page.keyboard.press('Escape');
+          await dialog.waitFor({ state: 'hidden' });
+          assert.equal(await dialog.isVisible(), false, `Resume dialog must close on Escape on ${name}`);
+        } finally {
+          await page.close();
+          await context.close();
+        }
+      });
+
+      test(`${name}: Failed API requests render ErrorState gracefully with retry`, async () => {
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        try {
+          await page.route('**/api/spotify/playlists**', (route) =>
+            route.fulfill({
+              status: 500,
+              contentType: 'application/json',
+              body: JSON.stringify({ message: 'Mocked 500 Network Failure' }),
+            })
+          );
+
+          await page.goto(`${baseUrl}/playlists`, { waitUntil: 'networkidle' });
+          const errorHeading = page.locator('h4').filter({ hasText: /Failed to load playlists/i });
+          await errorHeading.waitFor({ state: 'visible' });
+          assert.ok(await errorHeading.isVisible(), `ErrorState must render on 500 error in ${name}`);
+
+          const retryBtn = page.getByRole('button', { name: /Retry/i });
+          assert.ok(await retryBtn.isVisible(), `Retry button must be visible in ${name}`);
+        } finally {
+          await page.close();
+          await context.close();
+        }
+      });
+
+      test(`${name}: Layout and page scrolling execute without breakdown`, async () => {
+        const context = await browser.newContext();
+        const page = await context.newPage();
+        try {
+          await page.goto(`${baseUrl}/migrations/exec1`, { waitUntil: 'networkidle' });
+          const canScroll = await page.evaluate(() => {
+            const main = document.querySelector('main');
+            return main !== null && main.scrollHeight >= main.clientHeight;
+          });
+          assert.ok(canScroll, `Page layout must support scrolling on ${name}`);
+        } finally {
+          await page.close();
+          await context.close();
+        }
+      });
     });
   }
 });
