@@ -10,7 +10,7 @@ import java.util.Optional;
  * Immutable domain contract representing a single approved track ready for destination insertion.
  * <p>
  * Binds the original source track identity and ordering to the validated destination identity,
- * preserving provenance (automatic vs user-selected) and establishing deterministic destination ordering.
+ * preserving provenance (automatic vs user-selected), match score, match decision, and establishing deterministic destination ordering.
  *
  * @param sourcePosition 0-indexed track position in the original source playlist
  * @param sourceTrackId source track identifier (e.g. Spotify track ID or URI)
@@ -22,6 +22,8 @@ import java.util.Optional;
  * @param destinationDuration destination track duration, if available
  * @param decisionSource provenance of the decision (AUTOMATIC vs USER_SELECTED)
  * @param targetPosition 0-indexed sequential position in the destination playlist
+ * @param matchScore original matching confidence score, if available
+ * @param matchDecision original match classification decision, if available
  */
 public record ApprovedTrack(
         int sourcePosition,
@@ -33,7 +35,9 @@ public record ApprovedTrack(
         String destinationChannel,
         Duration destinationDuration,
         ReviewDecisionSource decisionSource,
-        int targetPosition
+        int targetPosition,
+        Double matchScore,
+        String matchDecision
 ) {
 
     public ApprovedTrack {
@@ -57,6 +61,37 @@ public record ApprovedTrack(
         if (targetPosition < 0) {
             throw new IllegalArgumentException("targetPosition must be non-negative: " + targetPosition);
         }
+    }
+
+    /**
+     * Backward-compatible 10-parameter constructor (Phases 11-13).
+     */
+    public ApprovedTrack(
+            int sourcePosition,
+            String sourceTrackId,
+            String sourceTitle,
+            String sourceArtist,
+            String destinationTrackId,
+            String destinationTitle,
+            String destinationChannel,
+            Duration destinationDuration,
+            ReviewDecisionSource decisionSource,
+            int targetPosition
+    ) {
+        this(
+                sourcePosition,
+                sourceTrackId,
+                sourceTitle,
+                sourceArtist,
+                destinationTrackId,
+                destinationTitle,
+                destinationChannel,
+                destinationDuration,
+                decisionSource,
+                targetPosition,
+                null,
+                null
+        );
     }
 
     public ApprovedTrack(
@@ -95,6 +130,14 @@ public record ApprovedTrack(
 
     public Optional<Duration> getDestinationDuration() {
         return Optional.ofNullable(destinationDuration);
+    }
+
+    public Optional<Double> getMatchScore() {
+        return Optional.ofNullable(matchScore);
+    }
+
+    public Optional<String> getMatchDecision() {
+        return Optional.ofNullable(matchDecision);
     }
 
     public boolean isUserSelected() {

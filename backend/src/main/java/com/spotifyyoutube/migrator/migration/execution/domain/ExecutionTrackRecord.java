@@ -52,6 +52,24 @@ public class ExecutionTrackRecord extends BaseEntity {
     @Column(name = "destination_track_id", nullable = false)
     private String destinationTrackId;
 
+    @Column(name = "destination_title", length = 500)
+    private String destinationTitle;
+
+    @Column(name = "destination_channel", length = 500)
+    private String destinationChannel;
+
+    @Column(name = "destination_duration_ms")
+    private Long destinationDurationMs;
+
+    @Column(name = "decision_source", length = 50)
+    private String decisionSource;
+
+    @Column(name = "match_score")
+    private Double matchScore;
+
+    @Column(name = "match_decision", length = 50)
+    private String matchDecision;
+
     @Column(name = "destination_playlist_item_id")
     private String destinationPlaylistItemId;
 
@@ -103,8 +121,37 @@ public class ExecutionTrackRecord extends BaseEntity {
         this.sourceTitle = approvedTrack.sourceTitle() != null ? approvedTrack.sourceTitle() : "Unknown Title";
         this.sourceArtist = approvedTrack.sourceArtist() != null ? approvedTrack.sourceArtist() : "Unknown Artist";
         this.destinationTrackId = Objects.requireNonNull(approvedTrack.destinationTrackId(), "destinationTrackId must not be null");
+        this.destinationTitle = approvedTrack.destinationTitle();
+        this.destinationChannel = approvedTrack.destinationChannel();
+        this.destinationDurationMs = approvedTrack.destinationDuration() != null ? approvedTrack.destinationDuration().toMillis() : null;
+        this.decisionSource = approvedTrack.decisionSource() != null ? approvedTrack.decisionSource().name() : "AUTOMATIC";
+        this.matchScore = approvedTrack.matchScore();
+        this.matchDecision = approvedTrack.matchDecision();
         this.status = ExecutionTrackStatus.PENDING;
         this.attemptCount = 0;
+    }
+
+    public ExecutionTrackRecord(
+            MigrationExecution execution,
+            int targetPosition,
+            String sourceTrackId,
+            String destinationTrackId,
+            String sourceTitle,
+            String sourceArtist,
+            String destinationTitle,
+            String destinationChannel,
+            Long destinationDurationMs,
+            String decisionSource,
+            Double matchScore,
+            String matchDecision
+    ) {
+        this(execution, targetPosition, sourceTrackId, destinationTrackId, sourceTitle, sourceArtist);
+        this.destinationTitle = destinationTitle;
+        this.destinationChannel = destinationChannel;
+        this.destinationDurationMs = destinationDurationMs;
+        this.decisionSource = decisionSource != null ? decisionSource : "AUTOMATIC";
+        this.matchScore = matchScore;
+        this.matchDecision = matchDecision;
     }
 
     public ExecutionTrackRecord(
@@ -556,5 +603,53 @@ public class ExecutionTrackRecord extends BaseEntity {
 
     public void setRetryBackoffMs(Long retryBackoffMs) {
         this.retryBackoffMs = retryBackoffMs;
+    }
+
+    public String getDestinationTitle() {
+        return destinationTitle;
+    }
+
+    public void setDestinationTitle(String destinationTitle) {
+        this.destinationTitle = destinationTitle;
+    }
+
+    public String getDestinationChannel() {
+        return destinationChannel;
+    }
+
+    public void setDestinationChannel(String destinationChannel) {
+        this.destinationChannel = destinationChannel;
+    }
+
+    public Long getDestinationDurationMs() {
+        return destinationDurationMs;
+    }
+
+    public void setDestinationDurationMs(Long destinationDurationMs) {
+        this.destinationDurationMs = destinationDurationMs;
+    }
+
+    public String getDecisionSource() {
+        return decisionSource;
+    }
+
+    public void setDecisionSource(String decisionSource) {
+        this.decisionSource = decisionSource;
+    }
+
+    public Double getMatchScore() {
+        return matchScore;
+    }
+
+    public void setMatchScore(Double matchScore) {
+        this.matchScore = matchScore;
+    }
+
+    public String getMatchDecision() {
+        return matchDecision;
+    }
+
+    public void setMatchDecision(String matchDecision) {
+        this.matchDecision = matchDecision;
     }
 }

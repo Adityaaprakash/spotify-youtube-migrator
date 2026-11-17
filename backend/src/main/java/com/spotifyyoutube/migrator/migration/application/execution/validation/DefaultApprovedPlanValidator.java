@@ -330,7 +330,9 @@ public class DefaultApprovedPlanValidator implements ApprovedPlanValidator {
                         track.getSelectedCandidateChannel(),
                         duration,
                         decisionSource,
-                        approvedTracks.size() // 0-indexed sequential destination position
+                        approvedTracks.size(), // 0-indexed sequential destination position
+                        track.getOriginalMatchScore(),
+                        track.getOriginalMatchDecision() != null ? track.getOriginalMatchDecision().name() : null
                 );
                 approvedTracks.add(approvedTrack);
             } else {

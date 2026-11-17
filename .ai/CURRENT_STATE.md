@@ -2,11 +2,18 @@
 
 Last Updated: 2026-11-17
 
-Current Phase: Phase 13 — Reliability Engineering [COMPLETE & FROZEN]
-Current Subphase: Phase 13H & 13I — Fault-Injection Engineering & Reliability Freeze [COMPLETE & FROZEN] -> Phase 14 — Migration History, Analytics & Auditability [READY TO START]
+Current Phase: Phase 14 — Migration History, Analytics & Auditability [IN PROGRESS]
+Current Subphase: Phase 14A & 14B — Architecture Audit & Persistent Migration Records [COMPLETE & VERIFIED] -> Phase 14C — Migration History & Detail APIs [READY TO START]
 Latest Pushed Commit: 2904c8a20b22ce2c6be7bbf07ab96b12565942c5
 
 ## Verification Status & Release Gate
+- **Phase 14A & 14B Verification Status**: COMPLETE & VERIFIED.
+  - Audit document generated: `docs/PHASE_14_AUDIT.md` covering all 10 architecture and existing-system audit requirements.
+  - Schema migration: `V15__phase14b_persistent_migration_history.sql` applied cleanly in PostgreSQL 16 Testcontainers with zero downtime backfill and composite index `idx_migrationexecutions_user_created`.
+  - Unit tests: `Phase14BPersistentMigrationRecordTest` (6 tests passing, 0 failures, 0 errors).
+  - Integration tests: `Phase14BPersistentMigrationRecordIT` (5 Testcontainers PostgreSQL tests passing, 0 failures, 0 errors).
+  - Regression tests: `MigrationExecutionDomainTest`, `MigrationExecutionStateMachineTest`, `ExecutionTrackRecordRepositoryTest`, `Phase13GRecoveryWorkflowTest`, `WorkerCrashBoundaryFaultInjectionTest` (65 regression tests passing, 0 failures, 0 errors).
+  - Checkstyle hygiene: 0 Checkstyle violations across all 462 main source files and 186 test source files.
 - **Phase 13H & 13I Verification Status**: COMPLETE & FROZEN (`mvn clean verify` passing with 2,212 total tests: 2,100 Surefire unit tests, 112 Failsafe integration tests, 0 failures, 0 errors, 0 skipped, 0 Checkstyle violations).
 - **Phase 13H Fault-Injection Test Suites (37 tests across 4 suites)**:
   - `WorkerCrashBoundaryFaultInjectionTest` (11 unit tests covering all 14 worker crash boundaries).

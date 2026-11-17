@@ -93,6 +93,12 @@ public class MigrationExecution extends BaseEntity {
     @Column(name = "status", nullable = false)
     private MigrationExecutionStatus status = MigrationExecutionStatus.INITIALIZED;
 
+    @Column(name = "total_source_tracks", nullable = false)
+    private int totalSourceTracks = 0;
+
+    @Column(name = "matched_tracks", nullable = false)
+    private int matchedTracks = 0;
+
     @Column(name = "total_approved_tracks", nullable = false)
     private int totalApprovedTracks = 0;
 
@@ -110,6 +116,9 @@ public class MigrationExecution extends BaseEntity {
 
     @Column(name = "rolled_back_insertions", nullable = false)
     private int rolledBackInsertions = 0;
+
+    @Column(name = "failure_summary", columnDefinition = "TEXT")
+    private String failureSummary;
 
     @Column(name = "started_at")
     private Instant startedAt;
@@ -218,6 +227,8 @@ public class MigrationExecution extends BaseEntity {
         this.sourcePlaylistId = reviewSession.getSourcePlaylistId() != null ? reviewSession.getSourcePlaylistId() : "sp_unknown";
         this.sourcePlaylistTitle = sourcePlaylistTitle != null ? sourcePlaylistTitle : "Migrated Playlist";
         this.planId = planId;
+        this.totalSourceTracks = reviewSession.getTotalTracks() != null ? reviewSession.getTotalTracks() : 0;
+        this.matchedTracks = 0;
         this.status = MigrationExecutionStatus.INITIALIZED;
     }
 
@@ -253,6 +264,8 @@ public class MigrationExecution extends BaseEntity {
      */
     public void initializeTracks(ApprovedMigrationContext context) {
         Objects.requireNonNull(context, "ApprovedMigrationContext must not be null");
+        this.totalSourceTracks = context.totalSourceTracks();
+        this.matchedTracks = context.approvedTrackCount();
         initializeTracks(context.approvedTracks());
     }
 
@@ -342,8 +355,12 @@ public class MigrationExecution extends BaseEntity {
         if (successfulInsertions == totalApprovedTracks && totalApprovedTracks > 0) {
             this.status = MigrationExecutionStatus.COMPLETED;
             this.completedAt = Instant.now();
+            this.failureSummary = null;
         } else if (uncertainInsertions > 0 || hasStaleAdding()) {
             this.status = MigrationExecutionStatus.RECOVERY_REQUIRED;
+            if (this.failureSummary == null) {
+                this.failureSummary = "Execution requires recovery: " + uncertainInsertions + " uncertain track(s)";
+            }
         } else if (successfulInsertions == 0 && rolledBackInsertions > 0) {
             this.status = MigrationExecutionStatus.ROLLED_BACK;
             this.completedAt = Instant.now();
@@ -351,9 +368,17 @@ public class MigrationExecution extends BaseEntity {
             this.status = MigrationExecutionStatus.PARTIALLY_ROLLED_BACK;
         } else if (successfulInsertions > 0) {
             this.status = MigrationExecutionStatus.PARTIALLY_COMPLETED;
+            if (this.failureSummary == null && (failedInsertions > 0 || skippedInsertions > 0)) {
+                this.failureSummary = String.format("Partially completed: %d added, %d failed, %d skipped out of %d approved tracks",
+                        successfulInsertions, failedInsertions, skippedInsertions, totalApprovedTracks);
+            }
         } else {
             this.status = MigrationExecutionStatus.FAILED;
             this.completedAt = Instant.now();
+            if (this.failureSummary == null) {
+                this.failureSummary = String.format("Execution failed: %d failed, %d skipped out of %d approved tracks",
+                        failedInsertions, skippedInsertions, totalApprovedTracks);
+            }
         }
     }
 
@@ -567,6 +592,9 @@ public class MigrationExecution extends BaseEntity {
     public void recordPlaylistCreationFailure(String failureCode, Instant nextAttemptAt) {
         this.playlistCreationFailureCode = failureCode;
         this.playlistCreationNextAttemptAt = nextAttemptAt;
+        if (failureCode != null && this.failureSummary == null) {
+            this.failureSummary = "Destination playlist creation failed: " + failureCode;
+        }
     }
 
     public void markPlaylistCreated(String destinationPlaylistId, String destinationPlaylistUrl, MigrationExecutionStatus nextStatus) {
@@ -582,10 +610,37 @@ public class MigrationExecution extends BaseEntity {
         this.destinationPlaylistUrl = destinationPlaylistUrl != null ? destinationPlaylistUrl.trim() : null;
         this.status = nextStatus != null ? nextStatus : MigrationExecutionStatus.INITIALIZED;
         this.playlistCreationFailureCode = null;
+        if (this.failureSummary != null && this.failureSummary.startsWith("Destination playlist creation failed")) {
+            this.failureSummary = null;
+        }
     }
 
     public MigrationExecutionStatus getStatus() {
         return status;
+    }
+
+    public int getTotalSourceTracks() {
+        return totalSourceTracks;
+    }
+
+    public void setTotalSourceTracks(int totalSourceTracks) {
+        this.totalSourceTracks = totalSourceTracks;
+    }
+
+    public int getMatchedTracks() {
+        return matchedTracks;
+    }
+
+    public void setMatchedTracks(int matchedTracks) {
+        this.matchedTracks = matchedTracks;
+    }
+
+    public String getFailureSummary() {
+        return failureSummary;
+    }
+
+    public void setFailureSummary(String failureSummary) {
+        this.failureSummary = failureSummary;
     }
 
     public int getTotalApprovedTracks() {

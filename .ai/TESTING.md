@@ -1189,3 +1189,29 @@ Implemented and verified (37 dedicated tests across 4 test suites: 3 unit test c
 - **Reliability Freeze**:
   - All 14 worker crash boundaries proven resilient against data loss and duplication.
   - All Phase 13 architectural invariants verified and formally frozen under ADR-031.
+
+---
+
+## Phase 14 Testing Scope: Persistent Migration Records & History (Phase 14A & 14B)
+
+### 1. Phase 14B Unit Tests (`Phase14BPersistentMigrationRecordTest`)
+- **Suite**: `Phase14BPersistentMigrationRecordTest` (6 unit tests, 0 failures, 0 errors, 0 skipped).
+- **Coverage**:
+  - `migrationExecutionInitializesSourceAndMatchedCounts`: Validates that `MigrationExecution` correctly initializes `totalSourceTracks` and `matchedTracks` from `ApprovedMigrationContext` along with destination and playlist metadata.
+  - `executionTrackRecordPreservesMatchingEvidenceAndProvenance`: Validates that `ExecutionTrackRecord` correctly preserves candidate details (`destinationTitle`, `destinationChannel`, `destinationDurationMs`), matching evidence (`matchScore`, `matchDecision`), and provenance (`decisionSource`).
+  - `approvedPlanValidatorCapturesEvidenceFromReviewTrack`: Validates that `DefaultApprovedPlanValidator` extracts match score, match decision, and decision provenance from `ReviewTrack` into `ApprovedTrack` during plan validation.
+  - `releaseExecutionSetsAndClearsFailureSummary`: Validates that `releaseExecution()` sets an informative `failureSummary` on `FAILED` and `PARTIALLY_COMPLETED` executions and clears it upon `COMPLETED`.
+  - `playlistCreationFailureLifecycleManagement`: Validates that `recordPlaylistCreationFailure` records the failure summary and error code on `ALLOCATING_DESTINATION` and `markPlaylistCreated` clears it upon destination allocation.
+  - `summaryAndApiMapperFullFieldMapping`: Validates that `MigrationExecutionSummary` and `MigrationExecutionApiMapper` map all newly added Phase 14B fields correctly to client responses.
+
+### 2. Phase 14B PostgreSQL Integration Tests (`Phase14BPersistentMigrationRecordIT`)
+- **Suite**: `Phase14BPersistentMigrationRecordIT` (5 integration tests executed against Testcontainers PostgreSQL 16, 0 failures, 0 errors, 0 skipped).
+- **Coverage**:
+  - `testMigrationExecutionPersistenceInPostgres`: Validates durable persistence of `MigrationExecution` with ownership, playlist metadata, source/matched track counts, timestamps, and failure summary in PostgreSQL.
+  - `testExecutionTrackRecordPersistenceInPostgres`: Validates durable persistence of `ExecutionTrackRecord` with destination candidate metadata, match score, match decision, and decision provenance.
+  - `testNullableDestinationPlaylistInAllocatingState`: Validates that `destination_playlist_id` is safely nullable during `ALLOCATING_DESTINATION` and successfully confirmed when created.
+  - `testUserMigrationHistorySortingAndPagination`: Validates reverse chronological query ordering `(created_at DESC)` and Spring Data JPA `Pageable` pagination across multiple user executions.
+  - `testResumePreservesCompletedTracksInDatabase`: Validates that completed track outcomes (`ADDED` with `destination_playlist_item_id`) remain durable and unmodified across parent execution retry or resume.
+
+### 3. Checkstyle & Code Hygiene
+- `mvnw.cmd checkstyle:check`: 0 Checkstyle violations across all 462 main source files and 186 test source files.

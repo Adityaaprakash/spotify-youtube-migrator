@@ -1410,10 +1410,15 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         }
 
         // Finalize execution state
+        final boolean wasStopped = stopRemaining;
+        final String finalStopReason = stopReason;
         return transactionTemplate.execute(status -> {
             MigrationExecution execution = executionRepository.findById(executionId)
                     .orElseThrow(() -> new IllegalStateException("Migration execution missing: " + executionId));
 
+            if (wasStopped && finalStopReason != null && execution.getFailureSummary() == null) {
+                execution.setFailureSummary("Track insertion stopped: " + finalStopReason);
+            }
             execution.releaseExecution();
             boolean invariantValid = execution.validateConservationInvariant();
             if (!invariantValid) {
@@ -1935,10 +1940,15 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         }
 
         // Release execution claim, reconcile counts, and finalize status
+        final boolean wasDirectStopped = stopRemaining;
+        final String finalDirectStopReason = stopReason;
         return transactionTemplate.execute(status -> {
             MigrationExecution execution = executionRepository.findById(executionId)
                     .orElseThrow(() -> new IllegalStateException("Migration execution missing: " + executionId));
 
+            if (wasDirectStopped && finalDirectStopReason != null && execution.getFailureSummary() == null) {
+                execution.setFailureSummary("Track insertion stopped: " + finalDirectStopReason);
+            }
             execution.releaseExecution();
             MigrationExecution saved = executionRepository.saveAndFlush(execution);
             if (saved == null) {

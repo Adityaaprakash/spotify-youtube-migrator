@@ -279,7 +279,10 @@ public final class MigrationExecutionApiMapper {
                 summary.canRollback(),
                 summary.startedAt(),
                 summary.completedAt(),
-                trackResponses
+                trackResponses,
+                summary.totalSourceTracks(),
+                summary.matchedTracks(),
+                summary.failureSummary()
         );
     }
 
@@ -300,7 +303,13 @@ public final class MigrationExecutionApiMapper {
                 dto.errorMessage(),
                 dto.attemptCount(),
                 dto.startedAt(),
-                dto.completedAt()
+                dto.completedAt(),
+                dto.destinationTitle(),
+                dto.destinationChannel(),
+                dto.destinationDurationMs(),
+                dto.decisionSource(),
+                dto.matchScore(),
+                dto.matchDecision()
         );
     }
 

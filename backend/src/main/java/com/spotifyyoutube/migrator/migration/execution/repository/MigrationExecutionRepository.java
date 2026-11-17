@@ -2,6 +2,8 @@ package com.spotifyyoutube.migrator.migration.execution.repository;
 
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecution;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -29,6 +31,10 @@ public interface MigrationExecutionRepository extends JpaRepository<MigrationExe
     Optional<MigrationExecution> findByIdAndUserId(UUID id, UUID userId);
 
     List<MigrationExecution> findByUserIdOrderByCreatedAtDesc(UUID userId);
+
+    Page<MigrationExecution> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
+
+    long countByUserId(UUID userId);
 
     boolean existsByReviewSessionId(UUID reviewSessionId);
 

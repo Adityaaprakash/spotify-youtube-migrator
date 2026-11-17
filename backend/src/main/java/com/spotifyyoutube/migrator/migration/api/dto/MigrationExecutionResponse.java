@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Presentation response DTO summarizing a durable migration execution (Phase 11E/11F).
+ * Presentation response DTO summarizing a durable migration execution (Phases 11E, 11F, & 14B).
  *
  * @param executionId unique execution identifier
  * @param reviewSessionId unique review session identifier
@@ -17,7 +17,7 @@ import java.util.UUID;
  * @param destinationPlaylistId destination playlist identifier
  * @param destinationPlaylistUrl web URL to access destination playlist
  * @param sourcePlaylistTitle title of the source playlist
- * @param status execution lifecycle status ("INITIALIZED", "RUNNING", "PARTIALLY_COMPLETED", "COMPLETED", "FAILED", "RECOVERY_REQUIRED", "ROLLED_BACK", "PARTIALLY_ROLLED_BACK")
+ * @param status execution lifecycle status ("INITIALIZED", "QUEUED", "RUNNING", "PARTIALLY_COMPLETED", "COMPLETED", "FAILED", "RECOVERY_REQUIRED", "ROLLED_BACK", "PARTIALLY_ROLLED_BACK")
  * @param totalApprovedTracks total approved tracks targeted for insertion
  * @param successfulInsertions count of tracks successfully inserted
  * @param failedInsertions count of tracks that failed insertion with confirmed provider rejection
@@ -30,6 +30,9 @@ import java.util.UUID;
  * @param startedAt timestamp when execution began
  * @param completedAt timestamp when execution finished
  * @param trackRecords detailed per-track durable execution records in canonical target position order
+ * @param totalSourceTracks total number of tracks evaluated in source playlist
+ * @param matchedTracks number of source tracks that received valid match candidates
+ * @param failureSummary human-readable summary of failure reason if execution did not complete fully
  */
 public record MigrationExecutionResponse(
         UUID executionId,
@@ -52,8 +55,65 @@ public record MigrationExecutionResponse(
         boolean canRollback,
         Instant startedAt,
         Instant completedAt,
-        List<ExecutionTrackRecordResponse> trackRecords
+        List<ExecutionTrackRecordResponse> trackRecords,
+        int totalSourceTracks,
+        int matchedTracks,
+        String failureSummary
 ) {
+
+    /**
+     * Backward-compatible 21-parameter constructor (Phase 11F).
+     */
+    public MigrationExecutionResponse(
+            UUID executionId,
+            UUID reviewSessionId,
+            UUID planId,
+            UUID userId,
+            Platform destinationPlatform,
+            String destinationPlaylistId,
+            String destinationPlaylistUrl,
+            String sourcePlaylistTitle,
+            String status,
+            int totalApprovedTracks,
+            int successfulInsertions,
+            int failedInsertions,
+            int uncertainInsertions,
+            int skippedInsertions,
+            int rolledBackInsertions,
+            boolean fullySuccessful,
+            boolean canResume,
+            boolean canRollback,
+            Instant startedAt,
+            Instant completedAt,
+            List<ExecutionTrackRecordResponse> trackRecords
+    ) {
+        this(
+                executionId,
+                reviewSessionId,
+                planId,
+                userId,
+                destinationPlatform,
+                destinationPlaylistId,
+                destinationPlaylistUrl,
+                sourcePlaylistTitle,
+                status,
+                totalApprovedTracks,
+                successfulInsertions,
+                failedInsertions,
+                uncertainInsertions,
+                skippedInsertions,
+                rolledBackInsertions,
+                fullySuccessful,
+                canResume,
+                canRollback,
+                startedAt,
+                completedAt,
+                trackRecords,
+                totalApprovedTracks,
+                totalApprovedTracks,
+                null
+        );
+    }
 
     /**
      * Backward-compatible 19-parameter constructor (Phase 11E).
