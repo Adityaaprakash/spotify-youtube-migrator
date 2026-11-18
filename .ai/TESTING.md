@@ -1803,3 +1803,45 @@ Implemented and verified (43 dedicated security tests across 4 test classes, 2,2
   - `cors_PreflightAllowedOrigin_Returns200WithCorsHeaders`: Verifies preflight from configured origin (`http://localhost:5173`) returns allowed origin, allowed methods, allowed credentials, and exposed headers.
   - `cors_PreflightUnauthorizedOrigin_DoesNotAllowOrigin`: Verifies preflight from unauthorized origin (`http://evil.com`) is rejected without CORS allow headers.
   - `httpMethod_UnsupportedMethod_Returns405MethodNotAllowed`: Verifies unsupported HTTP methods return 405 Method Not Allowed with standardized `METHOD_NOT_ALLOWED` error response.
+
+### 5. Sensitive Data Protection and Logging Security Suite (`SensitiveDataLoggingSecurityTest`)
+- 15 dedicated test methods:
+  - `redactsBearerTokens`: Verifies single and multiple Bearer tokens in headers, error messages, and URLs are redacted to `Bearer [REDACTED]`.
+  - `redactsBasicAuthCredentials`: Verifies Basic authentication credentials are redacted to `Basic [REDACTED]`.
+  - `redactsAuthorizationHeaders`: Verifies generic and typed Authorization headers are redacted while preserving header keyword.
+  - `redactsQueryAndFormParameters`: Verifies `access_token`, `refresh_token`, `client_secret`, `secret`, `password`, `code`, `state`, `api_key`, `key` parameters are redacted.
+  - `redactsJsonPayloads`: Verifies JSON payload string values for sensitive keys are redacted to `"[REDACTED]"`.
+  - `redactsSessionAndCsrfCookies`: Verifies `JSESSIONID`, `XSRF-TOKEN`, `SESSION` cookie values are redacted.
+  - `neutralizesCrlfLogInjection`: Verifies `sanitizeSingleLine` replaces CR and LF characters to prevent log splitting and forging attacks.
+  - `neutralizesCrlfWithSensitiveParameters`: Verifies CRLF neutralization combined with sensitive token redaction.
+  - `sanitizesNestedThrowableCauseChains`: Verifies multi-level exception cause chains redact secrets at every level.
+  - `preventsInfiniteLoopsOnCircularThrowableCauses`: Verifies cyclic exception references terminate cleanly without StackOverflowError.
+  - `extractsAndSanitizesThrowableMessage`: Verifies extraction of direct throwable message with fallback to simple class name.
+  - `isIdempotent`: Verifies repeated sanitization (`sanitize(sanitize(x))`) never double-redacts or mangles text.
+  - `handlesNullAndBlankStrings`: Verifies null-safety and blank input preservation.
+  - `supportsCustomReplacementMask`: Verifies custom mask support (e.g. `***`).
+  - `logAppenderCaptureNeverLeaksSecrets`: CapturedOutput test asserting real logger output contains contextual message `OAuth token refreshed successfully userId=... provider=spotify` and zero raw secrets.
+
+### 6. Database Security and Token Persistence Suite (`DatabaseSecurityTest`)
+- 12 dedicated test methods:
+  - `tokensAreEncryptedWithAesGcm`: Verifies AES-256-GCM encryption at rest, minimum 28-byte payload, and exact plaintext recovery.
+  - `noncesAreCryptographicallyRandomAndNeverRepeated`: Verifies distinct ciphertexts produced for identical plaintexts via unique 12-byte random IVs.
+  - `tamperedCiphertextFailsVerification`: Verifies bit tampering in ciphertext or authentication tag throws `InvalidStateException`.
+  - `truncatedCiphertextIsRejected`: Verifies truncated ciphertext payloads are safely rejected.
+  - `nullAndBlankTokensReturnNull`: Verifies null/blank tokens safely return null without encryption attempt.
+  - `invalidKeyIsRejected`: Verifies fail-fast rejection of null, blank, malformed Base64, and non-256-bit encryption keys.
+  - `connectionServiceEncryptsTokensBeforeRepositorySave`: Verifies `OAuthConnectionService.saveConnection` encrypts tokens before passing entity to repository.
+  - `getConnectionReturnsDecryptedDetachedCopy`: Verifies `getConnection` returns detached copy with decrypted tokens while database entity remains encrypted.
+  - `oauthStateRepositoryQueryContract`: Verifies `deleteExpiredStates` and `consumeState` repository contracts matching V17 index `idx_oauth_states_expires_at`.
+  - `reviewSessionRepositoryQueryContract`: Verifies `findByUserIdOrderByCreatedAtDesc` contract matching V17 composite index `idx_reviewsessions_user_created`.
+  - `rollbackRecordRepositoryQueryContract`: Verifies `findByExecutionIdOrderByTargetPositionAsc` contract matching V17 composite index `idx_rollback_execution_target_position`.
+  - `reconciliationRecordRepositoryQueryContract`: Verifies `findByExecutionIdOrderByCreatedAtAsc` contract matching V17 composite index `idx_reconciliation_execution_created`.
+
+### 7. Actuator and Operational Endpoint Security Suite (`ActuatorSecurityTest`)
+- 6 dedicated test methods:
+  - `healthEndpoint_PublicAccess_Returns200`: Verifies `/actuator/health` is publicly accessible for liveness/readiness orchestration probes without authentication.
+  - `healthEndpoint_DoesNotExposeComponentDetails`: Verifies `/actuator/health` response does not expose internal component details, database names, or disk space when unauthenticated (`show-details: never`).
+  - `infoEndpoint_PublicAccess_Returns200`: Verifies `/actuator/info` is accessible for basic application metadata.
+  - `unexposedActuatorEndpoints_Return404`: Verifies unexposed actuator endpoints (e.g., `/actuator/env`, `/actuator/beans`) return 404 Not Found to prevent information disclosure.
+  - `sensitiveActuatorEndpoints_WhenUnauthenticated_ReturnUnauthorizedOrNotFound`: Verifies actuator administrative endpoints require authentication or remain unexposed.
+  - `actuatorHealth_HealthIndicatorsDoNotLeakCredentials`: Verifies health payload never leaks credentials, hostnames, or sensitive connection parameters.

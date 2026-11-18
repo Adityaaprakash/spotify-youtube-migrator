@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.identity.application;
 
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import com.spotifyyoutube.migrator.identity.domain.ConnectionStatus;
 import com.spotifyyoutube.migrator.identity.domain.OAuthConnection;
 import com.spotifyyoutube.migrator.identity.domain.OAuthProvider;
@@ -108,11 +109,12 @@ public class OAuthTokenLifecycleServiceImpl implements OAuthTokenLifecycleServic
                 connection.setStatus(ConnectionStatus.CONNECTED);
 
                 connectionRepository.save(connection);
+                log.info("OAuth token refreshed successfully userId={} provider={}", userId, provider.name().toLowerCase());
             } catch (ConnectionDisconnectedException ex) {
                 throw new InvalidStateException(ex.getMessage());
             } catch (Exception ex) {
                 log.warn("Failed to refresh OAuth token for user {} and provider {}. Flagging REAUTH_REQUIRED: {}",
-                        userId, provider, ex.getMessage());
+                        userId, provider, SensitiveDataSanitizer.sanitize(ex.getMessage()));
                 if (connection.getId() == null || connectionRepository.existsById(connection.getId())) {
                     connection.setStatus(ConnectionStatus.REAUTH_REQUIRED);
                     connectionRepository.save(connection);

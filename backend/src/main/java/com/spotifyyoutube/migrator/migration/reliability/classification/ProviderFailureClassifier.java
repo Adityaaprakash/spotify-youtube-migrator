@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
@@ -16,7 +17,6 @@ import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.regex.Pattern;
 
 /**
  * Provider failure classification engine for external APIs (YouTube, Spotify) (Phase 13B).
@@ -34,10 +34,6 @@ import java.util.regex.Pattern;
  */
 @Component
 public class ProviderFailureClassifier {
-
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "(?i)(bearer\\s+|(?:access_token|refresh_token|token|api_key|apikey|key|client_secret|secret|password)=)[^\\s&\"',;]+"
-    );
 
     private final RetryAfterParser retryAfterParser;
     private final ObjectMapper objectMapper;
@@ -416,7 +412,7 @@ public class ProviderFailureClassifier {
         if (message == null) {
             return "null";
         }
-        return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+        return SensitiveDataSanitizer.sanitize(message);
     }
 
     private static boolean isNetworkTimeoutOrConnectionError(Throwable t) {

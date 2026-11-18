@@ -3,10 +3,35 @@
 Last Updated: 2026-11-18
 
 Current Phase: Phase 16 — Security Hardening / End-to-End Integration [IN PROGRESS]
-Current Subphase: Phase 16C & 16D (Authentication, Authorization & API Security Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 16 Final Review / Commit & Push [READY TO BEGIN]
-Latest Pushed Commit: b82277acae4287cb855265a21a759febb24657a0 (test(frontend): close phase 15 verification gaps)
+Current Subphase: Phase 16E & 16F (Database Security Hardening & Logging Protection) [COMPLETE & VERIFIED] -> Next Subphase: Phase 16E/16F Final Review / Commit & Push [READY TO BEGIN]
+Latest Pushed Commit: 76fea3cbb4b674e36049124f5ea95356630f5530 (feat(security): harden authentication and API security)
 
 ## Verification Status & Release Gate
+- **Phase 16E & 16F Verification Status**: COMPLETE & VERIFIED.
+  - Database Security Hardening (Phase 16E):
+    - Token Encryption Persistence Invariant: Plaintext tokens are strictly never persisted. AES-256-GCM encryption verified across `OAuthTokenServiceImpl` and `OAuthConnectionServiceImpl`. Encrypted columns (`access_token`, `refresh_token`) contain unique 12-byte random IVs and 128-bit authentication tags; tampering throws `InvalidStateException`. Decrypted tokens exist only as detached in-memory objects during active provider communication.
+    - Forward-Only Flyway Migration `V17__phase16e_database_security_and_indexes.sql`: Applied 4 query-justified index optimizations:
+      1. `idx_oauth_states_expires_at` on `oauth_states(expires_at)` optimizing periodic expired state cleanup sweep (`OAuthStateRepository.deleteExpiredStates`).
+      2. `idx_reviewsessions_user_created` on `review_sessions(user_id, created_at DESC)` optimizing user review session discovery in reverse chronological order (`findByUserIdOrderByCreatedAtDesc`).
+      3. `idx_rollback_execution_target_position` on `execution_rollback_records(execution_id, target_position ASC)` optimizing ordered execution rollback record retrieval (`findByExecutionIdOrderByTargetPositionAsc`).
+      4. `idx_reconciliation_execution_created` on `execution_reconciliation_records(execution_id, created_at ASC)` optimizing ordered reconciliation record retrieval (`findByExecutionIdOrderByCreatedAtAsc`).
+    - Database Constraints & Audit Retention: Audit records (`execution_rollback_records`, `execution_reconciliation_records`) retain `ON DELETE RESTRICT` foreign keys to `migration_executions`, enforcing mutation history retention and preventing accidental deletion of audit trails.
+    - Environment Configuration Documentation: Documented required `OAUTH_ENCRYPTION_KEY=` environment variable in `.env.example`.
+  - Logging & Sensitive Data Protection (Phase 16F):
+    - Centralized Sensitive Data Sanitizer (`SensitiveDataSanitizer`): Unified, idempotent, thread-safe utility redacting Bearer tokens (`Bearer [REDACTED]`), Basic auth (`Basic [REDACTED]`), generic Authorization headers, URI/query parameters (`access_token`, `refresh_token`, `client_secret`, `secret`, `password`, `code`, `state`, `api_key`), JSON properties, and session cookies (`JSESSIONID`, `XSRF-TOKEN`, `SESSION`).
+    - CRLF Log Injection Protection: `sanitizeSingleLine` strips `\r` and `\n` to prevent log splitting and forging from untrusted callback errors.
+    - Throwable Cause Chain Traversal: `sanitize(Throwable)` safely inspects cause chains up to 20 levels with circular reference protection to prevent recursion loops, redacting sensitive tokens from all nested exception messages.
+    - Full Backend Logging Audit: Refactored `DefaultMigrationExecutionStateService`, `DefaultDestinationPlaylistCreationService`, `DefaultOrderedTrackInsertionService`, `PlaylistMigrationOrchestrator`, `ProviderFailureClassifier`, `OAuthTokenLifecycleServiceImpl`, and `OAuthController` to delegate to `SensitiveDataSanitizer`.
+    - Safe Contextual Success & Warning Logging: Refreshed tokens logged safely without secrets: `OAuth token refreshed successfully userId=<id> provider=spotify`. OAuth errors and downstream exceptions logged with sanitized single-line formatting.
+  - Actuator & Operational Endpoint Hardening:
+    - Minimal Public Surface: Restricted actuator endpoints in `SecurityConfig.java`; only `/actuator/health` (and health group probes) and `/actuator/info` are public. All other actuator endpoints require authentication.
+    - Information Disclosure Protection: Configured `management.endpoint.health.show-details: never` in production and base config; unauthenticated health probes return strictly `{"status":"UP"}` without internal database or disk details. Restricted web exposure in `application.yml` and `application-prod.yml` to `health,info`, completely blocking `/actuator/env`, `/actuator/beans`, and debugging dumps.
+  - Test Suite & Verification:
+    - 3 dedicated security test suites (`SensitiveDataLoggingSecurityTest`, `DatabaseSecurityTest`, `ActuatorSecurityTest`) comprising 33 automated tests.
+    - All 91 Phase 16 security tests passing (100% pass rate).
+    - Full Maven test suite: 2,262 total tests passing with 0 failures, 0 errors, and 0 skipped.
+    - Checkstyle: 0 Checkstyle violations (`mvnw checkstyle:check`).
+    - Git Hygiene: `git diff --check` clean with 0 whitespace errors.
 - **Phase 16C & 16D Verification Status**: COMPLETE & VERIFIED.
   - Authentication & Authorization Hardening (Phase 16C):
     - Comprehensive Authentication Enforcement: Audited and verified all application endpoints; anonymous access to protected user, playlist, migration, review, Spotify, and YouTube endpoints is strictly blocked (HTTP 403 Forbidden / HTTP 401 Unauthorized for `/api/migrations/submit`).

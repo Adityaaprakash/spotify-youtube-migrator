@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.application.execution;
 
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.CreateDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylist;
@@ -21,7 +22,6 @@ import org.springframework.web.client.RestClientException;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * Default implementation of {@link DestinationPlaylistCreationService}.
@@ -41,10 +41,6 @@ import java.util.regex.Pattern;
 public class DefaultDestinationPlaylistCreationService implements DestinationPlaylistCreationService {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultDestinationPlaylistCreationService.class);
-
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "(?i)(bearer\\s+|(?:access_token|refresh_token|token|api_key|apikey|key|client_secret|secret|password)=)[^\\s&\"',;]+"
-    );
 
     private final ApprovedMigrationExecutionService executionService;
     private final MusicDestination musicDestination;
@@ -204,6 +200,6 @@ public class DefaultDestinationPlaylistCreationService implements DestinationPla
         if (message == null) {
             return "null";
         }
-        return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+        return SensitiveDataSanitizer.sanitize(message);
     }
 }

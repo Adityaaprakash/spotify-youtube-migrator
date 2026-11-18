@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.application.orchestration;
 
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import com.spotifyyoutube.migrator.matching.discovery.CandidateDiscoveryRequest;
 import com.spotifyyoutube.migrator.matching.discovery.CandidateDiscoveryResult;
 import com.spotifyyoutube.migrator.matching.discovery.CandidateDiscoveryService;
@@ -37,7 +38,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * Orchestrates the end-to-end playlist migration workflow connecting Spotify source tracks,
@@ -57,9 +57,6 @@ import java.util.regex.Pattern;
 public class PlaylistMigrationOrchestrator {
 
     private static final Logger log = LoggerFactory.getLogger(PlaylistMigrationOrchestrator.class);
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "(?i)(bearer\\s+|(?:access_token|refresh_token|token|api_key|apikey|key|client_secret|secret|password)=)[^\\s&\"',;]+"
-    );
 
     private final SpotifyPlaylistService spotifyPlaylistService;
     private final NormalizationOrchestrator normalizationOrchestrator;
@@ -345,6 +342,6 @@ public class PlaylistMigrationOrchestrator {
         if (message == null) {
             return null;
         }
-        return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+        return SensitiveDataSanitizer.sanitize(message);
     }
 }

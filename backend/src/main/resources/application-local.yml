@@ -13,3 +13,12 @@ logging:
   level:
     com.spotifyyoutube.migrator: DEBUG
     org.springframework.web: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always

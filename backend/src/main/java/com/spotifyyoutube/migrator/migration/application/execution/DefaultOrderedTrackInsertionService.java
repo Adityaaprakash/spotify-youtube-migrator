@@ -3,6 +3,7 @@ package com.spotifyyoutube.migrator.migration.application.execution;
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
 import com.spotifyyoutube.migrator.migration.application.destination.model.AddTrackToDestinationPlaylistRequest;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationPlaylistItem;
@@ -26,7 +27,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * Default implementation of {@link OrderedTrackInsertionService}.
@@ -46,10 +46,6 @@ import java.util.regex.Pattern;
 public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertionService {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultOrderedTrackInsertionService.class);
-
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "(?i)(bearer\\s+|(?:access_token|refresh_token|token|api_key|apikey|key|client_secret|secret|password)=)[^\\s&\"',;]+"
-    );
 
     private final ApprovedMigrationExecutionService executionService;
     private final MusicDestination musicDestination;
@@ -266,7 +262,7 @@ public class DefaultOrderedTrackInsertionService implements OrderedTrackInsertio
         if (message == null) {
             return "null";
         }
-        return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+        return SensitiveDataSanitizer.sanitize(message);
     }
 
     private PlaylistTrackInsertionSummary toInsertionSummary(MigrationExecutionSummary summary) {

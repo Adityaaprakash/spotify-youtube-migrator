@@ -3,6 +3,7 @@ package com.spotifyyoutube.migrator.migration.application.execution;
 import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import com.spotifyyoutube.migrator.migration.reliability.scheduling.StaleLeaseOwnershipException;
 import com.spotifyyoutube.migrator.identity.domain.User;
 import com.spotifyyoutube.migrator.migration.application.destination.MusicDestination;
@@ -74,7 +75,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -87,10 +87,6 @@ import java.util.stream.Collectors;
 public class DefaultMigrationExecutionStateService implements MigrationExecutionStateService {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultMigrationExecutionStateService.class);
-
-    private static final Pattern TOKEN_PATTERN = Pattern.compile(
-            "(?i)(bearer\\s+|(?:access_token|refresh_token|token|api_key|apikey|key|client_secret|secret|password)=)[^\\s&\"',;]+"
-    );
 
     private final MigrationExecutionRepository executionRepository;
     private final ExecutionTrackRecordRepository trackRecordRepository;
@@ -2596,7 +2592,7 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
         if (message == null) {
             return "null";
         }
-        return TOKEN_PATTERN.matcher(message).replaceAll("$1[REDACTED]");
+        return SensitiveDataSanitizer.sanitize(message);
     }
 
     @Override

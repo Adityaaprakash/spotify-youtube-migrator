@@ -1,6 +1,7 @@
 package com.spotifyyoutube.migrator.identity.api;
 
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import com.spotifyyoutube.migrator.identity.api.dto.OAuthConnectionStatusDto;
 import com.spotifyyoutube.migrator.identity.application.OAuthAuthorizationService;
 import com.spotifyyoutube.migrator.identity.application.OAuthStateService;
@@ -70,7 +71,7 @@ public class OAuthController {
 
         // Handle provider denial or error response (RFC 6749 Section 4.1.2.1)
         if (error != null && !error.isBlank()) {
-            log.warn("OAuth provider {} returned error during authorization: {}", provider, error);
+            log.warn("OAuth provider {} returned error during authorization: {}", provider, SensitiveDataSanitizer.sanitizeSingleLine(error));
             if (state != null && !state.isBlank()) {
                 stateService.invalidateState(state);
             }
