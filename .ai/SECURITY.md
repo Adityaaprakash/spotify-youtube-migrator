@@ -98,3 +98,17 @@
   - Public `/actuator/health` calls return strictly `{"status":"UP"}` without revealing database version, schema status, disk space, or subsystem internals.
   - In `application-prod.yml`, `management.info.env.enabled: false` ensures environment details are not leaked in `/actuator/info`.
   - Development profiles (`application-local.yml`) may selectively expose metrics or details for local diagnostic use.
+
+---
+
+## 7. Integrated Security Architecture & Phase 16 Freeze (Phase 16G & 16H)
+- **Multi-Layer Defense Posture**:
+  - The security posture combines perimeter controls (CORS whitelist, CSRF double-submit cookies, sliding-window rate limiting), edge application controls (Spring Security session fixation prevention, cookie expiry, JSR-380 input validation, bounded payload limits), authorization controls (authenticated Principal derivation, multi-tenant IDOR 404 non-disclosure), provider controls (256-bit entropy OAuth states, atomic single-use deletion, static redirect URIs, striped concurrency locking), database controls (AES-256-GCM authenticated encryption at rest, `ON DELETE RESTRICT` audit retention, Flyway V1–V17 migrations), diagnostic controls (centralized `SensitiveDataSanitizer`, CRLF log injection protection, circular-safe exception traversal), and operational controls (restricted Actuator exposure, `show-details: never`).
+- **Production Secret & Key Management**:
+  - Production deployments require external injection of `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `OAUTH_ENCRYPTION_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `YOUTUBE_API_KEY`.
+  - In `application-prod.yml`, missing required secrets fail fast on container startup without falling back to insecure defaults.
+- **Accepted Limitations & Architectural Boundaries**:
+  - In-memory rate limiting and in-memory OAuth refresh lock striping operate node-locally within a single JVM process. Multi-node clustered deployments will require distributed locking or API gateway rate limiting.
+  - Testcontainers runtime verification requires a functional local Docker daemon; mock-based regression test suites provide 100% test isolation when Docker is unavailable.
+- **Phase 16 Formal Freeze**:
+  - All security requirements from Phase 16A through 16H are verified and sealed. The security subsystem is formally frozen. Phase 17 (Testing) may proceed without re-opening Phase 16 architectural contracts.

@@ -1845,3 +1845,30 @@ Implemented and verified (43 dedicated security tests across 4 test classes, 2,2
   - `unexposedActuatorEndpoints_Return404`: Verifies unexposed actuator endpoints (e.g., `/actuator/env`, `/actuator/beans`) return 404 Not Found to prevent information disclosure.
   - `sensitiveActuatorEndpoints_WhenUnauthenticated_ReturnUnauthorizedOrNotFound`: Verifies actuator administrative endpoints require authentication or remain unexposed.
   - `actuatorHealth_HealthIndicatorsDoNotLeakCredentials`: Verifies health payload never leaks credentials, hostnames, or sensitive connection parameters.
+
+---
+
+## Phase 16G & 16H — Integrated Security Verification and Phase Freeze Scope (Complete, Verified & Frozen)
+
+Phase 16G and 16H conclude the security hardening milestone by performing an integrated regression verification across all 10 security test suites (127 dedicated security tests across 12 test classes) and the full 2,262-test backend test suite:
+
+### Security Test Suites Inventory (127 Tests)
+1. **`OAuthStateSecurityTest`** (11 tests): 256-bit cryptographically secure state generation, user/provider binding, atomic single-use deletion, 15-minute expiration, state invalidation on callback cancellation.
+2. **`OAuthRedirectUriValidationTest`** (15 tests): Scheme whitelisting, host/path validation, fragment rejection, open redirect sanitization (`//`, `/\`, CRLF, `%2f`, `%5c`, `..`, protocol schemes).
+3. **`OAuthTokenEncryptionTest`** (11 tests): AES-256-GCM encryption at rest, 12-byte random IVs, 128-bit authentication tags, 256-bit key validation, tamper detection (`InvalidStateException`).
+4. **`OAuthTokenLifecycleSecurityTest`** (7 tests): Stripe-locked concurrent refresh coordination (`NUM_LOCK_STRIPES = 256`), double-checked refresh pattern, 5-minute pre-expiry buffer, disconnect detection during refresh.
+5. **`OAuthControllerTest`** (7 tests): Controller endpoint mapping, callback parameters, state consumption, error callback handling.
+6. **`AuthenticationAndAuthorizationSecurityTest`** (13 tests): Anonymous request blocking (401/403), user profile isolation, playlist isolation, migration execution isolation, review session isolation, 404 Not Found non-disclosure on unauthorized multi-tenant access (anti-IDOR).
+7. **`ApiRateLimitingSecurityTest`** (12 tests): In-memory sliding window rate limiting (10,000 keys capacity), IP spoofing protection (`trust-forwarded-headers: false`), tiered limits on auth, search, migration mutations, HTTP 429 with `Retry-After`.
+8. **`InputValidationSecurityTest`** (10 tests): JSR-380 bean validation, string/collection length boundaries, pagination parameter bounds, disabled multipart uploads, Tomcat request body caps (1MB/2MB).
+9. **`CorsAndCsrfSecurityTest`** (8 tests): Origin whitelist (`http://localhost:5173,http://localhost:3000`), credentials allowed, exposed headers; double-submit cookie CSRF via `CookieCsrfTokenRepository.withHttpOnlyFalse()` and `CsrfCookieFilter`.
+10. **`DatabaseSecurityTest`** (12 tests): AES-256-GCM token encryption persistence invariant, nonces randomness, tampering rejection, truncated ciphertext rejection, repository query contracts matching Flyway V17 indexes (`idx_oauth_states_expires_at`, `idx_reviewsessions_user_created`, `idx_rollback_execution_target_position`, `idx_reconciliation_execution_created`), and audit history retention (`ON DELETE RESTRICT`).
+11. **`SensitiveDataLoggingSecurityTest`** (15 tests): Centralized `SensitiveDataSanitizer` redacting Bearer tokens, Basic credentials, Authorization headers, query/form parameters, JSON keys, session cookies; CRLF log injection neutralization; circular-safe throwable cause chain traversal; zero tokens/secrets in logs; contextual success logging.
+12. **`ActuatorSecurityTest`** (6 tests): Restricted actuator public access (`/actuator/health`, `/actuator/info`), component detail masking (`show-details: never`), 404 rejection on unexposed actuator endpoints (`env`, `beans`), authenticated administrative access.
+
+### Verification Release Gate Results
+- **Security Tests**: 127 / 127 tests passing (100% pass rate).
+- **Full Backend Regression Suite**: 2,262 / 2,262 tests passing (0 failures, 0 errors, 0 skipped).
+- **Checkstyle**: 0 Checkstyle violations (`mvnw checkstyle:check`).
+- **Frontend Layer**: Complete, verified, and frozen from Phase 15 (0 frontend files modified).
+- **Phase Status**: Phase 16 formally COMPLETE and FROZEN; cleared for Phase 17.
