@@ -3,10 +3,23 @@
 Last Updated: 2026-11-18
 
 Current Phase: Phase 17 — Testing [IN PROGRESS]
-Current Subphase: Phase 17A (Testing Architecture Audit & Coverage Planning) [AUDIT COMPLETE] -> Next Subphase: Phase 17B (Unit Testing Hardening) [AWAITING APPROVAL]
-Latest Pushed Commit: 5e483f55a842742c704c8b486e9f65c9c596cf3a (docs(security): finalize phase 16 security audit and freeze)
+Current Subphase: Phase 17B (Unit Testing Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 17C (Integration Testing Hardening) [AWAITING APPROVAL]
+Latest Pushed Commit: afc26c172f73a5afa22c23aa882fdb70f163a8dd (docs(testing): finalize phase 17A testing audit)
 
 ## Verification Status & Release Gate
+- **Phase 17B Verification Status**: COMPLETE & VERIFIED.
+  - Implemented comprehensive unit testing hardening across 7 test classes without modifying production code.
+  - Expanded backend test suite from 2,262 to **2,429 tests** (+167 tests), passing with 0 failures, 0 errors, 0 skipped (`mvn test`, 1 min 40 s).
+  - Maintained 0 Checkstyle violations (`mvn checkstyle:check`).
+  - Closed unit-testing gaps identified in Phase 17A audit:
+    1. `MigrationExecutionStateMachineTest`: Implemented complete 10-state transition matrix covering all $10 \times 10 = 100$ directed transitions (22 legal, 78 illegal); verified terminal state immutability (30 illegal outgoing transitions); verified illegal self-transitions and legal idempotent `QUEUED -> QUEUED`; tested operations `claimExecution()`, `markQueued()`, `resetToInitialized()`, and `markPlaylistCreated()` across all 10 states; verified state invariants `isTerminal()`, `canResume()`, `canRollback()`, and `isQueued()`.
+    2. `TitleNormalizerTest`: Added tests for Cyrillic, Japanese Kana, and Arabic titles with promotional suffix stripping; mixed Latin/non-Latin scripts; zero-width characters (`\u200B`, `\uFEFF`, `\u200C`); repeated punctuation clusters and nested parentheticals.
+    3. `ArtistNormalizerTest`: Added non-Latin featured credits; zero-width characters in artist names; multilingual collaboration tokens (`avec`, `con`) preserving band/duet identity; complex multi-delimiter featured artist credits.
+    4. `DefaultSearchQueryGeneratorTest`: Added tests for titles exceeding 100 characters; safe truncation at `SearchQuery.MAX_QUERY_LENGTH` (500 chars); single-word artists; special characters and currency symbols; duplicate suppression when album equals clean title.
+    5. `DurationSimilarityScorerTest`: Added tests for extreme duration discrepancies (>30 min live jam vs 3 min single -> 0.0); continuous piecewise boundary transition precision accounting for 4-decimal rounding.
+    6. `VersionPenaltyScorerTest`: Added remix vs acoustic variant conflict tests accumulating to 0.25; multi-variant penalty summation bounded in $[0.0, 1.0]$.
+    7. `DefaultCandidateDiscoveryServiceTest`: Added tests filtering out candidates with null, empty, or whitespace IDs; zero-result query continuation across multiple queries; safe retention of candidates with missing or zero duration.
+  - Confirmed 0 production files modified (`backend/src/main/` and `frontend/` untouched).
 - **Phase 17A Verification Status**: AUDIT COMPLETE (Read-Only Planning).
   - Executed comprehensive read-only testing architecture audit across backend, frontend, security, and persistence subsystems.
   - Verified actual execution baseline: **2,401 distinct automated tests** passing at 100% (2,262 backend tests in `mvnw test` with 0 failures, 0 errors, 0 skipped; 139 frontend tests across 48 suites in `npm test`), 0 Checkstyle violations, 0 typecheck/lint errors, production Vite build succeeding.

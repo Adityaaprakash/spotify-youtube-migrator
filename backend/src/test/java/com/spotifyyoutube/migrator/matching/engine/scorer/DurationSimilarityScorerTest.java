@@ -153,6 +153,44 @@ class DurationSimilarityScorerTest {
             Double score10m = scorer.score(Duration.ofSeconds(200), Duration.ofSeconds(800));
             assertThat(score10m).isEqualTo(0.0);
         }
+
+        @Test
+        @DisplayName("should award strictly 0.0 for extreme duration discrepancies like extended live jams and full sets")
+        void shouldAwardZeroForExtremeDiscrepancies() {
+            // 3-minute studio single (180s) vs 45-minute extended live performance (2700s)
+            Double score45m = scorer.score(Duration.ofSeconds(180), Duration.ofSeconds(2700));
+            assertThat(score45m).isEqualTo(0.0);
+
+            // 3-minute studio single vs 2-hour full DJ set / album compilation (7200s)
+            Double score2h = scorer.score(Duration.ofSeconds(180), Duration.ofSeconds(7200));
+            assertThat(score2h).isEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("should strictly verify continuous piecewise boundary transitions")
+        void shouldVerifyPiecewiseBoundaryTransitions() {
+            long base = 200000L;
+
+            // Exactly at 2.0s boundary -> full credit 1.0
+            assertThat(scorer.score(base, base + 2000L)).isEqualTo(1.0);
+            // 100ms past 2.0s boundary -> decays below 1.0 accounting for 4-decimal rounding
+            assertThat(scorer.score(base, base + 2100L)).isLessThan(1.0);
+
+            // Exactly at 10.0s boundary -> 0.85
+            assertThat(scorer.score(base, base + 10000L)).isEqualTo(0.85);
+            // 100ms past 10.0s boundary -> decays below 0.85
+            assertThat(scorer.score(base, base + 10100L)).isLessThan(0.85);
+
+            // Exactly at 30.0s boundary -> 0.40
+            assertThat(scorer.score(base, base + 30000L)).isEqualTo(0.40);
+            // 100ms past 30.0s boundary -> decays below 0.40
+            assertThat(scorer.score(base, base + 30100L)).isLessThan(0.40);
+
+            // Exactly at 60.0s boundary -> 0.0
+            assertThat(scorer.score(base, base + 60000L)).isEqualTo(0.0);
+            // Past 60.0s boundary -> 0.0
+            assertThat(scorer.score(base, base + 60100L)).isEqualTo(0.0);
+        }
     }
 
     @Nested

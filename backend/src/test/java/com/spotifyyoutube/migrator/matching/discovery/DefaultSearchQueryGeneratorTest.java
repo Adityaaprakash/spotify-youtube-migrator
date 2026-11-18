@@ -455,6 +455,48 @@ class DefaultSearchQueryGeneratorTest {
             assertThat(queries.get(0).query().length()).isLessThanOrEqualTo(SearchQuery.MAX_QUERY_LENGTH);
             assertThat(queries.get(0).query().length()).isEqualTo(SearchQuery.MAX_QUERY_LENGTH);
         }
+
+        @Test
+        @DisplayName("Handles long track titles exceeding 100 characters cleanly")
+        void handlesLongTrackTitlesExceeding100Characters() {
+            String longTitle = "The Long and Winding Road That Leads to Your Door Will Never Disappear I Have Seen That Road Before It Always Leads Me Here";
+            assertThat(longTitle.length()).isGreaterThan(100);
+
+            RawTrackMetadata raw = RawTrackMetadata.of(longTitle, "The Beatles", "Let It Be", 217000L);
+            NormalizedTrackMetadata metadata = orchestrator.normalize(raw);
+
+            List<SearchQuery> queries = generator.generateQueries(metadata, DiscoveryOptions.defaults());
+
+            assertThat(queries).isNotEmpty();
+            assertThat(queries.get(0).query()).startsWith("the beatles - the long and winding road");
+            assertThat(queries.get(0).query().length()).isLessThanOrEqualTo(SearchQuery.MAX_QUERY_LENGTH);
+        }
+
+        @Test
+        @DisplayName("Correctly generates queries for single-word artists without distortion")
+        void generatesQueriesForSingleWordArtists() {
+            RawTrackMetadata raw = RawTrackMetadata.of("Hello", "Adele", "25", 295000L);
+            NormalizedTrackMetadata metadata = orchestrator.normalize(raw);
+
+            DiscoveryOptions options = new DiscoveryOptions(20, 3, 10, null);
+            List<SearchQuery> queries = generator.generateQueries(metadata, options);
+
+            assertThat(queries).isNotEmpty();
+            assertThat(queries.get(0).strategy()).isEqualTo(SearchQueryStrategy.PRIMARY_TITLE_ARTIST);
+            assertThat(queries.get(0).query()).isEqualTo("adele - hello");
+        }
+
+        @Test
+        @DisplayName("Preserves special characters, punctuation, and currency in search query formulation")
+        void preservesSpecialCharactersInQueries() {
+            RawTrackMetadata raw = RawTrackMetadata.of("TiK ToK", "Ke$ha", "Animal", 200000L);
+            NormalizedTrackMetadata metadata = orchestrator.normalize(raw);
+
+            List<SearchQuery> queries = generator.generateQueries(metadata, DiscoveryOptions.defaults());
+
+            assertThat(queries).isNotEmpty();
+            assertThat(queries.get(0).query()).isEqualTo("ke$ha - tik tok");
+        }
     }
 
     @Nested

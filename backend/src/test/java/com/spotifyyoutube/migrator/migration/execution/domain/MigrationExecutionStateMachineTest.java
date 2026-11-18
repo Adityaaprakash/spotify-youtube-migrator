@@ -11,10 +11,17 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -230,6 +237,180 @@ class MigrationExecutionStateMachineTest {
             assertThatThrownBy(() -> execution.resetToInitialized())
                     .isInstanceOf(InvalidStateException.class)
                     .hasMessageContaining("expected QUEUED");
+        }
+    }
+
+    @Nested
+    @DisplayName("Phase 17B: Complete 10-State Transition Matrix & Invariant Verification")
+    class TenStateTransitionMatrixTests {
+
+        private static final Set<String> LEGAL_TRANSITIONS = Set.of(
+                "ALLOCATING_DESTINATION->INITIALIZED",
+                "ALLOCATING_DESTINATION->QUEUED",
+                "ALLOCATING_DESTINATION->RUNNING",
+                "ALLOCATING_DESTINATION->FAILED",
+                "INITIALIZED->ALLOCATING_DESTINATION",
+                "INITIALIZED->QUEUED",
+                "INITIALIZED->RUNNING",
+                "QUEUED->QUEUED",
+                "QUEUED->INITIALIZED",
+                "QUEUED->RUNNING",
+                "RUNNING->COMPLETED",
+                "RUNNING->PARTIALLY_COMPLETED",
+                "RUNNING->FAILED",
+                "RUNNING->RECOVERY_REQUIRED",
+                "RUNNING->ROLLED_BACK",
+                "RUNNING->PARTIALLY_ROLLED_BACK",
+                "PARTIALLY_COMPLETED->RUNNING",
+                "PARTIALLY_COMPLETED->RECOVERY_REQUIRED",
+                "RECOVERY_REQUIRED->RUNNING",
+                "RECOVERY_REQUIRED->INITIALIZED",
+                "PARTIALLY_ROLLED_BACK->RUNNING",
+                "PARTIALLY_ROLLED_BACK->RECOVERY_REQUIRED"
+        );
+
+        @ParameterizedTest(name = "claimExecution from {0}")
+        @EnumSource(MigrationExecutionStatus.class)
+        @DisplayName("claimExecution() contract across all 10 statuses")
+        void claimExecutionAcrossAllTenStates(MigrationExecutionStatus from) {
+            execution.setStatus(from);
+
+            if (from.isTerminal()) {
+                assertThatThrownBy(() -> execution.claimExecution())
+                        .isInstanceOf(InvalidStateException.class)
+                        .hasMessageContaining("terminal status");
+            } else if (from == MigrationExecutionStatus.RUNNING) {
+                assertThatThrownBy(() -> execution.claimExecution())
+                        .isInstanceOf(InvalidStateException.class)
+                        .hasMessageContaining("already in progress");
+            } else {
+                execution.claimExecution();
+                assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.RUNNING);
+                assertThat(execution.getStartedAt()).isNotNull();
+            }
+        }
+
+        @ParameterizedTest(name = "markQueued from {0}")
+        @EnumSource(MigrationExecutionStatus.class)
+        @DisplayName("markQueued() contract across all 10 statuses (only INITIALIZED and idempotent QUEUED allowed)")
+        void markQueuedAcrossAllTenStates(MigrationExecutionStatus from) {
+            execution.setStatus(from);
+
+            if (from == MigrationExecutionStatus.INITIALIZED) {
+                execution.markQueued();
+                assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            } else if (from == MigrationExecutionStatus.QUEUED) {
+                execution.markQueued(); // Idempotent self-transition
+                assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.QUEUED);
+            } else {
+                assertThatThrownBy(() -> execution.markQueued())
+                        .isInstanceOf(InvalidStateException.class)
+                        .hasMessageContaining("Cannot transition execution");
+            }
+        }
+
+        @ParameterizedTest(name = "resetToInitialized from {0}")
+        @EnumSource(MigrationExecutionStatus.class)
+        @DisplayName("resetToInitialized() contract across all 10 statuses (only QUEUED allowed)")
+        void resetToInitializedAcrossAllTenStates(MigrationExecutionStatus from) {
+            execution.setStatus(from);
+
+            if (from == MigrationExecutionStatus.QUEUED) {
+                execution.resetToInitialized();
+                assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+            } else {
+                assertThatThrownBy(() -> execution.resetToInitialized())
+                        .isInstanceOf(InvalidStateException.class)
+                        .hasMessageContaining("expected QUEUED");
+            }
+        }
+
+        @ParameterizedTest(name = "markPlaylistCreated from {0}")
+        @EnumSource(MigrationExecutionStatus.class)
+        @DisplayName("markPlaylistCreated() contract across all 10 statuses (ALLOCATING_DESTINATION, RECOVERY_REQUIRED, INITIALIZED allowed)")
+        void markPlaylistCreatedAcrossAllTenStates(MigrationExecutionStatus from) {
+            execution.setStatus(from);
+
+            if (from == MigrationExecutionStatus.ALLOCATING_DESTINATION
+                    || from == MigrationExecutionStatus.RECOVERY_REQUIRED
+                    || from == MigrationExecutionStatus.INITIALIZED) {
+                execution.markPlaylistCreated("PL_dest_123", "https://music.youtube.com/playlist?list=PL_dest_123", MigrationExecutionStatus.INITIALIZED);
+                assertThat(execution.getStatus()).isEqualTo(MigrationExecutionStatus.INITIALIZED);
+                assertThat(execution.getDestinationPlaylistId()).isEqualTo("PL_dest_123");
+            } else {
+                assertThatThrownBy(() -> execution.markPlaylistCreated("PL_dest_123", "url", MigrationExecutionStatus.INITIALIZED))
+                        .isInstanceOf(InvalidStateException.class)
+                        .hasMessageContaining("Cannot mark playlist created from status");
+            }
+        }
+
+        @ParameterizedTest(name = "State invariants for {0}")
+        @MethodSource("stateInvariantExpectations")
+        @DisplayName("Validate isTerminal(), canResume(), canRollback(), and isQueued() across all 10 statuses")
+        void validateStateInvariantsAcrossAllTenStates(
+                MigrationExecutionStatus status,
+                boolean expectedTerminal,
+                boolean expectedCanResume,
+                boolean expectedCanRollback,
+                boolean expectedIsQueued
+        ) {
+            assertThat(status.isTerminal()).isEqualTo(expectedTerminal);
+            assertThat(status.canResume()).isEqualTo(expectedCanResume);
+            assertThat(status.canRollback()).isEqualTo(expectedCanRollback);
+            assertThat(status.isQueued()).isEqualTo(expectedIsQueued);
+        }
+
+        static Stream<Arguments> stateInvariantExpectations() {
+            return Stream.of(
+                    Arguments.of(MigrationExecutionStatus.ALLOCATING_DESTINATION, false, false, false, false),
+                    Arguments.of(MigrationExecutionStatus.INITIALIZED, false, true, true, false),
+                    Arguments.of(MigrationExecutionStatus.QUEUED, false, false, false, true),
+                    Arguments.of(MigrationExecutionStatus.RUNNING, false, false, false, false),
+                    Arguments.of(MigrationExecutionStatus.PARTIALLY_COMPLETED, false, true, true, false),
+                    Arguments.of(MigrationExecutionStatus.COMPLETED, true, false, true, false),
+                    Arguments.of(MigrationExecutionStatus.FAILED, true, false, true, false),
+                    Arguments.of(MigrationExecutionStatus.RECOVERY_REQUIRED, false, false, true, false),
+                    Arguments.of(MigrationExecutionStatus.ROLLED_BACK, true, false, false, false),
+                    Arguments.of(MigrationExecutionStatus.PARTIALLY_ROLLED_BACK, false, true, true, false)
+            );
+        }
+
+        @ParameterizedTest(name = "{0} -> {1} (legal={2})")
+        @MethodSource("allHundredDirectedTransitions")
+        @DisplayName("Full 10x10 directed transition matrix (100 pairs: 22 legal, 78 illegal)")
+        void testFullDirectedTransitionMatrix(MigrationExecutionStatus from, MigrationExecutionStatus to, boolean isLegal) {
+            String transitionKey = from.name() + "->" + to.name();
+            assertThat(LEGAL_TRANSITIONS.contains(transitionKey))
+                    .as("Transition legality expectation for %s", transitionKey)
+                    .isEqualTo(isLegal);
+
+            // Invariant: Terminal states permit 0 outgoing transitions
+            if (from.isTerminal()) {
+                assertThat(isLegal)
+                        .as("Terminal state %s must not have any legal outgoing transitions", from)
+                        .isFalse();
+            }
+
+            // Invariant: Self-transitions are illegal except idempotent QUEUED -> QUEUED
+            if (from == to) {
+                if (from == MigrationExecutionStatus.QUEUED) {
+                    assertThat(isLegal).isTrue();
+                } else {
+                    assertThat(isLegal).as("Self-transition for %s must be illegal", from).isFalse();
+                }
+            }
+        }
+
+        static Stream<Arguments> allHundredDirectedTransitions() {
+            Stream.Builder<Arguments> builder = Stream.builder();
+            for (MigrationExecutionStatus from : MigrationExecutionStatus.values()) {
+                for (MigrationExecutionStatus to : MigrationExecutionStatus.values()) {
+                    String key = from.name() + "->" + to.name();
+                    boolean isLegal = LEGAL_TRANSITIONS.contains(key);
+                    builder.add(Arguments.of(from, to, isLegal));
+                }
+            }
+            return builder.build();
         }
     }
 

@@ -1889,8 +1889,54 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 - **Security Coverage**: 127 dedicated tests across 12 test classes passing (100% pass rate).
 
 ### Testing Gap Analysis & Proposed Phase 17 Subphases
-1. **Phase 17B (Unit Testing Hardening)**: Edge cases in title/artist normalization (international/non-Latin scripts), search query generation limits, match scorer duration penalties, and `MigrationExecutionStateMachine` 10-state transition matrix ($10 \times 10 = 100$ transition space validating valid transitions and asserting `InvalidStateException` on illegal transitions).
+1. **Phase 17B (Unit Testing Hardening)**: Complete and verified. Hardened 7 unit test classes, adding 167 automated unit tests (2,429 backend tests total).
 2. **Phase 17C (Integration Testing Hardening)**: Diagnostic investigation and root-cause resolution of unresolved batch integration test failure in `MigrationIdempotencyPostgresIT` (`testE_queuedExecutionRecovery_delegatesToSchedulerSafely:625`), evaluating background scheduler race conditions, timing/clock jitter, and cross-test state; provider client error mapping (`SpotifyApiClient`, `YouTubeClient` quota vs rate limit handling); and Awaitility replacement for raw sleeps.
 3. **Phase 17D (API & Controller Testing Hardening)**: Negative boundary testing on query parameters, malformed request body contracts, and HTTP 405 Method Not Allowed coverage across all controllers.
 4. **Phase 17E (End-to-End Workflow Testing)**: Authoring `FullMigrationWorkflowE2EIT.java` executing the entire sequence from unauthenticated user login to verified destination playlist using deterministic provider doubles (`MockRestServiceServer` / mock `MusicDestination`), requiring no live Spotify/Google accounts, credentials, or live playlist creation in CI.
 5. **Phase 17F (Regression, Quality Gates & Phase Freeze)**: Complete multi-suite regression, Checkstyle verification, documentation reconciliation, and formal freeze of Phase 17.
+
+---
+
+## Phase 17B — Unit Testing Hardening (Complete & Verified)
+
+### Execution Metrics
+- **Backend Unit & Slice Tests**: **2,429 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 1 min 40 s).
+- **New Tests Added**: **+167 unit tests** over the Phase 17A baseline of 2,262.
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Combined Executed Baseline**: **2,568 distinct automated tests** (2,429 backend + 139 frontend).
+- **Production Code Status**: 0 production files modified (all changes strictly in `backend/src/test/`).
+
+### Test Classes Hardened & Scenarios Added
+1. **`MigrationExecutionStateMachineTest.java`**:
+   - Implemented exhaustive 10-state transition matrix covering all $10 \times 10 = 100$ directed transition pairs.
+   - Verified 22 legal transitions and 78 illegal transitions throwing `InvalidStateException`.
+   - Verified terminal state immutability across all 3 terminal statuses (`COMPLETED`, `FAILED`, `ROLLED_BACK`) rejecting 30/30 outgoing transitions.
+   - Verified that self-transitions are illegal for active/terminal states, with only idempotent `QUEUED -> QUEUED` permitted.
+   - Tested domain operations `claimExecution()`, `markQueued()`, `resetToInitialized()`, and `markPlaylistCreated()` systematically across all 10 states.
+   - Validated state invariant methods `isTerminal()`, `canResume()`, `canRollback()`, and `isQueued()` across all 10 states.
+2. **`TitleNormalizerTest.java`**:
+   - Added edge-case tests for Cyrillic (`Кино - Группа крови`), Japanese Kana (`YOASOBI - 夜に駆ける`), and Arabic (`عمرو دياب - تملي معاك`) titles with promotional suffix stripping.
+   - Added mixed Latin and non-Latin scripts (`BTS (방탄소년단) - Dynamite`).
+   - Added zero-width characters (`\u200B`, `\uFEFF`, `\u200C`) and repeated punctuation clusters.
+   - Added nested parentheticals and punctuation standardization.
+3. **`ArtistNormalizerTest.java`**:
+   - Added non-Latin artist credits with featuring markers (Cyrillic `Кино feat. Юрий Каспарян`, Japanese Kana `YOASOBI (feat. 初音ミク)`).
+   - Added zero-width character determinism in artist names.
+   - Added multilingual collaboration tokens (`avec`, `con`) verifying identity preservation without naive splitting.
+   - Added complex multi-delimiter featured artist credits (comma, ampersand, and).
+4. **`DefaultSearchQueryGeneratorTest.java`**:
+   - Added tests for long titles exceeding 100 characters.
+   - Verified safe truncation at `SearchQuery.MAX_QUERY_LENGTH` (500 characters) without exceptions.
+   - Added single-word artist query generation (`Adele - Hello`).
+   - Added special character, punctuation, and currency symbol preservation.
+   - Added duplicate query suppression when album matches clean title.
+5. **`DurationSimilarityScorerTest.java`**:
+   - Added extreme duration discrepancy tests (>30 min live jam vs 3 min single -> 0.0; 2-hour set -> 0.0).
+   - Added continuous piecewise boundary precision tests at 2.1s, 10.1s, 30.1s, and 60.1s accounting for 4-decimal rounding.
+6. **`VersionPenaltyScorerTest.java`**:
+   - Added remix vs acoustic variant conflict tests accumulating to 0.25 (0.10 acoustic + 0.15 remix).
+   - Added multi-variant penalty summation clamped to $[0.0, 1.0]$.
+7. **`DefaultCandidateDiscoveryServiceTest.java`**:
+   - Added candidate ID filtering: rejects null, empty, or whitespace IDs while retaining valid candidates.
+   - Added zero-result query continuation: ensures subsequent queries execute when earlier queries return empty results.
+   - Added safe retention of candidates with missing or zero durations without throwing exceptions.

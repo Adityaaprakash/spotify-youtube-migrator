@@ -123,6 +123,48 @@ class TitleNormalizerTest {
         }
 
         @Test
+        @DisplayName("Should strip promotional suffixes from Cyrillic, Japanese Kana, and Arabic titles")
+        void shouldStripPromotionalSuffixesFromNonLatinTitles() {
+            assertThat(normalizer.normalize("Кино - Группа крови (Official Audio)"))
+                    .isEqualTo("кино - группа крови");
+            assertThat(normalizer.normalize("YOASOBI - 夜に駆ける (Official Music Video)"))
+                    .isEqualTo("yoasobi - 夜に駆ける");
+            assertThat(normalizer.normalize("عمرو دياب - تملي معاك (Official Video)"))
+                    .isEqualTo("عمرو دياب - تملي معاك");
+        }
+
+        @Test
+        @DisplayName("Should normalize mixed Latin and non-Latin scripts correctly")
+        void shouldNormalizeMixedLatinAndNonLatinScripts() {
+            assertThat(normalizer.normalize("BTS (방탄소년단) - Dynamite (Official Music Video)"))
+                    .isEqualTo("bts (방탄소년단) - dynamite");
+            assertThat(normalizer.normalize("Utada Hikaru (宇多田ヒカル) - First Love"))
+                    .isEqualTo("utada hikaru (宇多田ヒカル) - first love");
+        }
+
+        @Test
+        @DisplayName("Should preserve zero-width characters deterministically in titles")
+        void shouldHandleZeroWidthCharactersInTitles() {
+            String titleWithZwnj = "فاصله\u200Cمجازی";
+            assertThat(normalizer.normalize(titleWithZwnj)).isEqualTo("فاصله\u200cمجازی");
+
+            String titleWithZws = "Song\u200BTitle";
+            assertThat(normalizer.normalize(titleWithZws)).isEqualTo("song\u200btitle");
+
+            String titleWithBom = "\uFEFFClean Title";
+            assertThat(normalizer.normalize(titleWithBom)).isEqualTo("\ufeffclean title");
+        }
+
+        @Test
+        @DisplayName("Should handle repeated separators, punctuation clusters, and nested parentheticals")
+        void shouldHandleRepeatedPunctuationAndNestedParentheticals() {
+            assertThat(normalizer.normalize("Title --- Subtitle")).isEqualTo("title --- subtitle");
+            assertThat(normalizer.normalize("Track ... ??? !!! (Official Video)")).isEqualTo("track ... ??? !!!");
+            assertThat(normalizer.normalize("Song (Subtitle (Part 1)) (Official Audio)"))
+                    .isEqualTo("song (subtitle (part 1))");
+        }
+
+        @Test
         @DisplayName("Should preserve Latin diacritics and accented European characters")
         void shouldPreserveAccentedEuropeanCharacters() {
             assertThat(normalizer.normalize("Über den Wolken")).isEqualTo("über den wolken");

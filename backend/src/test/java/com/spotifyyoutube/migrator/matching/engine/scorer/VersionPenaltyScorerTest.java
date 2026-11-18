@@ -383,6 +383,22 @@ class VersionPenaltyScorerTest {
             assertThat(penalty).isEqualTo(0.10);
             assertThat(detailed).containsEntry("ACOUSTIC_MISMATCH", 0.10);
         }
+
+        @Test
+        @DisplayName("should accumulate both remix mismatch and acoustic mismatch when acoustic source encounters remix candidate")
+        void shouldAccumulateRemixAndAcousticMismatchPenalties() {
+            SourceTrackFeatures source = acousticSource("Get Lucky (Acoustic)", "Daft Punk");
+            CandidateTrackFeatures candidate = candidateWithIndicators("Daft Punk - Get Lucky (Remix)", Set.of(VersionIndicator.REMIX));
+
+            Double penalty = scorer.calculatePenalty(source, candidate);
+            Map<String, Double> detailed = scorer.calculateDetailedPenalties(source, candidate);
+
+            // Acoustic mismatch (0.10) + Remix mismatch (0.15) = 0.25
+            assertThat(penalty).isEqualTo(0.25);
+            assertThat(detailed).containsEntry("ACOUSTIC_MISMATCH", 0.10);
+            assertThat(detailed).containsEntry("REMIX_MISMATCH", 0.15);
+            assertThat(detailed).hasSize(2);
+        }
     }
 
     @Nested

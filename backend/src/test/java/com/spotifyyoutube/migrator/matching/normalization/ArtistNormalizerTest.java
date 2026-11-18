@@ -122,6 +122,25 @@ class ArtistNormalizerTest {
             assertThat(normalizer.normalize("방탄소년단")).isEqualTo("방탄소년단");
             assertThat(normalizer.normalize("عمرو دياب")).isEqualTo("عمرو دياب");
         }
+
+        @Test
+        @DisplayName("Should parse featured artist credits in non-Latin scripts")
+        void shouldParseFeaturedCreditsInNonLatinScripts() {
+            NormalizedArtistCredit creditCyrillic = normalizer.parseArtistCredit("Кино feat. Юрий Каспарян");
+            assertThat(creditCyrillic.primaryArtist()).isEqualTo("кино");
+            assertThat(creditCyrillic.featuredArtists()).containsExactly("юрий каспарян");
+
+            NormalizedArtistCredit creditJapanese = normalizer.parseArtistCredit("YOASOBI (feat. 初音ミク)");
+            assertThat(creditJapanese.primaryArtist()).isEqualTo("yoasobi");
+            assertThat(creditJapanese.featuredArtists()).containsExactly("初音ミク");
+        }
+
+        @Test
+        @DisplayName("Should preserve zero-width characters deterministically in artist names")
+        void shouldPreserveZeroWidthCharactersInArtistNames() {
+            assertThat(normalizer.normalize("Artist\u200BName")).isEqualTo("artist\u200bname");
+            assertThat(normalizer.normalize("\uFEFFArtist Name")).isEqualTo("\ufeffartist name");
+        }
     }
 
     @Nested
@@ -263,6 +282,28 @@ class ArtistNormalizerTest {
             NormalizedArtistCredit credit5 = normalizer.parseArtistCredit("Crosby, Stills, Nash & Young");
             assertThat(credit5.primaryArtist()).isEqualTo("crosby, stills, nash & young");
             assertThat(credit5.featuredArtists()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should preserve multilingual collaboration tokens like 'avec' and 'con' without naive splitting")
+        void shouldPreserveMultilingualCollaborationTokens() {
+            // French collaboration
+            NormalizedArtistCredit creditAvec = normalizer.parseArtistCredit("Cœur de pirate avec Loud");
+            assertThat(creditAvec.primaryArtist()).isEqualTo("cœur de pirate avec loud");
+            assertThat(creditAvec.featuredArtists()).isEmpty();
+
+            // Spanish collaboration
+            NormalizedArtistCredit creditCon = normalizer.parseArtistCredit("Rosalía con J Balvin");
+            assertThat(creditCon.primaryArtist()).isEqualTo("rosalía con j balvin");
+            assertThat(creditCon.featuredArtists()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should parse complex mixed delimiters (comma, ampersand, and) in featured list")
+        void shouldParseComplexMixedDelimitersInFeaturedList() {
+            NormalizedArtistCredit credit = normalizer.parseArtistCredit("Artist (feat. Guest 1, Guest 2 & Guest 3 and Guest 4)");
+            assertThat(credit.primaryArtist()).isEqualTo("artist");
+            assertThat(credit.featuredArtists()).containsExactly("guest 1", "guest 2", "guest 3", "guest 4");
         }
 
         @Test

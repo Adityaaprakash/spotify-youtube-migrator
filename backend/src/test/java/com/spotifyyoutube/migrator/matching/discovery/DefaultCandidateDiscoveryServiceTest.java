@@ -18,6 +18,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -819,6 +820,87 @@ class DefaultCandidateDiscoveryServiceTest {
 
             assertThat(result.status()).isEqualTo(CandidateDiscoveryStatus.SUCCESS);
             assertThat(result.candidates()).containsExactly(minimal);
+        }
+
+        @Test
+        @DisplayName("Filters out candidates with null, empty, or whitespace IDs while retaining valid candidates")
+        void filtersOutCandidatesWithInvalidIds() {
+            NormalizedTrackMetadata track = sampleSourceTrack();
+            DiscoveryOptions options = new DiscoveryOptions(10, 1, 10, null);
+            SearchQuery q1 = query("Q1", SearchQueryStrategy.PRIMARY_TITLE_ARTIST, 1);
+            when(queryGenerator.generateQueries(track, options)).thenReturn(List.of(q1));
+
+            DestinationTrackCandidate valid = new DestinationTrackCandidate("validId", "Valid Title", "Channel", null, null, null, Duration.ofSeconds(200));
+            DestinationTrackCandidate nullId = new DestinationTrackCandidate(null, "No ID", "Channel", null, null, null, Duration.ofSeconds(200));
+            DestinationTrackCandidate emptyId = new DestinationTrackCandidate("", "Empty ID", "Channel", null, null, null, Duration.ofSeconds(200));
+            DestinationTrackCandidate blankId = new DestinationTrackCandidate("   ", "Blank ID", "Channel", null, null, null, Duration.ofSeconds(200));
+
+            List<DestinationTrackCandidate> rawCandidates = Arrays.asList(valid, nullId, emptyId, blankId, null);
+
+            when(musicDestination.searchTracks("Q1", null, 10))
+                    .thenReturn(new DestinationSearchResult(rawCandidates, null, rawCandidates.size()));
+
+            CandidateDiscoveryResult result = discoveryService.discoverCandidates(new CandidateDiscoveryRequest(track, options));
+
+            assertThat(result.status()).isEqualTo(CandidateDiscoveryStatus.SUCCESS);
+            assertThat(result.candidates()).containsExactly(valid);
+        }
+
+        @Test
+        @DisplayName("Continues executing subsequent queries when an earlier query yields zero results")
+        void continuesQueryExecutionWhenEarlierQueryYieldsZeroResults() {
+            NormalizedTrackMetadata track = sampleSourceTrack();
+            DiscoveryOptions options = new DiscoveryOptions(10, 3, 10, null);
+            SearchQuery q1 = query("Q1", SearchQueryStrategy.PRIMARY_TITLE_ARTIST, 1);
+            SearchQuery q2 = query("Q2", SearchQueryStrategy.TITLE_ARTIST_FEATURED, 2);
+            SearchQuery q3 = query("Q3", SearchQueryStrategy.TITLE_ARTIST_ALBUM, 3);
+            when(queryGenerator.generateQueries(track, options)).thenReturn(List.of(q1, q2, q3));
+
+            DestinationTrackCandidate c2 = candidate("vid2", "Found via Q2");
+            DestinationTrackCandidate c3 = candidate("vid3", "Found via Q3");
+
+            // Query 1 returns zero candidates
+            when(musicDestination.searchTracks("Q1", null, 10))
+                    .thenReturn(new DestinationSearchResult(List.of(), null, 0));
+            // Query 2 returns 1 candidate
+            when(musicDestination.searchTracks("Q2", null, 10))
+                    .thenReturn(new DestinationSearchResult(List.of(c2), null, 1));
+            // Query 3 returns 1 candidate
+            when(musicDestination.searchTracks("Q3", null, 10))
+                    .thenReturn(new DestinationSearchResult(List.of(c3), null, 1));
+
+            CandidateDiscoveryResult result = discoveryService.discoverCandidates(new CandidateDiscoveryRequest(track, options));
+
+            assertThat(result.status()).isEqualTo(CandidateDiscoveryStatus.SUCCESS);
+            assertThat(result.candidateCount()).isEqualTo(2);
+            assertThat(result.candidates()).containsExactly(c2, c3);
+            assertThat(result.executedQueries()).containsExactly(
+                    SearchQueryExecution.success(q1, 0),
+                    SearchQueryExecution.success(q2, 1),
+                    SearchQueryExecution.success(q3, 1)
+            );
+        }
+
+        @Test
+        @DisplayName("Retains candidates with zero duration or absent duration safely without throwing")
+        void retainsCandidatesWithZeroOrAbsentDuration() {
+            NormalizedTrackMetadata track = sampleSourceTrack();
+            DiscoveryOptions options = new DiscoveryOptions(10, 1, 10, null);
+            SearchQuery q1 = query("Q1", SearchQueryStrategy.PRIMARY_TITLE_ARTIST, 1);
+            when(queryGenerator.generateQueries(track, options)).thenReturn(List.of(q1));
+
+            DestinationTrackCandidate zeroDuration = new DestinationTrackCandidate("vZero", "Zero Duration", "Artist", null, null, null, Duration.ZERO);
+            DestinationTrackCandidate nullDuration = new DestinationTrackCandidate("vNull", "Null Duration", "Artist", null, null, null, (Duration) null);
+
+            when(musicDestination.searchTracks("Q1", null, 10))
+                    .thenReturn(new DestinationSearchResult(List.of(zeroDuration, nullDuration), null, 2));
+
+            CandidateDiscoveryResult result = discoveryService.discoverCandidates(new CandidateDiscoveryRequest(track, options));
+
+            assertThat(result.status()).isEqualTo(CandidateDiscoveryStatus.SUCCESS);
+            assertThat(result.candidates()).containsExactly(zeroDuration, nullDuration);
+            assertThat(result.candidates().get(0).duration()).isEqualTo(Duration.ZERO);
+            assertThat(result.candidates().get(1).duration()).isNull();
         }
     }
 
