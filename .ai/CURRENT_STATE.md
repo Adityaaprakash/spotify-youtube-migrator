@@ -2,11 +2,23 @@
 
 Last Updated: 2026-11-18
 
-Current Phase: Phase 16 — Security Hardening / End-to-End Integration [COMPLETE & FROZEN]
-Current Subphase: Phase 16G & 16H (Final Security Verification & Phase Freeze) [COMPLETE & FROZEN] -> Next Phase: Phase 17 — Testing [READY TO BEGIN]
-Latest Pushed Commit: c93416e20fd8cc7696d7f7dbd16f4b5664e504e9 (feat(security): harden database integrity and sensitive logging)
+Current Phase: Phase 17 — Testing [IN PROGRESS]
+Current Subphase: Phase 17A (Testing Architecture Audit & Coverage Planning) [AUDIT COMPLETE] -> Next Subphase: Phase 17B (Unit Testing Hardening) [AWAITING APPROVAL]
+Latest Pushed Commit: 5e483f55a842742c704c8b486e9f65c9c596cf3a (docs(security): finalize phase 16 security audit and freeze)
 
 ## Verification Status & Release Gate
+- **Phase 17A Verification Status**: AUDIT COMPLETE (Read-Only Planning).
+  - Executed comprehensive read-only testing architecture audit across backend, frontend, security, and persistence subsystems.
+  - Verified actual execution baseline: **2,401 distinct automated tests** passing at 100% (2,262 backend tests in `mvnw test` with 0 failures, 0 errors, 0 skipped; 139 frontend tests across 48 suites in `npm test`), 0 Checkstyle violations, 0 typecheck/lint errors, production Vite build succeeding.
+  - Clarified test inventory: empirical executed baseline is 2,401 automated tests; subsystem breakdown counts (~2,529+) represent an approximate, non-additive aggregate of categorized classes with overlapping classifications.
+  - Verified Docker Desktop (v29.4) and Testcontainers integration active with PostgreSQL 16.
+  - Audited all 12 roadmap-specified test requirements and mapped to modular codebase locations.
+  - Diagnosed integration test finding: `MigrationIdempotencyPostgresIT.testE_queuedExecutionRecovery_delegatesToSchedulerSafely:625` fails in full batch execution with `AssertionError: Expecting Optional to contain a value but it was empty` (passes 22/22 in isolation). Root cause categorized as **UNRESOLVED**; candidate hypotheses (background scheduler race condition, timing/clock jitter, cross-test state) deferred to Phase 17C diagnostic investigation rather than assuming database contamination.
+  - Designed 10-state transition matrix plan for Phase 17B covering all 10 `MigrationExecutionStatus` values across the $10 \times 10 = 100$ transition space, asserting valid transitions and `InvalidStateException` on illegal transitions.
+  - Defined deterministic provider mocking strategy for Phase 17E E2E testing: automated CI runs execute against `MockRestServiceServer` and mock `MusicDestination` adapters with zero live Spotify/Google credentials or external playlist creation, while preserving the complete user journey.
+  - Authored comprehensive audit and coverage planning report in `.ai/PHASE_17A_TESTING_ARCHITECTURE_AUDIT.md`.
+  - Proposed Phase 17 execution breakdown (17A–17F) and defined acceptance criteria for phase completion.
+  - Awaiting user approval to proceed with Phase 17B implementation.
 - **Phase 16G & 16H Verification Status**: COMPLETE, VERIFIED & FROZEN.
   - Phase 16G (Integrated Security Verification & Cross-Subsystem Invariants):
     - Comprehensive cross-phase regression verification of all 10 security test suites (127 dedicated security tests across 12 test classes) passing at 100%.

@@ -1872,3 +1872,25 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 - **Checkstyle**: 0 Checkstyle violations (`mvnw checkstyle:check`).
 - **Frontend Layer**: Complete, verified, and frozen from Phase 15 (0 frontend files modified).
 - **Phase Status**: Phase 16 formally COMPLETE and FROZEN; cleared for Phase 17.
+
+---
+
+## Phase 17A — Testing Architecture Audit & Coverage Planning (Audit Complete)
+
+### Baseline Execution Metrics
+- **Executed Automated Test Baseline**: **2,401 distinct automated tests** passing at 100% with 0 failures and 0 skipped.
+  - **Backend Unit & Slice Tests**: 2,262 tests passing, 0 failures, 0 errors, 0 skipped (`mvnw test`, 1:49 min).
+  - **Frontend Test Suite**: 139 tests passing across 48 suites (`npm test`, 127.7 s).
+- **Subsystem Breakdown Count Clarification**: The subsystem breakdown estimate (~2,529+ tests) represents an approximate, non-additive aggregate of categorized classes. Several suites span multiple functional areas (e.g. security and reliability tests cross-cutting domain, API, service, and persistence layers). The empirical executed baseline is 2,401 automated tests.
+- **Backend Checkstyle**: 0 violations (`mvnw checkstyle:check`).
+- **Frontend Typecheck & Lint**: Clean (`tsc --noEmit`, `eslint .`).
+- **Frontend Build**: Production Vite build succeeds (40.77 s).
+- **Testcontainers & Docker**: Active Docker Desktop 29.4 daemon running PostgreSQL 16 image.
+- **Security Coverage**: 127 dedicated tests across 12 test classes passing (100% pass rate).
+
+### Testing Gap Analysis & Proposed Phase 17 Subphases
+1. **Phase 17B (Unit Testing Hardening)**: Edge cases in title/artist normalization (international/non-Latin scripts), search query generation limits, match scorer duration penalties, and `MigrationExecutionStateMachine` 10-state transition matrix ($10 \times 10 = 100$ transition space validating valid transitions and asserting `InvalidStateException` on illegal transitions).
+2. **Phase 17C (Integration Testing Hardening)**: Diagnostic investigation and root-cause resolution of unresolved batch integration test failure in `MigrationIdempotencyPostgresIT` (`testE_queuedExecutionRecovery_delegatesToSchedulerSafely:625`), evaluating background scheduler race conditions, timing/clock jitter, and cross-test state; provider client error mapping (`SpotifyApiClient`, `YouTubeClient` quota vs rate limit handling); and Awaitility replacement for raw sleeps.
+3. **Phase 17D (API & Controller Testing Hardening)**: Negative boundary testing on query parameters, malformed request body contracts, and HTTP 405 Method Not Allowed coverage across all controllers.
+4. **Phase 17E (End-to-End Workflow Testing)**: Authoring `FullMigrationWorkflowE2EIT.java` executing the entire sequence from unauthenticated user login to verified destination playlist using deterministic provider doubles (`MockRestServiceServer` / mock `MusicDestination`), requiring no live Spotify/Google accounts, credentials, or live playlist creation in CI.
+5. **Phase 17F (Regression, Quality Gates & Phase Freeze)**: Complete multi-suite regression, Checkstyle verification, documentation reconciliation, and formal freeze of Phase 17.
