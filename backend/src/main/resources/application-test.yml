@@ -39,3 +39,31 @@ youtube:
   max-results-limit: 50
   default-max-results: 25
 
+cors:
+  allowed-origins: "http://localhost:5173,http://localhost:3000"
+
+security:
+  rate-limiting:
+    enabled: true
+    trust-forwarded-headers: true
+    max-tracked-keys: 10000
+    login:
+      max-requests: 100
+      window-seconds: 60
+      retry-after-seconds: 60
+    register:
+      max-requests: 100
+      window-seconds: 60
+      retry-after-seconds: 60
+    oauth:
+      max-requests: 100
+      window-seconds: 60
+      retry-after-seconds: 30
+    search:
+      max-requests: 100
+      window-seconds: 60
+      retry-after-seconds: 15
+    migration:
+      max-requests: 100
+      window-seconds: 60
+      retry-after-seconds: 30

@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.review.api.dto;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 /**
  * Request payload for submitting a review decision for a track.
@@ -17,6 +18,7 @@ public record SubmitReviewDecisionRequest(
         @Valid
         CandidateSelectionDto candidate,
 
+        @Size(max = 1000, message = "Notes cannot exceed 1000 characters")
         String notes
 ) {
 

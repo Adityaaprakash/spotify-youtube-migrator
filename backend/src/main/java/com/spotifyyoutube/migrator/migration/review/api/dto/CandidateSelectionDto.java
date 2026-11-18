@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.review.api.dto;
 
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackCandidate;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import java.time.Duration;
 
@@ -19,21 +20,27 @@ import java.time.Duration;
  */
 public record CandidateSelectionDto(
         @NotBlank(message = "Candidate ID cannot be blank")
+        @Size(max = 100, message = "Candidate ID cannot exceed 100 characters")
         String id,
 
         @NotBlank(message = "Candidate title cannot be blank")
+        @Size(max = 255, message = "Candidate title cannot exceed 255 characters")
         String title,
 
+        @Size(max = 255, message = "Channel or artist cannot exceed 255 characters")
         String channelOrArtist,
 
         Long durationMs,
 
         Duration duration,
 
+        @Size(max = 5000, message = "Description cannot exceed 5000 characters")
         String description,
 
+        @Size(max = 2048, message = "Thumbnail URL cannot exceed 2048 characters")
         String thumbnailUrl,
 
+        @Size(max = 100, message = "PublishedAt cannot exceed 100 characters")
         String publishedAt
 ) {
 

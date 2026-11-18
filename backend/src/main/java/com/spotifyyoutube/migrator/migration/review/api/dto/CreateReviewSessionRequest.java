@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.review.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
@@ -15,6 +16,7 @@ import java.util.UUID;
  */
 public record CreateReviewSessionRequest(
         @NotBlank(message = "Source playlist ID cannot be blank")
+        @Size(max = 100, message = "Source playlist ID cannot exceed 100 characters")
         @JsonAlias({"spotifyPlaylistId", "playlistId"})
         String sourcePlaylistId,
 

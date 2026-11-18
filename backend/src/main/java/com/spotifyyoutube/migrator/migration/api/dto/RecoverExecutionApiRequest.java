@@ -1,5 +1,7 @@
 package com.spotifyyoutube.migrator.migration.api.dto;
 
+import jakarta.validation.constraints.Min;
+
 import java.util.UUID;
 
 /**
@@ -11,6 +13,7 @@ import java.util.UUID;
  */
 public record RecoverExecutionApiRequest(
         UUID reviewSessionId,
+        @Min(value = 0, message = "targetPosition cannot be negative")
         Integer targetPosition,
         UUID userId
 ) {

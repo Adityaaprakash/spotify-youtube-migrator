@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
@@ -21,9 +22,16 @@ public record RunMigrationApiRequest(
         UUID reviewSessionId,
 
         UUID userId,
+
+        @Size(max = 100, message = "sourcePlaylistId must not exceed 100 characters")
         String sourcePlaylistId,
+
+        @Size(max = 255, message = "targetPlaylistTitle must not exceed 255 characters")
         String targetPlaylistTitle,
+
+        @Size(max = 2000, message = "targetPlaylistDescription must not exceed 2000 characters")
         String targetPlaylistDescription,
+
         Boolean isPrivate
 ) {
 

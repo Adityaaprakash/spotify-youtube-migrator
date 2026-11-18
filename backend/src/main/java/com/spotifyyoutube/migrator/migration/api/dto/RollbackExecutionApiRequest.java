@@ -1,5 +1,7 @@
 package com.spotifyyoutube.migrator.migration.api.dto;
 
+import jakarta.validation.constraints.Size;
+
 import java.util.List;
 import java.util.UUID;
 
@@ -10,6 +12,7 @@ import java.util.UUID;
  * @param userId optional caller-supplied user ID for anti-impersonation verification
  */
 public record RollbackExecutionApiRequest(
+        @Size(max = 1000, message = "targetPositions list cannot exceed 1000 items")
         List<Integer> targetPositions,
         UUID userId
 ) {

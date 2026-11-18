@@ -14,6 +14,8 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.time.Instant;
 
@@ -273,6 +276,48 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
         return new ResponseEntity<>(apiError, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethodNotSupportedException(
+            HttpRequestMethodNotSupportedException ex,
+            HttpServletRequest request
+    ) {
+        ApiError apiError = new ApiError(
+                ErrorCode.METHOD_NOT_ALLOWED,
+                "HTTP method " + ex.getMethod() + " is not supported for this endpoint",
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.METHOD_NOT_ALLOWED);
+    }
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMediaTypeNotSupportedException(
+            HttpMediaTypeNotSupportedException ex,
+            HttpServletRequest request
+    ) {
+        ApiError apiError = new ApiError(
+                ErrorCode.INVALID_REQUEST,
+                "Content type is not supported",
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiError> handleMaxUploadSizeExceededException(
+            MaxUploadSizeExceededException ex,
+            HttpServletRequest request
+    ) {
+        ApiError apiError = new ApiError(
+                ErrorCode.INVALID_REQUEST,
+                "Request payload exceeds maximum allowed size",
+                Instant.now().toString(),
+                request.getRequestURI()
+        );
+        return new ResponseEntity<>(apiError, HttpStatus.PAYLOAD_TOO_LARGE);
     }
 
     @ExceptionHandler(Exception.class)

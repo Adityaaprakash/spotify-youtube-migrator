@@ -3,6 +3,7 @@ package com.spotifyyoutube.migrator.migration.api.dto;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
@@ -20,9 +21,11 @@ public record InitializeExecutionRequest(
         UUID reviewSessionId,
 
         @NotBlank(message = "destinationPlaylistId must not be blank")
+        @Size(max = 100, message = "destinationPlaylistId must not exceed 100 characters")
         @JsonAlias({"playlistId"})
         String destinationPlaylistId,
 
+        @Size(max = 2048, message = "destinationPlaylistUrl must not exceed 2048 characters")
         String destinationPlaylistUrl,
 
         UUID userId

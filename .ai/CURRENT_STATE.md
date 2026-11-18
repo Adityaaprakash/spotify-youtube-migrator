@@ -1,12 +1,33 @@
 # Current State
 
-Last Updated: 2026-11-17
+Last Updated: 2026-11-18
 
 Current Phase: Phase 16 — Security Hardening / End-to-End Integration [IN PROGRESS]
-Current Subphase: Phase 16A & 16B (Security Architecture Audit, Threat Modeling & OAuth/Token Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 16C (Rate Limiting, Input Validation & API Hardening) [READY TO BEGIN]
+Current Subphase: Phase 16C & 16D (Authentication, Authorization & API Security Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 16 Final Review / Commit & Push [READY TO BEGIN]
 Latest Pushed Commit: b82277acae4287cb855265a21a759febb24657a0 (test(frontend): close phase 15 verification gaps)
 
 ## Verification Status & Release Gate
+- **Phase 16C & 16D Verification Status**: COMPLETE & VERIFIED.
+  - Authentication & Authorization Hardening (Phase 16C):
+    - Comprehensive Authentication Enforcement: Audited and verified all application endpoints; anonymous access to protected user, playlist, migration, review, Spotify, and YouTube endpoints is strictly blocked (HTTP 403 Forbidden / HTTP 401 Unauthorized for `/api/migrations/submit`).
+    - Multi-Tenant IDOR Protection & 404 Non-Disclosure: Enforced strict resource-level ownership validation across user profiles (`/api/users/{id}`), playlists (`/api/playlists/{id}`), migration executions (`/api/migrations/{id}`), and review sessions (`/api/review-sessions/{id}`). Unauthorized access attempts by other authenticated users are rejected with HTTP 404 Not Found non-disclosure (eliminating resource enumeration and information disclosure).
+    - Session Security & Fixation Protection: Configured `sessionFixation().changeSessionId()` in Spring Security filter chain; in `AuthController.establishSession`, explicitly invalidated pre-existing session before generating a new authenticated session; on `/api/auth/logout`, completely invalidated the HTTP session and explicitly expired the `JSESSIONID` cookie (`Max-Age=0`).
+    - Anti-Impersonation & Mass Assignment Prevention: Stripped client-supplied identity parameters; user ID is extracted solely from `SecurityContextHolder` / `Principal`; DTO request bodies strictly bound with `@Size`, `@Min`, `@Max` bean validation to prevent mass-assignment and memory exhaustion attacks.
+  - API Security Hardening (Phase 16D):
+    - Rate Limiting Architecture: Implemented thread-safe sliding window rate limiter (`InMemoryApiRateLimiter`) with bounded cache capacity (10,000 keys) and automatic time-based eviction to prevent memory leaks; managed via `RateLimitingConfig` with `security.rate-limiting` configuration properties. Enforced client IP extraction boundaries with configurable trusted proxy support (`security.rate-limiting.trust-forwarded-headers: false` by default), preventing IP spoofing via arbitrary `X-Forwarded-For` headers. Documented that in-memory rate limiting is node-local per instance.
+    - Tiered Rate Limit Policies: Applied distinct limits for sensitive endpoints: Login (`/api/auth/login`: 5 req/min, 60s retry), Registration (`/api/auth/register`: 3 req/min, 120s retry), OAuth authorization (`/api/oauth/{provider}/authorize`: 10 req/min, 30s retry), Search (`/api/youtube/videos/search`: 30 req/min, 15s retry), and Migration execution dispatch (`/api/migrations`, `/api/migrations/submit`, `/api/migrations/execution/run`, `/api/migrations/{id}/resume`: 10 req/min, 30s retry). Mutation-only rate limiting guarantees read-only status polling (`GET /api/migrations/{id}/progress`, `/tracks`, `/history`) remains unthrottled.
+    - Rate Limit Response Contract: Exceeded requests fail fast with HTTP 429 Too Many Requests, standardized `ErrorResponse` envelope (`RATE_LIMIT_EXCEEDED`), and standard RFC 6585 `Retry-After` header indicating wait seconds.
+    - Input Validation & Parameter Boundary Enforcement: Bean validation constraints applied to all API DTOs (email <= 255 chars, password 6-128 chars, names <= 100 chars, playlist titles <= 255 chars, descriptions <= 2000 chars, review notes <= 1000 chars, UUID syntax); pagination parameters clamped across controllers (`pageSize` 1..100, `pageNumber >= 0`); YouTube search queries constrained (non-blank, <= 500 chars, maxResults 1..50).
+    - Request-Size & Upload Restrictions: Disabled multipart upload support (`spring.servlet.multipart.enabled: false`); configured Tomcat request limits (`max-http-form-post-size: 1MB`, `max-swallow-size: 2MB`) to prevent HTTP body flooding and DoS.
+    - CORS Policy Enforcement: Explicit whitelist (`cors.allowed-origins: http://localhost:5173,http://localhost:3000`), credentials allowed (`allowCredentials(true)`), permitted methods (`GET, POST, PUT, DELETE, PATCH, OPTIONS`), exposed headers (`Retry-After`, `Location`, `Idempotency-Key`, `Idempotency-Replayed`), and 1-hour preflight cache maxAge. Wildcard origins strictly forbidden.
+    - CSRF Protection: Cookie-based CSRF token with `CookieCsrfTokenRepository.withHttpOnlyFalse()`; deferred token generation forced via `CsrfCookieFilter` ensuring `XSRF-TOKEN` cookie is populated on initial safe GETs; state-changing requests (`POST`, `PUT`, `DELETE`, `PATCH`) require valid `X-XSRF-TOKEN` header; public authentication bootstrap endpoints (`/api/auth/login`, `/api/auth/register`) explicitly exempted.
+    - HTTP Method Enforcement: Unsupported HTTP methods mapped to HTTP 405 Method Not Allowed via `GlobalExceptionHandler` with standardized `METHOD_NOT_ALLOWED` error response.
+    - Safe Error Handling: `GlobalExceptionHandler` masks internal exceptions, prevents database syntax or stack traces from reaching clients, and handles `MaxUploadSizeExceededException` (413) and `HttpMediaTypeNotSupportedException` (415).
+  - Test Suite & Verification:
+    - 4 dedicated security test suites (`AuthenticationAndAuthorizationSecurityTest`, `ApiRateLimitingSecurityTest`, `InputValidationSecurityTest`, `CorsAndCsrfSecurityTest`) comprising 43 automated tests.
+    - Full Maven test suite: 2,229 total tests passing with 0 failures, 0 errors, and 0 skipped.
+    - Checkstyle: 0 Checkstyle violations (`mvnw checkstyle:check`).
+    - Git Hygiene: `git diff --check` clean with 0 whitespace errors.
 - **Phase 16A & 16B Verification Status**: COMPLETE & VERIFIED.
   - Security Architecture Mapping: Comprehensive audit of Spring Security session model (`CookieCsrfTokenRepository.withHttpOnlyFalse()`, SameSite=Lax, secure cookies in production), Spotify/Google OAuth 2.0 authorization code flows, token persistence, and lifecycle refresh.
   - Trust Boundary Analysis: Mapped and audited 7 explicit trust boundaries (Browser-to-Backend, Backend-to-Spotify, Backend-to-Google, Backend-to-Database, OAuth Callback-to-Session, Authenticated User-to-Migration Resources, External Provider Responses-to-Internal Processing).

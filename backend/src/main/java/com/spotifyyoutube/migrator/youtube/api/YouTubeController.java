@@ -51,6 +51,16 @@ public class YouTubeController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
+        if (query == null || query.isBlank()) {
+            throw new IllegalArgumentException("Search query must not be blank");
+        }
+        if (query.length() > 500) {
+            throw new IllegalArgumentException("Search query 'q' must not exceed 500 characters");
+        }
+        if (maxResults != null && (maxResults < 1 || maxResults > 50)) {
+            throw new IllegalArgumentException("maxResults must be between 1 and 50");
+        }
+
         YouTubeVideoSearchResponse response = searchService.searchVideos(query, pageToken, maxResults);
         return ResponseEntity.ok(response);
     }

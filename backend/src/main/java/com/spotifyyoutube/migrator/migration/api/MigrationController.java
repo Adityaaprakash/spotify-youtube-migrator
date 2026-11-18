@@ -274,14 +274,10 @@ public class MigrationController {
             return ResponseEntity.ok(new PagedResponse<>(Collections.emptyList(), 0, 0, 0L, 0, true, true));
         }
 
-        Pageable effectivePageable = pageable;
-        if (pageable.getSort().isUnsorted()) {
-            effectivePageable = PageRequest.of(
-                    pageable.getPageNumber(),
-                    pageable.getPageSize(),
-                    Sort.by(Sort.Direction.DESC, "createdAt")
-            );
-        }
+        int clampedPageSize = Math.min(Math.max(pageable.getPageSize(), 1), 100);
+        int clampedPageNumber = Math.max(pageable.getPageNumber(), 0);
+        Sort sort = pageable.getSort().isUnsorted() ? Sort.by(Sort.Direction.DESC, "createdAt") : pageable.getSort();
+        Pageable effectivePageable = PageRequest.of(clampedPageNumber, clampedPageSize, sort);
 
         Page<MigrationExecution> page;
         if (status != null) {
@@ -361,7 +357,12 @@ public class MigrationController {
             throw new ResourceNotFoundException("Execution audit service is not configured");
         }
 
-        Page<ExecutionAuditEvent> page = auditService.getAuditTimeline(id, userId, pageable);
+        int clampedPageSize = Math.min(Math.max(pageable.getPageSize(), 1), 100);
+        int clampedPageNumber = Math.max(pageable.getPageNumber(), 0);
+        Sort sort = pageable.getSort().isUnsorted() ? Sort.by(Sort.Direction.ASC, "createdAt") : pageable.getSort();
+        Pageable effectivePageable = PageRequest.of(clampedPageNumber, clampedPageSize, sort);
+
+        Page<ExecutionAuditEvent> page = auditService.getAuditTimeline(id, userId, effectivePageable);
         PagedResponse<MigrationAuditEventResponse> response = PagedResponse.from(
                 page,
                 MigrationExecutionApiMapper::toAuditEventResponse
@@ -474,13 +475,45 @@ public class MigrationController {
     }
 
     @GetMapping("/{id}/tasks")
-    public ResponseEntity<List<MigrationTaskResponse>> getMigrationTasks(@PathVariable UUID id) {
+    public ResponseEntity<List<MigrationTaskResponse>> getMigrationTasks(
+            @PathVariable UUID id,
+            Principal principal
+    ) {
+        if (principal != null) {
+            try {
+                UUID userId = resolveUserId(null, principal);
+                var job = migrationService.getMigrationJobById(id);
+                if (job.getUser() != null && job.getUser().getId() != null && !job.getUser().getId().equals(userId)) {
+                    throw new ResourceNotFoundException("Migration not found: " + id);
+                }
+            } catch (ResourceNotFoundException e) {
+                if (e.getMessage() != null && e.getMessage().contains("Migration not found")) {
+                    throw e;
+                }
+            }
+        }
         var tasks = migrationService.getMigrationTasks(id);
         return ResponseEntity.ok(MigrationMapper.toTaskResponseList(tasks));
     }
 
     @PostMapping("/{id}/execute")
-    public ResponseEntity<MigrationJobResponse> executeMigration(@PathVariable UUID id) {
+    public ResponseEntity<MigrationJobResponse> executeMigration(
+            @PathVariable UUID id,
+            Principal principal
+    ) {
+        if (principal != null) {
+            try {
+                UUID userId = resolveUserId(null, principal);
+                var job = migrationService.getMigrationJobById(id);
+                if (job.getUser() != null && job.getUser().getId() != null && !job.getUser().getId().equals(userId)) {
+                    throw new ResourceNotFoundException("Migration not found: " + id);
+                }
+            } catch (ResourceNotFoundException e) {
+                if (e.getMessage() != null && e.getMessage().contains("Migration not found")) {
+                    throw e;
+                }
+            }
+        }
         var job = migrationService.executeMigration(id);
         return ResponseEntity.ok(MigrationMapper.toJobResponse(job));
     }

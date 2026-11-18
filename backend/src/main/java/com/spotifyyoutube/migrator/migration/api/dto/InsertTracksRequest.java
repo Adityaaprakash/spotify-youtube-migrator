@@ -3,6 +3,7 @@ package com.spotifyyoutube.migrator.migration.api.dto;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
@@ -19,6 +20,7 @@ public record InsertTracksRequest(
         UUID reviewSessionId,
 
         @NotBlank(message = "destinationPlaylistId is required")
+        @Size(max = 100, message = "destinationPlaylistId must not exceed 100 characters")
         @JsonAlias({"playlistId"})
         String destinationPlaylistId,
 

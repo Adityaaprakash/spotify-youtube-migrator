@@ -1745,3 +1745,61 @@ Implemented and verified (46 dedicated security test cases across 4 new test cla
   - `handleCallback_MissingState_RedirectsWithError`: Verifies missing state redirects to `/?oauth_error=missing_state`.
   - `getConnectionStatus_ReturnsConnected`: Verifies status inspection.
   - `disconnect_CallsService`: Verifies provider disconnect.
+
+## Phase 16C & 16D — Authentication, Authorization & API Security Testing Scope
+Implemented and verified (43 dedicated security tests across 4 test classes, 2,229 total backend tests passing across all suites):
+
+### 1. Authentication and Authorization Security Suite (`AuthenticationAndAuthorizationSecurityTest`)
+- 13 dedicated test methods:
+  - `anonymousAccessToAuthMe_Returns403`: Verifies unauthenticated access to `/api/auth/me` is rejected with 403 Forbidden.
+  - `anonymousAccessToUserById_Returns403`: Verifies unauthenticated access to `/api/users/{id}` is rejected with 403 Forbidden.
+  - `anonymousAccessToPlaylists_Returns403`: Verifies unauthenticated access to `/api/playlists` is rejected with 403 Forbidden.
+  - `anonymousAccessToMigrations_Returns403`: Verifies unauthenticated access to `/api/migrations` is rejected with 403 Forbidden.
+  - `anonymousAccessToSubmitMigration_Returns401`: Verifies unauthenticated access to `/api/migrations/submit` returns 401 Unauthorized via configured authentication entry point.
+  - `anonymousAccessToSpotifyPlaylists_Returns403`: Verifies unauthenticated access to `/api/spotify/playlists` is rejected with 403 Forbidden.
+  - `anonymousAccessToYouTubeSearch_Returns403`: Verifies unauthenticated access to `/api/youtube/videos/search` is rejected with 403 Forbidden.
+  - `authenticatedUser_AccessOwnProfile_Returns200`: Verifies authenticated user can access their own profile.
+  - `authenticatedUser_AccessOtherUserProfile_Returns404NonDisclosure`: Verifies IDOR protection: unauthorized profile access returns 404 Not Found non-disclosure.
+  - `authenticatedUser_AccessOtherUserPlaylist_Returns404NonDisclosure`: Verifies IDOR protection: accessing other user's playlist returns 404 Not Found non-disclosure.
+  - `authenticatedUser_AccessOtherUserMigrationExecution_Returns404NonDisclosure`: Verifies IDOR protection: accessing other user's migration execution returns 404 Not Found non-disclosure.
+  - `authenticatedUser_AccessOtherUserReviewSession_Returns404NonDisclosure`: Verifies IDOR protection: accessing other user's review session returns 404 Not Found non-disclosure.
+  - `logout_InvalidatesSessionAndExpiresSessionCookie`: Verifies logout invalidates the HTTP session and sets `JSESSIONID` cookie with `Max-Age=0`.
+
+### 2. API Rate Limiting Security Suite (`ApiRateLimitingSecurityTest`)
+- 12 dedicated test methods across unit and filter test suites:
+  - `allowsRequestsWithinLimit`: Verifies sliding window permits requests up to configured limit.
+  - `blocksRequestsExceedingLimit_ReturnsRetryAfter`: Verifies exceeding request limit returns `allowed=false` and positive retryAfterSeconds.
+  - `windowExpires_AllowsNewRequests`: Verifies requests are permitted after window elapses.
+  - `isolatesDifferentKeys`: Verifies rate limiting on one key does not affect other keys.
+  - `evictsOldestEntriesWhenCapacityReached`: Verifies in-memory rate limiter capacity bounding and LRU cleanup.
+  - `loginRateLimiting_ExceedsLimit_Returns429TooManyRequests`: Verifies `/api/auth/login` returns HTTP 429 and `Retry-After` header when threshold is exceeded.
+  - `loginRateLimiting_WithinLimit_Allowed`: Verifies requests below threshold succeed normally.
+  - `rateLimitIsolation_DifferentIps`: Verifies rate limiting one IP does not throttle another IP.
+  - `untrustedForwardedHeaders_Ignored`: Verifies when `trustForwardedHeaders` is false, arbitrary `X-Forwarded-For` header is ignored and client IP falls back to `getRemoteAddr()`.
+  - `oauthAuthorize_ExceedingQuota_Triggers429`: Verifies `/api/oauth/{provider}/authorize` returns 429 when rate limit is exceeded.
+  - `migrationSubmit_ThrottledAfterLimit`: Verifies `POST /api/migrations/submit` is rate-limited upon exceeding quota.
+  - `readOnlyProgressPolling_NotThrottledByMigrationFilter`: Verifies read-only progress polling `GET /api/migrations/{id}/progress` is strictly unthrottled even when mutation quota is exhausted.
+
+### 3. Input Validation Security Suite (`InputValidationSecurityTest`)
+- 10 dedicated test methods:
+  - `register_OversizedEmail_Returns400`: Verifies rejection of email > 255 characters.
+  - `register_ShortPassword_Returns400`: Verifies rejection of password < 6 characters.
+  - `register_OversizedPassword_Returns400`: Verifies rejection of password > 128 characters.
+  - `register_OversizedDisplayName_Returns400`: Verifies rejection of display name > 100 characters.
+  - `login_BlankEmail_Returns400`: Verifies rejection of blank email on login.
+  - `createMigration_OversizedSourcePlaylistId_Returns400`: Verifies rejection of oversized source playlist ID.
+  - `runMigration_OversizedTitle_Returns400`: Verifies rejection of playlist title > 255 characters.
+  - `submitReviewDecision_OversizedNotes_Returns400`: Verifies rejection of review notes > 1000 characters.
+  - `paginationParameters_ExceedingBounds_ClampedOrRejected`: Verifies pagination clamping (`pageSize` 1..100, `pageNumber >= 0`).
+  - `youtubeSearch_BlankOrOversizedQuery_Returns400`: Verifies rejection of blank query and query > 500 characters.
+
+### 4. CORS and CSRF Security Suite (`CorsAndCsrfSecurityTest`)
+- 8 dedicated test methods:
+  - `csrf_StateChangingRequestWithoutToken_Forbidden`: Verifies state-changing mutation (`POST /api/auth/logout`) without CSRF token returns 403 Forbidden.
+  - `csrf_StateChangingRequestWithValidToken_Allowed`: Verifies mutation with valid `X-XSRF-TOKEN` and cookie succeeds.
+  - `csrf_StateChangingRequestWithInvalidToken_Forbidden`: Verifies mutation with invalid CSRF token returns 403 Forbidden.
+  - `csrf_SafeGetRequest_DoesNotRequireCsrfToken`: Verifies GET requests do not require CSRF token and receive populated `XSRF-TOKEN` cookie via `CsrfCookieFilter`.
+  - `csrf_LoginAndRegister_ExemptFromCsrf`: Verifies public authentication bootstrap endpoints (`/api/auth/login`, `/api/auth/register`) are exempt from CSRF.
+  - `cors_PreflightAllowedOrigin_Returns200WithCorsHeaders`: Verifies preflight from configured origin (`http://localhost:5173`) returns allowed origin, allowed methods, allowed credentials, and exposed headers.
+  - `cors_PreflightUnauthorizedOrigin_DoesNotAllowOrigin`: Verifies preflight from unauthorized origin (`http://evil.com`) is rejected without CORS allow headers.
+  - `httpMethod_UnsupportedMethod_Returns405MethodNotAllowed`: Verifies unsupported HTTP methods return 405 Method Not Allowed with standardized `METHOD_NOT_ALLOWED` error response.

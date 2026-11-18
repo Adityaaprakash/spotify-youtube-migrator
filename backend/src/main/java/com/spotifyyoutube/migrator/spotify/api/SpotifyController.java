@@ -50,6 +50,12 @@ public class SpotifyController {
         if (principal == null) {
             return ResponseEntity.status(401).build();
         }
+        if (limit < 1 || limit > 50) {
+            throw new IllegalArgumentException("limit must be between 1 and 50");
+        }
+        if (offset < 0) {
+            throw new IllegalArgumentException("offset must not be negative");
+        }
         User user = userService.getUserByEmail(principal.getName());
         return ResponseEntity.ok(playlistService.getPlaylists(user.getId(), limit, offset));
     }

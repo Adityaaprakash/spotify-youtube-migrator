@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
@@ -14,6 +15,7 @@ import java.util.UUID;
  */
 public record MigrationPlanPreviewRequest(
         @NotBlank(message = "Spotify playlist ID cannot be blank")
+        @Size(max = 100, message = "Spotify playlist ID cannot exceed 100 characters")
         @JsonAlias({"sourcePlaylistId", "playlistId"})
         String spotifyPlaylistId,
 
