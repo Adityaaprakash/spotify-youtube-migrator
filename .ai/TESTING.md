@@ -2120,6 +2120,54 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 18C — Micrometer Metrics Foundation
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE & VERIFIED`.
+- **Backend Unit & Slice Tests (`mvn test`)**: **2,559 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 04 s).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Dependencies Added**: `io.micrometer:micrometer-registry-prometheus` (1.13.4, managed by Spring Boot 3.3.4 parent BOM).
+- **Production Java Changes**: Centralized metric foundation in `com.spotifyyoutube.migrator.common.metrics` (`MetricNames`, `TagKeys`, `TagPolicy`, `MetricsRegistrationHelper`, `MetricsConfig`).
+- **Business Metrics Recorded**: Strictly **0** (no migration, matching, or provider events instrumented; foundation only).
+
+### Metric Naming, Type & Prometheus Export Matrix
+| Roadmap Metric | Internal Micrometer Name | Meter Type | Prometheus Export Name | Permitted Tags |
+|---|---|---|---|---|
+| `migration_started_total` | `migration.started` | Counter | `migration_started_total` | `mode` |
+| `migration_completed_total` | `migration.completed` | Counter | `migration_completed_total` | `outcome`, `mode` |
+| `migration_failed_total` | `migration.failed` | Counter | `migration_failed_total` | `error_category`, `outcome` |
+| `tracks_matched_total` | `tracks.matched` | Counter | `tracks_matched_total` | `decision`, `confidence` |
+| `tracks_unmatched_total` | `tracks.unmatched` | Counter | `tracks_unmatched_total` | `decision` |
+| `youtube_api_requests_total` | `youtube.api.requests` | Counter | `youtube_api_requests_total` | `provider`, `operation`, `status` |
+| `youtube_api_errors_total` | `youtube.api.errors` | Counter | `youtube_api_errors_total` | `provider`, `operation`, `error_category` |
+| `average_match_score` | `matching.score` | DistributionSummary | `matching_score_count`, `matching_score_sum` | `decision`, `confidence` |
+| `migration_duration` | `migration.duration` | Timer | `migration_duration_seconds_count`, `migration_duration_seconds_sum` | `outcome`, `mode` |
+
+### Test Implementations & Hardening (+54 tests)
+1. **`TagPolicyTest.java` (Brand New Suite — 36 tests)**:
+   - Valid low-cardinality tag acceptance across all defined tag keys (`provider`, `operation`, `status`, `outcome`, `decision`, `confidence`, `error_category`, `mode`).
+   - High-cardinality prohibited key rejection (blacklist: `userId`, `playlistId`, `trackId`, `title`, `artist`, `query`, `url`, `requestId`, `correlationId`, `traceId`, `executionId`, `exceptionMessage`, `errorMessage`).
+   - Tag key format regex validation (`^[a-z0-9_.-]+$`).
+   - Tag value safety: rejects null/blank values, oversized values (>64 chars), UUID patterns, URL patterns, and email patterns.
+   - Tag argument parity validation (even pairs).
+2. **`MetricsRegistrationHelperTest.java` (Brand New Suite — 8 tests)**:
+   - Validates generic registration for `Counter`, `Timer`, and `DistributionSummary` using `SimpleMeterRegistry`.
+   - Proves idempotent repeated registration (same instance returned without duplicate meter creation).
+   - Enforces `TagPolicy` validation at meter registration time (rejects prohibited keys and UUID values).
+   - Rejects null registry and blank metric names.
+3. **`MetricNamesConventionTest.java` (Brand New Suite — 5 tests)**:
+   - Verifies 100% roadmap metric mapping coverage (all 9 roadmap metrics map to lowercase dot-separated Micrometer names).
+   - Validates live `PrometheusMeterRegistry` export format: Counter exports with `_total`, Timer exports with `_seconds_count` and `_seconds_sum`, DistributionSummary exports with `_count` and `_sum`.
+   - Verifies mathematical accuracy of average score derivation (`matching_score_sum / matching_score_count`).
+4. **`MetricsInfrastructureIntegrationTest.java` (Brand New Suite — 5 tests)**:
+   - Verifies `MeterRegistry` auto-configuration and dependency injection into Spring Boot application context.
+   - Verifies `PrometheusMeterRegistry` bean availability when `management.prometheus.metrics.export.enabled=true`.
+   - Verifies `commonTagsMeterFilter` automatically attaches `application: spotify-youtube-migrator` tag to registered meters.
+   - Verifies `/actuator/prometheus` scraping endpoint is NOT exposed over the web and returns HTTP 403 Forbidden under `SecurityConfig`.
+   - Verifies `/actuator/metrics` endpoint is NOT exposed over the web and returns HTTP 403 Forbidden under `SecurityConfig`.
+
+---
+
 ## Phase 18B — Application Health & Spring Actuator Hardening
 
 ### Execution & Verification Metrics

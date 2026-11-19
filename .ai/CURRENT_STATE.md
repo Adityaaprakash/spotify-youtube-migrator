@@ -3,10 +3,27 @@
 Last Updated: 2026-11-19
 
 Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
-Current Subphase: Phase 18B (Application Health & Spring Actuator) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18C (Micrometer Metrics Foundation) [READY FOR IMPLEMENTATION]
-Latest Pushed Commit: 53e1064282658a872cfd8722a7aa494c9430fe6b (test(reliability): harden migration recovery and rollback scenarios)
+Current Subphase: Phase 18C (Micrometer Metrics Foundation) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18D (Migration & Matching Business Metrics) [READY FOR IMPLEMENTATION]
+Latest Pushed Commit: 22a974c135ebce0a6f9356c172974a5bd1ca34f3 (feat(observability): harden actuator health probes)
 
 ## Verification Status & Release Gate
+- **Phase 18C Verification Status**: COMPLETE & VERIFIED.
+  - Added `io.micrometer:micrometer-registry-prometheus` dependency to `backend/pom.xml` managed by Spring Boot 3.3.4 BOM (resolved cleanly to version 1.13.4 with 0 version conflicts or duplicate dependencies).
+  - Configured `management.prometheus.metrics.export.enabled: true` in `application.yml` and `application-prod.yml`.
+  - Enforced operational and security boundaries: neither `/actuator/metrics` nor `/actuator/prometheus` are exposed over the web (both return HTTP 403 Forbidden under `SecurityConfig`; public scraping endpoint exposure strictly deferred to Phase 18G).
+  - Centralized metric naming standards in `MetricNames.java`: documented 1-to-1 mapping of roadmap metrics to standard Micrometer lowercase dot-separated names and Prometheus snake_case export names.
+  - Established low-cardinality tagging policy in `TagKeys.java` and `TagPolicy.java`: defines permitted tags (`provider`, `operation`, `status`, `outcome`, `decision`, `confidence`, `error_category`, `mode`), restricts tag values to 64 characters, and prohibits high-cardinality keys/values (user IDs, playlist IDs, track IDs, queries, URLs, emails, UUIDs, stack trace/error messages).
+  - Built generic, type-safe registration helper in `MetricsRegistrationHelper.java` for Counters, Timers, and DistributionSummaries with injected `MeterRegistry` and mandatory `TagPolicy` validation.
+  - Implemented `MetricsConfig.java` providing `commonTagsMeterFilter` (`application: spotify-youtube-migrator`) and `matchingScoreMeterFilter` ($[0.01, 1.0]$ bounds).
+  - Strictly zero business metrics recorded in this phase (no migration, matching, or provider events instrumented; foundation only).
+  - Added 54 automated tests across 4 suites:
+    - `TagPolicyTest.java` (36 tests): tests valid tag acceptance, prohibited tag rejection, key format regex, value length bounding, and UUID/URL/email pattern rejections.
+    - `MetricsRegistrationHelperTest.java` (8 tests): tests counter, timer, and distribution summary creation, idempotent repeated registration, and tag validation guardrails using `SimpleMeterRegistry`.
+    - `MetricNamesConventionTest.java` (5 tests): tests roadmap metric mapping completeness, dot-separated naming patterns, and actual `PrometheusMeterRegistry` scrape conversions (`_total`, `_seconds`, and distribution summary count/sum).
+    - `MetricsInfrastructureIntegrationTest.java` (5 tests): tests `MeterRegistry` and `PrometheusMeterRegistry` injection in Spring Boot context, common application tag attachment, and HTTP 403 Forbidden rejections on unexposed `/actuator/prometheus` and `/actuator/metrics`.
+  - Full backend test suite verified: **2,559 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 04 s).
+  - Code hygiene: 0 Checkstyle violations (`.\backend\mvnw.cmd checkstyle:check`).
+  - Zero modifications to migration, matching, security, or business logic.
 - **Phase 18B Verification Status**: COMPLETE & VERIFIED.
   - Configured and hardened Spring Boot Actuator health probe groups and detail masking across `backend/src/main/resources/application.yml` and `backend/src/main/resources/application-prod.yml`.
   - Liveness probe group (`/actuator/health/liveness`) explicitly isolated to `livenessState`: reflects internal application process vitality; unaffected by database outages or external provider latency/quotas; prevents orchestrator/container crash loops.

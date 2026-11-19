@@ -36,6 +36,10 @@ management:
           include: livenessState
         readiness:
           include: readinessState,db
+  prometheus:
+    metrics:
+      export:
+        enabled: true
   info:
     env:
       enabled: false

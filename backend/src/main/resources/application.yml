@@ -93,6 +93,10 @@ management:
           include: livenessState
         readiness:
           include: readinessState,db
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 youtube:
   api-key: ${YOUTUBE_API_KEY:mock-youtube-api-key}
