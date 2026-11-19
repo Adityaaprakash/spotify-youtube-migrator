@@ -45,6 +45,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 /**
  * PostgreSQL Testcontainers integration tests verifying Phase 13E API idempotency persistence,
@@ -652,15 +653,16 @@ public class MigrationIdempotencyPostgresIT {
             MigrationIdempotencyRecord initialRecord = idempotencyRepository.findById(claimId).orElseThrow();
             Instant initialExpiresAt = initialRecord.getClaimExpiresAt();
 
-            // 3. Simulate caller blocked in external YouTube operation for 250ms
-            Thread.sleep(250);
-
-            // 4. Verify background heartbeat renewed the claim in PostgreSQL independently of caller thread
-            MigrationIdempotencyRecord renewedRecord = idempotencyRepository.findById(claimId).orElseThrow();
-            assertThat(renewedRecord.getHeartbeatAt()).isNotNull();
-            assertThat(renewedRecord.getClaimExpiresAt()).isAfter(initialExpiresAt);
-            assertThat(renewedRecord.getClaimOwner()).isEqualTo(ownerA);
-            assertThat(renewedRecord.getClaimGeneration()).isEqualTo(genA);
+            // 3. Await background heartbeat renewing the claim in PostgreSQL independently of caller thread
+            await().atMost(Duration.ofSeconds(5))
+                    .pollInterval(Duration.ofMillis(25))
+                    .untilAsserted(() -> {
+                        MigrationIdempotencyRecord renewedRecord = idempotencyRepository.findById(claimId).orElseThrow();
+                        assertThat(renewedRecord.getHeartbeatAt()).isNotNull();
+                        assertThat(renewedRecord.getClaimExpiresAt()).isAfter(initialExpiresAt);
+                        assertThat(renewedRecord.getClaimOwner()).isEqualTo(ownerA);
+                        assertThat(renewedRecord.getClaimGeneration()).isEqualTo(genA);
+                    });
         } finally {
             heartbeatSvc.unregisterClaim(claimId);
             heartbeatSvc.shutdown();

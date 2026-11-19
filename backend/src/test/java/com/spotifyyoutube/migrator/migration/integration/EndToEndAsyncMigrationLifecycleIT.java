@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
@@ -194,16 +195,15 @@ public class EndToEndAsyncMigrationLifecycleIT {
         verify(musicDestination, times(1)).createPlaylist(eq(alice.getId()), any());
 
         // 2. Poll until worker completes processing
-        MigrationExecution completed = null;
-        for (int i = 0; i < 50; i++) {
-            completed = executionRepository.findById(executionId).orElse(null);
-            if (completed != null && completed.getStatus() == MigrationExecutionStatus.COMPLETED) {
-                break;
-            }
-            Thread.sleep(100);
-        }
+        await().atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(50))
+                .untilAsserted(() -> {
+                    MigrationExecution exec = executionRepository.findById(executionId).orElse(null);
+                    assertThat(exec).isNotNull();
+                    assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+                });
 
-        assertThat(completed).isNotNull();
+        MigrationExecution completed = executionRepository.findById(executionId).orElseThrow();
         assertThat(completed.getStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
 
         // 3. Poll progress as Alice -> Expect 200 OK with 100% completed

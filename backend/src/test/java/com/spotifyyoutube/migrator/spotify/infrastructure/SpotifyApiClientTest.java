@@ -146,4 +146,65 @@ class SpotifyApiClientTest {
         assertThat(result.total()).isEqualTo(0);
         mockServer.verify();
     }
+
+    @Test
+    void getUserPlaylists_shouldThrowExternalProviderException_on429RateLimitWithRetryAfter() {
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set(org.springframework.http.HttpHeaders.RETRY_AFTER, "45");
+
+        mockServer.expect(requestTo("https://api.spotify.com/v1/me/playlists?limit=50&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS).headers(headers));
+
+        assertThatThrownBy(() -> spotifyApiClient.getUserPlaylists("valid_token", 50, 0))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(429);
+                    assertThat(ex.getRetryAfter()).isEqualTo("45");
+                });
+    }
+
+    @Test
+    void getPlaylistTracks_shouldThrowExternalProviderException_on429RateLimitWithRetryAfter() {
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set(org.springframework.http.HttpHeaders.RETRY_AFTER, "30");
+
+        mockServer.expect(requestTo("https://api.spotify.com/v1/playlists/p123/tracks?limit=50&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS).headers(headers));
+
+        assertThatThrownBy(() -> spotifyApiClient.getPlaylistTracks("valid_token", "p123", 50, 0))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(429);
+                    assertThat(ex.getRetryAfter()).isEqualTo("30");
+                });
+    }
+
+    @Test
+    void getCurrentUserProfile_shouldThrowExternalProviderException_on401Unauthorized() {
+        mockServer.expect(requestTo("https://api.spotify.com/v1/me"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.UNAUTHORIZED));
+
+        assertThatThrownBy(() -> spotifyApiClient.getCurrentUserProfile("expired_token"))
+                .isInstanceOf(ExternalProviderException.class)
+                .satisfies(e -> {
+                    ExternalProviderException ex = (ExternalProviderException) e;
+                    assertThat(ex.getProviderStatusCode()).isEqualTo(401);
+                });
+    }
+
+    @Test
+    void getPlaylistTracks_shouldThrowResourceNotFound_on404() {
+        mockServer.expect(requestTo("https://api.spotify.com/v1/playlists/notFound/tracks?limit=50&offset=0"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(org.springframework.http.HttpStatus.NOT_FOUND));
+
+        assertThatThrownBy(() -> spotifyApiClient.getPlaylistTracks("valid_token", "notFound", 50, 0))
+                .isInstanceOf(com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException.class)
+                .hasMessageContaining("Playlist not found on Spotify");
+    }
 }

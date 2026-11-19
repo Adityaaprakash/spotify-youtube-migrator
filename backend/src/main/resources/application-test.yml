@@ -67,3 +67,7 @@ security:
       max-requests: 100
       window-seconds: 60
       retry-after-seconds: 30
+
+migration:
+  scheduler:
+    enabled: false

@@ -1,12 +1,21 @@
 # Current State
 
-Last Updated: 2026-11-18
+Last Updated: 2026-11-19
 
 Current Phase: Phase 17 — Testing [IN PROGRESS]
-Current Subphase: Phase 17B (Unit Testing Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 17C (Integration Testing Hardening) [AWAITING APPROVAL]
-Latest Pushed Commit: afc26c172f73a5afa22c23aa882fdb70f163a8dd (docs(testing): finalize phase 17A testing audit)
+Current Subphase: Phase 17C (Integration Testing Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 17D (API & Controller Testing Hardening) [AWAITING APPROVAL]
+Latest Pushed Commit: eb73adb6b2d5461a5a2c64a871b39ba2f7baea7f (test(unit): complete Phase 17B unit testing hardening)
 
 ## Verification Status & Release Gate
+- **Phase 17C Verification Status**: COMPLETE & VERIFIED.
+  - Resolved the intermittent/batch failure in `MigrationIdempotencyPostgresIT.testE_queuedExecutionRecovery_delegatesToSchedulerSafely:625`: identified that background `@Scheduled` scheduler polling thread `[ scheduling-1]` was active in cached Spring `TestContext` across test suites, claiming executions before the test thread. Disabled background scheduler auto-polling in `backend/src/main/resources/application-test.yml` (`migration.scheduler.enabled: false`).
+  - Hardened integration test polling with deterministic Awaitility: replaced brittle `Thread.sleep` polling loops with `await().atMost(...).pollInterval(...).untilAsserted(...)` across `EndToEndAsyncMigrationLifecycleIT`, `QueuedMigrationDispatcherIT`, and `MigrationIdempotencyPostgresIT`.
+  - Expanded external provider client testing: added 4 new integration tests to `SpotifyApiClientTest` covering HTTP 429 rate limit responses with `Retry-After` header extraction, HTTP 401 Unauthorized handling, and HTTP 404 Resource Not Found handling.
+  - Verified 100% pass rate across all 21 PostgreSQL Testcontainers integration test suites (128/128 tests passing in batch mode via `mvn test -Dtest=*IT`).
+  - Verified 100% pass rate across full backend test suite: **2,433 unit & slice tests passing** (`mvn test`, 1 min 43 s) + **128 integration tests passing** = **2,561 total backend tests**, 0 failures, 0 errors, 0 skipped.
+  - Verified zero Checkstyle violations (`mvn checkstyle:check`).
+  - Total automated project test suite: **2,700 tests** (2,561 backend + 139 frontend).
+  - Confirmed 0 production files modified (`backend/src/main/` production code and `frontend/` untouched).
 - **Phase 17B Verification Status**: COMPLETE & VERIFIED.
   - Implemented comprehensive unit testing hardening across 7 test classes without modifying production code.
   - Expanded backend test suite from 2,262 to **2,429 tests** (+167 tests), passing with 0 failures, 0 errors, 0 skipped (`mvn test`, 1 min 40 s).

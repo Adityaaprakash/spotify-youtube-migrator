@@ -1940,3 +1940,58 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
    - Added candidate ID filtering: rejects null, empty, or whitespace IDs while retaining valid candidates.
    - Added zero-result query continuation: ensures subsequent queries execute when earlier queries return empty results.
    - Added safe retention of candidates with missing or zero durations without throwing exceptions.
+
+---
+
+## Phase 17C — Integration Testing Hardening (Complete & Verified)
+
+### Execution Metrics
+- **PostgreSQL Testcontainers Integration Tests (`-Dtest=*IT`)**: **128 tests** passing across 21 test suites, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test "-Dtest=*IT"`, 1 min 28 s).
+- **Backend Unit & Slice Tests (`mvn test`)**: **2,433 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 1 min 43 s).
+- **Combined Backend Executed Tests**: **2,561 tests** (2,433 unit/slice + 128 integration).
+- **Frontend Automated Tests**: **139 tests** (Phase 15 frozen baseline).
+- **Total Project Automated Tests**: **2,700 tests**.
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Production Code Status**: 0 production Java files modified (test configuration and test code only).
+
+### Root-Cause Resolution of Batch Integration Failure
+- **Issue**: `MigrationIdempotencyPostgresIT.testE_queuedExecutionRecovery_delegatesToSchedulerSafely:625` failed in batch runs with `AssertionError: Expecting Optional to contain a value but it was empty`.
+- **Root Cause**: Spring TestContext caching retained the background `@Scheduled` thread pool `[ scheduling-1]` from earlier `@SpringBootTest` suites. The background thread ran `DurableMigrationScheduler.pollAndDispatch()` every 5 seconds, claiming the `QUEUED` execution in PostgreSQL milliseconds before the test thread asserted recovery.
+- **Fix**: Disabled automatic background scheduler polling in test configuration by setting `migration.scheduler.enabled: false` in `backend/src/main/resources/application-test.yml`. Dedicated scheduler test suites instantiate or trigger scheduling explicitly on test threads.
+- **Verification**: Batch execution of all 21 suites (`mvn test -Dtest=*IT`) passed 128/128 with 0 failures.
+
+### Concurrency & Reliability Hardening (Awaitility)
+- Replaced non-deterministic `Thread.sleep` loops in asynchronous test suites with `org.awaitility.Awaitility.await()`:
+  - `EndToEndAsyncMigrationLifecycleIT`: Replaced 50x100ms sleep loop with `await().atMost(10s).pollInterval(50ms).untilAsserted(...)`.
+  - `QueuedMigrationDispatcherIT`: Replaced 50x100ms sleep loop with `await().atMost(10s).pollInterval(50ms).untilAsserted(...)`.
+  - `MigrationIdempotencyPostgresIT`: Replaced `Thread.sleep(250)` with `await().atMost(5s).pollInterval(25ms).untilAsserted(...)` for independent background heartbeat renewal.
+
+### Provider Client Error Mapping Hardening
+- Added 4 targeted integration tests to `SpotifyApiClientTest`:
+  - `getUserPlaylists` on HTTP 429: Verifies `ExternalProviderException` with `providerStatusCode = 429` and `retryAfter = "45"`.
+  - `getPlaylistTracks` on HTTP 429: Verifies `ExternalProviderException` with `providerStatusCode = 429` and `retryAfter = "30"`.
+  - `getCurrentUserProfile` on HTTP 401: Verifies `ExternalProviderException` with `providerStatusCode = 401`.
+  - `getPlaylistTracks` on HTTP 404: Verifies translation to `ResourceNotFoundException`.
+
+### Complete Integration Test Suite Inventory (21 Suites, 128 Tests)
+1. `PostgreSqlTimezoneIT` (3 tests) — Database UTC timezone and driver alignment.
+2. `ActiveMigrationProgressIT` (4 tests) — Real-time progress snapshots and count conservation.
+3. `AtomicQueuedExecutionClaimIT` (3 tests) — Atomic queue claiming and concurrency safety.
+4. `EndToEndAsyncMigrationLifecycleIT` (6 tests) — Async lifecycle, worker dispatch, and progress polling.
+5. `QueuedMigrationDispatcherIT` (5 tests) — Async dispatcher, destination playlist creation, track insertion.
+6. `Phase14BPersistentMigrationRecordIT` (5 tests) — Migration record persistence, immutable audit columns.
+7. `Phase14CDPersistentHistoryAndAuditIT` (5 tests) — Paginated history and chronological audit events.
+8. `Phase14EFResumeIntegrationIT` (6 tests) — Safe resume skipping already-added tracks.
+9. `PostgreSqlProgressConsistencyIT` (3 tests) — PostgreSQL atomic progress conservation.
+10. `MigrationIdempotencyAutoConfiguredMockMvcIT` (6 tests) — MockMvc idempotency headers and replay deduplication.
+11. `MigrationIdempotencyConcurrencyIT` (5 tests) — Concurrent claim acquisition and row-level locking.
+12. `MigrationIdempotencyPostgresIT` (22 tests) — PostgreSQL idempotency keys, crash recovery, and heartbeat.
+13. `ExternalOperationSafetyPostgresIT` (6 tests) — External operation safety and fencing tokens.
+14. `Phase13HFaultInjectionIT` (7 tests) — Worker crash simulation, lease stealing, split-brain fencing.
+15. `Phase13GRecoveryIntegrationIT` (9 tests) — Orphaned lease reclamation, rollback, state recovery.
+16. `AtomicPostgresSchedulerClaimingIT` (13 tests) — PostgreSQL SKIP LOCKED claiming, generation fences.
+17. `DurableHeartbeatAndRenewalIT` (7 tests) — Heartbeat renewal threads, lease extension, clean release.
+18. `DurableLeaseAndFencingPersistenceIT` (19 tests) — Monotonic fence generations, stale worker rejection.
+19. `DurableRetrySchedulingIT` (4 tests) — Exponential backoff scheduling in PostgreSQL.
+20. `GracefulShutdownAndSaturationIT` (3 tests) — Thread pool saturation, graceful shutdown draining.
+21. `WorkerDispatchAndCompensationIT` (7 tests) — Worker thread dispatch and failure compensation.

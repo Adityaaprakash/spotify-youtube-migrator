@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
@@ -167,17 +168,16 @@ public class QueuedMigrationDispatcherIT {
         // Destination playlist creation happened exactly once during synchronous preparation
         verify(musicDestination, times(1)).createPlaylist(eq(userId), any());
 
-        // Wait up to 5 seconds for background worker to claim and complete track insertion
-        MigrationExecution completedExecution = null;
-        for (int i = 0; i < 50; i++) {
-            completedExecution = executionRepository.findById(executionId).orElse(null);
-            if (completedExecution != null && completedExecution.getStatus() == MigrationExecutionStatus.COMPLETED) {
-                break;
-            }
-            Thread.sleep(100);
-        }
+        // Wait up to 10 seconds for background worker to claim and complete track insertion
+        await().atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(50))
+                .untilAsserted(() -> {
+                    MigrationExecution exec = executionRepository.findById(executionId).orElse(null);
+                    assertThat(exec).isNotNull();
+                    assertThat(exec.getStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
+                });
 
-        assertThat(completedExecution).isNotNull();
+        MigrationExecution completedExecution = executionRepository.findById(executionId).orElseThrow();
         assertThat(completedExecution.getStatus()).isEqualTo(MigrationExecutionStatus.COMPLETED);
         assertThat(completedExecution.getSuccessfulInsertions()).isEqualTo(2);
         assertThat(completedExecution.getFailedInsertions()).isEqualTo(0);
