@@ -57,8 +57,10 @@ import com.spotifyyoutube.migrator.migration.reliability.scheduling.DurableSched
 import com.spotifyyoutube.migrator.migration.reliability.reconciliation.TrackInsertionReconciliationOutcome;
 import com.spotifyyoutube.migrator.migration.reliability.reconciliation.TrackInsertionReconciliationResult;
 import com.spotifyyoutube.migrator.migration.reliability.reconciliation.TrackInsertionReconciliationService;
+import com.spotifyyoutube.migrator.migration.metrics.MigrationMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -104,6 +106,13 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
     private final MigrationIdempotencyService idempotencyService;
     private final TrackInsertionReconciliationService trackReconciliationService;
     private final ExecutionAuditService auditService;
+
+    @Autowired(required = false)
+    private MigrationMetrics migrationMetrics;
+
+    public void setMigrationMetrics(MigrationMetrics migrationMetrics) {
+        this.migrationMetrics = migrationMetrics;
+    }
 
     public DefaultMigrationExecutionStateService(
             MigrationExecutionRepository executionRepository,
@@ -1649,6 +1658,10 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
             recordAuditStateTransition(execution, preClaim, MigrationExecutionStatus.RUNNING,
                     isResume ? "Execution resumed" : "Execution started", "USER", null);
 
+            if (migrationMetrics != null && !isResume) {
+                migrationMetrics.recordMigrationStarted(executionId, "manual");
+            }
+
             return execution.getDestinationPlaylistId();
         });
 
@@ -3023,6 +3036,26 @@ public class DefaultMigrationExecutionStateService implements MigrationExecution
                     "WORKER",
                     null
             );
+
+            if (migrationMetrics != null) {
+                Instant startedAt = execution.getStartedAt() != null
+                        ? execution.getStartedAt()
+                        : (execution.getCreatedAt() != null ? execution.getCreatedAt() : Instant.now());
+                Instant completedAt = execution.getCompletedAt() != null
+                        ? execution.getCompletedAt()
+                        : Instant.now();
+                Duration duration = Duration.between(startedAt, completedAt);
+                if (duration.isNegative()) {
+                    duration = Duration.ZERO;
+                }
+
+                if (execution.getStatus() == MigrationExecutionStatus.COMPLETED) {
+                    migrationMetrics.recordMigrationCompleted(execution.getId(), "completed", "manual", duration);
+                } else if (execution.getStatus() == MigrationExecutionStatus.FAILED) {
+                    String errorCat = MigrationMetrics.classifyErrorCategory(execution.getFailureSummary());
+                    migrationMetrics.recordMigrationFailed(execution.getId(), errorCat, "failed", duration);
+                }
+            }
         }
     }
 

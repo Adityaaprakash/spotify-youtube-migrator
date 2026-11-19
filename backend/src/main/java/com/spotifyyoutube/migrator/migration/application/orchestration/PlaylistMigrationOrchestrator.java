@@ -21,6 +21,7 @@ import com.spotifyyoutube.migrator.migration.application.destination.model.Desti
 import com.spotifyyoutube.migrator.migration.domain.MigrationJob;
 import com.spotifyyoutube.migrator.migration.domain.MigrationStatus;
 import com.spotifyyoutube.migrator.migration.domain.MigrationTask;
+import com.spotifyyoutube.migrator.migration.metrics.MigrationMetrics;
 import com.spotifyyoutube.migrator.migration.repository.MigrationJobRepository;
 import com.spotifyyoutube.migrator.migration.repository.MigrationTaskRepository;
 import com.spotifyyoutube.migrator.playlist.api.dto.PlaylistResponse;
@@ -29,12 +30,15 @@ import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -65,6 +69,7 @@ public class PlaylistMigrationOrchestrator {
     private final MusicDestination musicDestination;
     private final MigrationJobRepository migrationJobRepository;
     private final MigrationTaskRepository migrationTaskRepository;
+    private final MigrationMetrics migrationMetrics;
 
     public PlaylistMigrationOrchestrator(
             SpotifyPlaylistService spotifyPlaylistService,
@@ -75,6 +80,21 @@ public class PlaylistMigrationOrchestrator {
             MigrationJobRepository migrationJobRepository,
             MigrationTaskRepository migrationTaskRepository
     ) {
+        this(spotifyPlaylistService, normalizationOrchestrator, candidateDiscoveryService,
+                matchingEngine, musicDestination, migrationJobRepository, migrationTaskRepository, null);
+    }
+
+    @Autowired
+    public PlaylistMigrationOrchestrator(
+            SpotifyPlaylistService spotifyPlaylistService,
+            NormalizationOrchestrator normalizationOrchestrator,
+            CandidateDiscoveryService candidateDiscoveryService,
+            TrackMatchingEngine matchingEngine,
+            MusicDestination musicDestination,
+            MigrationJobRepository migrationJobRepository,
+            MigrationTaskRepository migrationTaskRepository,
+            @Autowired(required = false) MigrationMetrics migrationMetrics
+    ) {
         this.spotifyPlaylistService = Objects.requireNonNull(spotifyPlaylistService, "SpotifyPlaylistService must not be null");
         this.normalizationOrchestrator = Objects.requireNonNull(normalizationOrchestrator, "NormalizationOrchestrator must not be null");
         this.candidateDiscoveryService = Objects.requireNonNull(candidateDiscoveryService, "CandidateDiscoveryService must not be null");
@@ -82,6 +102,7 @@ public class PlaylistMigrationOrchestrator {
         this.musicDestination = Objects.requireNonNull(musicDestination, "MusicDestination must not be null");
         this.migrationJobRepository = Objects.requireNonNull(migrationJobRepository, "MigrationJobRepository must not be null");
         this.migrationTaskRepository = Objects.requireNonNull(migrationTaskRepository, "MigrationTaskRepository must not be null");
+        this.migrationMetrics = migrationMetrics;
     }
 
     /**
@@ -114,6 +135,9 @@ public class PlaylistMigrationOrchestrator {
         job.setStatus(MigrationStatus.IN_PROGRESS);
         job.setStartedAt(Instant.now());
         job = migrationJobRepository.save(job);
+        if (migrationMetrics != null) {
+            migrationMetrics.recordMigrationStarted(job.getId(), "manual");
+        }
 
         MigrationExecutionSummary summary;
         try {
@@ -125,6 +149,10 @@ public class PlaylistMigrationOrchestrator {
             job.setStatus(MigrationStatus.FAILED);
             job.setCompletedAt(Instant.now());
             migrationJobRepository.save(job);
+            if (migrationMetrics != null) {
+                String errorCat = MigrationMetrics.classifyErrorCategory(sanitizedMsg);
+                migrationMetrics.recordMigrationFailed(job.getId(), errorCat, "failed", Duration.ZERO);
+            }
             throw new RuntimeException("Playlist migration failed: " + sanitizedMsg, ex);
         }
 
@@ -134,6 +162,17 @@ public class PlaylistMigrationOrchestrator {
         job.setTargetPlaylistUrl(summary.destinationPlaylistUrl());
         job.setStatus(summary.finalStatus());
         job.setCompletedAt(Instant.now());
+
+        if (migrationMetrics != null) {
+            Duration duration = Duration.ofMillis(summary.durationMs());
+            if (summary.finalStatus() == MigrationStatus.COMPLETED) {
+                migrationMetrics.recordMigrationCompleted(job.getId(), "completed", "manual", duration);
+            } else if (summary.finalStatus() == MigrationStatus.PARTIALLY_COMPLETED) {
+                migrationMetrics.recordMigrationCompleted(job.getId(), "partially_completed", "manual", duration);
+            } else if (summary.finalStatus() == MigrationStatus.FAILED) {
+                migrationMetrics.recordMigrationFailed(job.getId(), "server_error", "failed", duration);
+            }
+        }
 
         return migrationJobRepository.save(job);
     }
@@ -223,6 +262,16 @@ public class PlaylistMigrationOrchestrator {
                     String candidateId = matchResult.selectedCandidate().id();
                     String candidateTitle = matchResult.selectedCandidate().title();
 
+                    if (migrationMetrics != null) {
+                        String confidence = matchResult.confidence() != null
+                                ? matchResult.confidence().name().toLowerCase(Locale.ROOT)
+                                : "good";
+                        migrationMetrics.recordTrackMatched(confidence);
+                        if (overallScore != null) {
+                            migrationMetrics.recordMatchingScore(overallScore, "matched", confidence);
+                        }
+                    }
+
                     if (deduplicate && insertedCandidateIds.contains(candidateId)) {
                         duplicateCount++;
                         failedCount++;
@@ -259,6 +308,12 @@ public class PlaylistMigrationOrchestrator {
                         ));
                     }
                 } else if (decision == MatchDecision.REVIEW_REQUIRED) {
+                    if (migrationMetrics != null && overallScore != null) {
+                        String confidence = matchResult.confidence() != null
+                                ? matchResult.confidence().name().toLowerCase(Locale.ROOT)
+                                : "poor";
+                        migrationMetrics.recordMatchingScore(overallScore, "review_required", confidence);
+                    }
                     reviewRequiredCount++;
                     failedCount++;
                     String reviewMsg = "Review required: " + String.join("; ", matchResult.matchReasons());
@@ -274,6 +329,15 @@ public class PlaylistMigrationOrchestrator {
                     ));
                 } else {
                     // NO_MATCH
+                    if (migrationMetrics != null) {
+                        migrationMetrics.recordTrackUnmatched();
+                        if (overallScore != null) {
+                            String confidence = matchResult.confidence() != null
+                                    ? matchResult.confidence().name().toLowerCase(Locale.ROOT)
+                                    : "poor";
+                            migrationMetrics.recordMatchingScore(overallScore, "no_match", confidence);
+                        }
+                    }
                     failedCount++;
                     String noMatchMsg = "No matching destination candidate found: " + String.join("; ", matchResult.matchReasons());
                     if (task != null) {

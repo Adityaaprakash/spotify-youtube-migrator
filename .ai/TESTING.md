@@ -2120,6 +2120,35 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 18D — Migration & Matching Business Metrics
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE & VERIFIED`.
+- **Backend Unit & Slice Tests (`mvn test`)**: **2,585 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 08 s).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **New Tests Added**: +26 tests across 2 suites:
+  - `MigrationMetricsTest.java`: 23 tests (lifecycle counters, duplicate prevention, mutual exclusivity of terminal outcomes, duration timer, track matching counters, score distribution, error categorization).
+  - `MigrationBusinessMetricsIntegrationTest.java`: 3 tests (Spring application context injection, common application tags, lifecycle recording, duplicate suppression).
+- **Instrumentation Architecture**:
+  - `MigrationMetrics.java`: Dedicated `@Component` metrics service managing business metric recording and in-memory deduplication.
+  - `PlaylistMigrationOrchestrator.java`: Instrumented with `MigrationMetrics` for synchronous migrations and matching decisions.
+  - `DefaultPlaylistMigrationPlanGenerator.java`: Instrumented with `MigrationMetrics` for plan preview and matching decisions.
+  - `DefaultMigrationExecutionStateService.java`: Instrumented with `MigrationMetrics` for durable lifecycle starts (`processInsertion`) and terminal transitions (`checkTerminalTransition`).
+  - `DurableMigrationScheduler.java`: Instrumented with `MigrationMetrics` for automated scheduled worker lease claims.
+
+### Implemented Business Metrics Matrix
+| Roadmap Metric | Micrometer Name | Meter Type | Authoritative Recording Boundary | Bounded Tags |
+|---|---|---|---|---|
+| `migration_started_total` | `migration.started` | Counter | `DefaultMigrationExecutionStateService.processInsertion` / `DurableMigrationScheduler.claimNextExecution` / `PlaylistMigrationOrchestrator.executeMigration` | `mode` (`manual`, `automated`) |
+| `migration_completed_total` | `migration.completed` | Counter | `DefaultMigrationExecutionStateService.checkTerminalTransition` / `PlaylistMigrationOrchestrator.executeMigration` | `outcome` (`completed`, `partially_completed`), `mode` (`manual`) |
+| `migration_failed_total` | `migration.failed` | Counter | `DefaultMigrationExecutionStateService.checkTerminalTransition` / `PlaylistMigrationOrchestrator.executeMigration` | `error_category` (`server_error`, `rate_limit`, `quota_exceeded`, `network_error`, `auth_error`, `validation_error`), `outcome` (`failed`) |
+| `migration_duration` | `migration.duration` | Timer | Monotonic duration from start to terminal completion/failure | `outcome` (`completed`, `partially_completed`, `failed`), `mode` (`manual`, `automated`) |
+| `tracks_matched_total` | `tracks.matched` | Counter | Confident candidate selection (`MatchDecision.MATCH` with selected candidate) | `decision` (`matched`), `confidence` (`excellent`, `good`, `poor`) |
+| `tracks_unmatched_total` | `tracks.unmatched` | Counter | Genuine `MatchDecision.NO_MATCH` outcome | `decision` (`unmatched`) |
+| `average_match_score` | `matching.score` | DistributionSummary | Final composite matching score in $[0.0, 1.0]$ | `decision` (`matched`, `review_required`, `no_match`), `confidence` (`excellent`, `good`, `poor`) |
+
+---
+
 ## Phase 18C — Micrometer Metrics Foundation
 
 ### Execution & Verification Metrics

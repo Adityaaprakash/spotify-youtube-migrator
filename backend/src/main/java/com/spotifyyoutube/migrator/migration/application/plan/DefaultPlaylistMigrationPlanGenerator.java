@@ -12,17 +12,20 @@ import com.spotifyyoutube.migrator.matching.normalization.NormalizationOrchestra
 import com.spotifyyoutube.migrator.matching.normalization.NormalizedTrackMetadata;
 import com.spotifyyoutube.migrator.matching.normalization.RawTrackMetadata;
 import com.spotifyyoutube.migrator.migration.application.destination.model.DestinationTrackCandidate;
+import com.spotifyyoutube.migrator.migration.metrics.MigrationMetrics;
 import com.spotifyyoutube.migrator.playlist.api.dto.PlaylistResponse;
 import com.spotifyyoutube.migrator.playlist.api.dto.TrackResponse;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -43,6 +46,7 @@ public class DefaultPlaylistMigrationPlanGenerator implements PlaylistMigrationP
     private final NormalizationOrchestrator normalizationOrchestrator;
     private final CandidateDiscoveryService candidateDiscoveryService;
     private final TrackMatchingEngine matchingEngine;
+    private final MigrationMetrics migrationMetrics;
 
     public DefaultPlaylistMigrationPlanGenerator(
             SpotifyPlaylistService spotifyPlaylistService,
@@ -50,10 +54,22 @@ public class DefaultPlaylistMigrationPlanGenerator implements PlaylistMigrationP
             CandidateDiscoveryService candidateDiscoveryService,
             TrackMatchingEngine matchingEngine
     ) {
+        this(spotifyPlaylistService, normalizationOrchestrator, candidateDiscoveryService, matchingEngine, null);
+    }
+
+    @Autowired
+    public DefaultPlaylistMigrationPlanGenerator(
+            SpotifyPlaylistService spotifyPlaylistService,
+            NormalizationOrchestrator normalizationOrchestrator,
+            CandidateDiscoveryService candidateDiscoveryService,
+            TrackMatchingEngine matchingEngine,
+            @Autowired(required = false) MigrationMetrics migrationMetrics
+    ) {
         this.spotifyPlaylistService = Objects.requireNonNull(spotifyPlaylistService, "SpotifyPlaylistService must not be null");
         this.normalizationOrchestrator = Objects.requireNonNull(normalizationOrchestrator, "NormalizationOrchestrator must not be null");
         this.candidateDiscoveryService = Objects.requireNonNull(candidateDiscoveryService, "CandidateDiscoveryService must not be null");
         this.matchingEngine = Objects.requireNonNull(matchingEngine, "TrackMatchingEngine must not be null");
+        this.migrationMetrics = migrationMetrics;
     }
 
     @Override
@@ -122,6 +138,15 @@ public class DefaultPlaylistMigrationPlanGenerator implements PlaylistMigrationP
                         : null;
 
                 if (decision == MatchDecision.MATCH && selectedCandidate != null) {
+                    if (migrationMetrics != null) {
+                        String confidence = matchResult.confidence() != null
+                                ? matchResult.confidence().name().toLowerCase(Locale.ROOT)
+                                : "good";
+                        migrationMetrics.recordTrackMatched(confidence);
+                        if (overallScore != null) {
+                            migrationMetrics.recordMatchingScore(overallScore, "matched", confidence);
+                        }
+                    }
                     String candidateId = selectedCandidate.id();
                     if (deduplicate && seenCandidateIds.contains(candidateId)) {
                         String dupReason = "Duplicate: destination candidate '" + candidateId + "' already selected for an earlier track";
@@ -137,12 +162,27 @@ public class DefaultPlaylistMigrationPlanGenerator implements PlaylistMigrationP
                         ));
                     }
                 } else if (decision == MatchDecision.REVIEW_REQUIRED) {
+                    if (migrationMetrics != null && overallScore != null) {
+                        String confidence = matchResult.confidence() != null
+                                ? matchResult.confidence().name().toLowerCase(Locale.ROOT)
+                                : "poor";
+                        migrationMetrics.recordMatchingScore(overallScore, "review_required", confidence);
+                    }
                     planTracks.add(MigrationPlanTrack.reviewRequired(
                             i, sourceTrackId, trackTitle, trackArtist,
                             selectedCandidate, overallScore, calibratedProb, matchReasons
                     ));
                 } else {
                     // NO_MATCH or unselected candidate
+                    if (migrationMetrics != null) {
+                        migrationMetrics.recordTrackUnmatched();
+                        if (overallScore != null) {
+                            String confidence = matchResult != null && matchResult.confidence() != null
+                                    ? matchResult.confidence().name().toLowerCase(Locale.ROOT)
+                                    : "poor";
+                            migrationMetrics.recordMatchingScore(overallScore, "no_match", confidence);
+                        }
+                    }
                     planTracks.add(MigrationPlanTrack.unmatched(
                             i, sourceTrackId, trackTitle, trackArtist, matchReasons
                     ));

@@ -6,6 +6,7 @@ import com.spotifyyoutube.migrator.migration.async.MigrationBackgroundWorker;
 import com.spotifyyoutube.migrator.migration.execution.domain.ExecutionAuditEventType;
 import com.spotifyyoutube.migrator.migration.execution.domain.MigrationExecutionStatus;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
+import com.spotifyyoutube.migrator.migration.metrics.MigrationMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,12 +52,26 @@ public class DurableMigrationScheduler implements SmartLifecycle {
     private final DurableSchedulerProperties properties;
     private final DurableLeaseHeartbeatService heartbeatService;
     private final ExecutionAuditService auditService;
+    private final MigrationMetrics migrationMetrics;
     private final String workerId;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private static final java.util.regex.Pattern TOKEN_PATTERN = java.util.regex.Pattern.compile(
             "(?i)(bearer\\s+|(?:access_token|refresh_token|token|api_key|apikey|key|client_secret|secret|password)=)[^\\s&\"',;]+"
     );
+
+    public DurableMigrationScheduler(
+            MigrationExecutionRepository migrationExecutionRepository,
+            MigrationBackgroundWorker migrationBackgroundWorker,
+            @Qualifier(AsyncMigrationConfig.MIGRATION_TASK_EXECUTOR_BEAN) TaskExecutor taskExecutor,
+            PlatformTransactionManager transactionManager,
+            DurableSchedulerProperties properties,
+            DurableLeaseHeartbeatService heartbeatService,
+            ExecutionAuditService auditService
+    ) {
+        this(migrationExecutionRepository, migrationBackgroundWorker, taskExecutor,
+                transactionManager, properties, heartbeatService, auditService, null);
+    }
 
     @Autowired
     public DurableMigrationScheduler(
@@ -66,7 +81,8 @@ public class DurableMigrationScheduler implements SmartLifecycle {
             PlatformTransactionManager transactionManager,
             DurableSchedulerProperties properties,
             @Autowired(required = false) DurableLeaseHeartbeatService heartbeatService,
-            @Autowired(required = false) ExecutionAuditService auditService
+            @Autowired(required = false) ExecutionAuditService auditService,
+            @Autowired(required = false) MigrationMetrics migrationMetrics
     ) {
         this.migrationExecutionRepository = Objects.requireNonNull(
                 migrationExecutionRepository, "MigrationExecutionRepository must not be null");
@@ -80,6 +96,7 @@ public class DurableMigrationScheduler implements SmartLifecycle {
                 properties, "DurableSchedulerProperties must not be null");
         this.heartbeatService = heartbeatService;
         this.auditService = auditService;
+        this.migrationMetrics = migrationMetrics;
         this.workerId = (properties.getWorkerIdPrefix() != null ? properties.getWorkerIdPrefix() : "scheduler-node-")
                 + UUID.randomUUID();
     }
@@ -203,6 +220,9 @@ public class DurableMigrationScheduler implements SmartLifecycle {
             claim.ifPresent(c -> {
                 log.info("Worker '{}' claimed execution {} with lease generation {}",
                         workerId, c.executionId(), c.leaseGeneration());
+                if (migrationMetrics != null && c.preClaimStatus() == MigrationExecutionStatus.QUEUED) {
+                    migrationMetrics.recordMigrationStarted(c.executionId(), "automated");
+                }
                 if (auditService != null) {
                     try {
                         auditService.recordLeaseEvent(

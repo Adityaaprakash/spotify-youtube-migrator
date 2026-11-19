@@ -3,10 +3,35 @@
 Last Updated: 2026-11-19
 
 Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
-Current Subphase: Phase 18C (Micrometer Metrics Foundation) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18D (Migration & Matching Business Metrics) [READY FOR IMPLEMENTATION]
-Latest Pushed Commit: 22a974c135ebce0a6f9356c172974a5bd1ca34f3 (feat(observability): harden actuator health probes)
+Current Subphase: Phase 18D (Migration & Matching Business Metrics) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18E (External Provider Metrics) [READY FOR IMPLEMENTATION]
+Latest Pushed Commit: 5ab97ffa7d487768e8b3724cdf352a9f4043a62e (feat(observability): establish micrometer metrics foundation)
 
 ## Verification Status & Release Gate
+- **Phase 18D Verification Status**: COMPLETE & VERIFIED.
+  - Implemented application metrics service `MigrationMetrics.java` under `com.spotifyyoutube.migrator.migration.metrics` leveraging the reusable Micrometer infrastructure from Phase 18C.
+  - Implemented migration lifecycle counters:
+    - `migration.started` (`migration_started_total`): incremented strictly at authoritative execution starts (`mode="manual"` for API executions, `mode="automated"` for scheduled lease claims); retries, duplicate submissions, and resume operations are prohibited from double-incrementing.
+    - `migration.completed` (`migration_completed_total`): incremented when execution reaches terminal completion with outcome tags (`outcome="completed"` for full success, `outcome="partially_completed"` for partial success, `mode="manual"`).
+    - `migration.failed` (`migration_failed_total`): incremented upon terminal failure with categorized error (`error_category="server_error"|"rate_limit"|"quota_exceeded"|"network_error"|"auth_error"|"validation_error"`, `outcome="failed"`).
+  - Implemented migration duration timer:
+    - `migration.duration` (`migration_duration_seconds`): measures monotonic elapsed duration from start to terminal completion/failure, handling both completed and failed paths consistently.
+  - Implemented track matching counters and distribution summary:
+    - `tracks.matched` (`tracks_matched_total`): incremented for confidently selected candidate matches (`decision="matched"`, `confidence="excellent"|"good"|"poor"`).
+    - `tracks.unmatched` (`tracks_unmatched_total`): incremented for genuine `NO_MATCH` outcomes (`decision="unmatched"`).
+    - `REVIEW_REQUIRED` tracks and track processing exceptions are excluded from matched and unmatched counters.
+    - `matching.score` (`matching_score_count`, `matching_score_sum`): records actual final composite scores in $[0.0, 1.0]$ with `decision` and `confidence` tags; rejects NaN, infinity, and out-of-bound scores; omits recording when matching evidence is missing.
+  - Built-in exactly-once duplicate protection: in-memory concurrent thread-safe deduplication sets (`startedExecutions`, `completedExecutions`, `failedExecutions`, `durationRecordedExecutions`) guarantee that repeated polling callbacks or redundant method invocations never double-increment meters.
+  - Instrumented existing migration components cleanly with backward-compatible constructors:
+    - `PlaylistMigrationOrchestrator.java` (synchronous migration execution & track matching)
+    - `DefaultPlaylistMigrationPlanGenerator.java` (plan generation & track matching)
+    - `DefaultMigrationExecutionStateService.java` (durable track insertion lifecycle & terminal transition)
+    - `DurableMigrationScheduler.java` (automated background worker lease claims)
+  - Zero modifications to matching algorithm, scoring weights, thresholds, calibration, or decision policy. Zero modifications to API contracts, security configurations, or database schemas.
+  - Added 26 automated tests across 2 new test suites:
+    - `MigrationMetricsTest.java` (23 unit tests): tests lifecycle counters, duplicate protection, mutual exclusivity of terminal outcomes, duration timers, track matching counters, score distribution boundary values, and error categorization.
+    - `MigrationBusinessMetricsIntegrationTest.java` (3 integration tests): tests Spring context injection with `MeterRegistry`, application common tags, full lifecycle recording, and duplicate protection.
+  - Full backend test suite verified: **2,585 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 08 s).
+  - Code hygiene: 0 Checkstyle violations (`.\backend\mvnw.cmd checkstyle:check`).
 - **Phase 18C Verification Status**: COMPLETE & VERIFIED.
   - Added `io.micrometer:micrometer-registry-prometheus` dependency to `backend/pom.xml` managed by Spring Boot 3.3.4 BOM (resolved cleanly to version 1.13.4 with 0 version conflicts or duplicate dependencies).
   - Configured `management.prometheus.metrics.export.enabled: true` in `application.yml` and `application-prod.yml`.
