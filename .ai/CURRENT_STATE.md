@@ -3,11 +3,34 @@
 Last Updated: 2026-11-19
 
 Current Phase: Phase 17 — Testing [IN PROGRESS]
-Current Subphase: Phase 17D (API & Controller Testing Hardening) [READY FOR REVIEW] -> Next Subphase: Phase 17E (End-to-End Workflow Testing) [AWAITING APPROVAL]
-Latest Pushed Commit: 9a1768ab825c5d7525831ad16684caf1e0ba690f (test(integration): harden scheduler recovery and async test reliability)
+Current Subphase: Phase 17E (End-to-End Migration Workflow Testing) [READY FOR REVIEW] -> Next Subphase: Phase 17F (Full Regression & Phase Freeze) [AWAITING APPROVAL]
+Latest Pushed Commit: 6323eb4e235cd6afc9b5a606e8deebbb1ec2ac60 (test(api): harden controller validation and error contract coverage)
 
 ## Verification Status & Release Gate
-- **Phase 17D Verification Status**: IMPLEMENTATION COMPLETE & VERIFIED (Ready for Review).
+- **Phase 17E Verification Status**: IMPLEMENTATION COMPLETE & VERIFIED (Ready for Review).
+  - Implemented comprehensive, deterministic end-to-end migration workflow test in `FullMigrationWorkflowE2EIT.java` (+4 automated tests) across real PostgreSQL Testcontainers and Spring Boot web layer.
+  - Validated primary 9-stage migration journey in a single unbroken test:
+    1. User Registration: HTTP `POST /api/auth/register` returns 201 Created; asserts user record in PostgreSQL with encrypted BCrypt password hash (`$2a$`).
+    2. Authentication: HTTP `POST /api/auth/login` returns 200 OK with authenticated `MockHttpSession`; verifies `GET /api/auth/me` returns 200 OK with matching user identity.
+    3. Source Playlist Retrieval: Consumes realistic Spotify fixtures via `SpotifyApiClient` seam; verifies `GET /api/spotify/playlists/{id}` and `GET /api/spotify/playlists/{id}/tracks` return 200 OK with 6 tracks in order.
+    4. Migration Preview & Plan: Evaluates candidate discovery and matching without external mutations; verifies `POST /api/migrations/preview` returns 200 OK with 6 tracks, match scores, and classifications.
+    5. Review Session: Creates persistent review session via `POST /api/review-sessions`; verifies `GET .../tracks` and `GET .../progress` return 200 OK with 6 tracks in order.
+    6. Human Review & Approval: Submits manual candidate replacement on ambiguous track 3 via `POST .../tracks/3/select` (user-selected studio version); excludes unmatched track 4 via `POST .../tracks/4/exclude`; finalizes session via `POST .../complete`; asserts 5 approved tracks and `COMPLETED` review status in database.
+    7. Destination Playlist Creation: Submits approved migration via `POST /api/migrations`; returns 202 Accepted with `Location` header; invokes destination playlist creation on `MusicDestination` test double with correlation marker.
+    8. Ordered Track Insertion: Asynchronous background worker processes approved tracks in target position order (0, 1, 2, 3, 5); asserts `ExecutionTrackRecord` database rows in canonical order with mapped YouTube video IDs; asserts excluded track was not inserted.
+    9. Migration Completion & Persisted Result Verification: Bounded Awaitility polling asserts terminal `COMPLETED` execution state in database and via `GET /api/migrations/{id}/progress` (100% progress) and `GET /api/migrations/{id}`; verifies idempotent resubmission returns 200 OK without re-creating playlist or re-inserting tracks.
+  - Implemented 3 critical failure/edge scenarios:
+    - Multi-tenant anti-IDOR cross-user protection: unauthorized user Bob cannot read or submit Alice's review session (returns 404 NOT_FOUND non-disclosure).
+    - Unapproved review session rejection: submitting an `IN_PROGRESS` review session is rejected with 409 Conflict (`INVALID_STATE`).
+    - Destination playlist creation failure: handles remote quota/network failure safely with 403 Forbidden (`EXTERNAL_PROVIDER_ERROR`) without orphan executions.
+  - Verified 100% pass rate in triple-run determinism testing (3 consecutive 4/4 runs: 33.2s, 31.6s, 30.7s; 0 failures, 0 flakes).
+  - Verified 100% pass rate across all 22 PostgreSQL Testcontainers integration test suites: **132 / 132 tests passing** (`mvn test -Dtest=*IT`, 1 min 30 s).
+  - Verified 100% pass rate across full backend test suite: **2,500 tests passing** (`mvn test`, 2 min 05 s).
+  - Combined backend executed tests: **2,632 tests** (2,500 unit/controller + 132 integration).
+  - Total combined automated project baseline: **2,771 tests** (2,632 backend + 139 frozen frontend tests).
+  - Maintained 0 Checkstyle violations across production and test code (`mvn checkstyle:check`).
+  - Confirmed 0 production files modified (`backend/src/main/` and `frontend/` untouched).
+- **Phase 17D Verification Status**: COMPLETE & VERIFIED.
   - Implemented systematic API and controller testing hardening across 9 test classes (+67 automated tests), expanding backend suite from 2,433 to **2,500 tests** with 0 failures, 0 errors, 0 skipped (`mvn test`, 1 min 50 s).
   - Maintained 0 Checkstyle violations across production and test code (`mvn checkstyle:check`).
   - Preserved 100% pass rate across all 21 PostgreSQL Testcontainers integration test suites (128/128 tests passing via `mvn test -Dtest=*IT`, 1 min 22 s).

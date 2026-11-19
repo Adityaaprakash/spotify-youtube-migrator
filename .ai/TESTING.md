@@ -1995,6 +1995,40 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 19. `DurableRetrySchedulingIT` (4 tests) — Exponential backoff scheduling in PostgreSQL.
 20. `GracefulShutdownAndSaturationIT` (3 tests) — Thread pool saturation, graceful shutdown draining.
 21. `WorkerDispatchAndCompensationIT` (7 tests) — Worker thread dispatch and failure compensation.
+22. `FullMigrationWorkflowE2EIT` (4 tests) — Comprehensive 9-stage end-to-end migration workflow and failure scenarios.
+
+---
+
+## Phase 17E — End-to-End Migration Workflow Testing (Complete & Verified)
+
+### Execution Metrics
+- **New E2E Test Suite**: `FullMigrationWorkflowE2EIT.java` (4 tests passing, 0 failures, 0 errors, 0 skipped, ~30-33s).
+- **Determinism Verification**: Triple consecutive runs verified 100% deterministic pass rate (Run 1: 33.21s, Run 2: 31.63s, Run 3: 30.72s).
+- **PostgreSQL Testcontainers Integration Tests (`-Dtest=*IT`)**: **132 tests** passing across 22 test suites (`.\backend\mvnw.cmd test "-Dtest=*IT"`, 1 min 30 s).
+- **Backend Unit & Controller Tests (`mvn test`)**: **2,500 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 05 s).
+- **Combined Backend Executed Tests**: **2,632 tests** (2,500 unit/controller + 132 integration).
+- **Frontend Automated Tests**: **139 tests** (Phase 15 frozen baseline).
+- **Total Project Automated Tests**: **2,771 tests**.
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Production Code Status**: 0 production Java files modified.
+
+### 9-Stage E2E Workflow Journey Tested
+1. **User Registration**: `POST /api/auth/register` creates user with BCrypt hashed password (`$2a$`), asserts database persistence.
+2. **Authentication**: `POST /api/auth/login` returns session cookie (`JSESSIONID`) and `MockHttpSession`; verifies `GET /api/auth/me` with session.
+3. **Source Playlist Retrieval**: Mocked `SpotifyApiClient` seam provides realistic rock playlist (6 tracks); verifies `GET /api/spotify/playlists/{id}` and `/tracks` return 200 OK with ordered tracks.
+4. **Migration Preview & Plan**: `POST /api/migrations/preview` generates non-mutating preview with candidate discovery and matching scores.
+5. **Review Session**: `POST /api/review-sessions` initializes persistent session with 6 tracks; verifies `GET /tracks` and `/progress`.
+6. **Review Decisions & Approval**: Submits candidate replacement on track 3 via `POST .../tracks/3/select` (user-selected studio version); excludes track 4 via `POST .../tracks/4/exclude`; completes session via `POST .../complete`; asserts 5 approved tracks in DB.
+7. **Destination Playlist Creation**: Submits migration via `POST /api/migrations`; returns 202 Accepted with `Location` header; invokes `MusicDestination.createPlaylist` once with correlation marker.
+8. **Ordered Track Insertion**: Background worker processes approved tracks in target order (0, 1, 2, 3, 5); asserts `ExecutionTrackRecord` database rows in canonical order.
+9. **Migration Completion & Persisted Result Verification**: Awaitility asserts terminal `COMPLETED` execution state in DB; verifies `GET /progress` (100%) and `GET /{id}`; verifies idempotent resubmission returns 200 OK without re-creating playlist or re-inserting tracks.
+
+### Additional Failure Scenarios
+1. **Multi-Tenant Anti-IDOR**: Unauthorized user cannot access or submit another user's review session (404 NOT_FOUND).
+2. **Unapproved Review Session Rejection**: Submitting an uncompleted review session is rejected with 409 Conflict (`INVALID_STATE`).
+3. **Destination Playlist Creation Failure**: Quota or network errors from destination provider are handled safely with 403 Forbidden (`EXTERNAL_PROVIDER_ERROR`) without orphan executions.
+
+---
 
 ---
 
