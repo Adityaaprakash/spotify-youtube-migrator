@@ -88,6 +88,11 @@ management:
       show-details: ${MANAGEMENT_HEALTH_SHOW_DETAILS:never}
       probes:
         enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,db
 
 youtube:
   api-key: ${YOUTUBE_API_KEY:mock-youtube-api-key}

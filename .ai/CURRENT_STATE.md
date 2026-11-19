@@ -3,10 +3,26 @@
 Last Updated: 2026-11-19
 
 Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
-Current Subphase: Phase 18A (Observability Architecture & Audit) [COMPLETE — AUDIT VERIFIED] -> Next Subphase: Phase 18B (Application Health & Spring Actuator) [READY FOR IMPLEMENTATION]
+Current Subphase: Phase 18B (Application Health & Spring Actuator) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18C (Micrometer Metrics Foundation) [READY FOR IMPLEMENTATION]
 Latest Pushed Commit: 53e1064282658a872cfd8722a7aa494c9430fe6b (test(reliability): harden migration recovery and rollback scenarios)
 
 ## Verification Status & Release Gate
+- **Phase 18B Verification Status**: COMPLETE & VERIFIED.
+  - Configured and hardened Spring Boot Actuator health probe groups and detail masking across `backend/src/main/resources/application.yml` and `backend/src/main/resources/application-prod.yml`.
+  - Liveness probe group (`/actuator/health/liveness`) explicitly isolated to `livenessState`: reflects internal application process vitality; unaffected by database outages or external provider latency/quotas; prevents orchestrator/container crash loops.
+  - Readiness probe group (`/actuator/health/readiness`) explicitly configured with `readinessState,db`: incorporates HikariCP PostgreSQL database connectivity; marks application not ready (503 Service Unavailable) during database startup or outages without restarting the JVM process.
+  - Strict external provider isolation: neither Spotify nor YouTube APIs are wired into health indicators, ensuring external provider rate-limits, maintenance, or quota exhaustion never degrade container vitality or readiness.
+  - Health details masking: enforced `management.endpoint.health.show-details: never` (with configurable override `MANAGEMENT_HEALTH_SHOW_DETAILS` in base config, fixed `never` in production profile). Verified that both anonymous and authenticated callers receive strictly `{"status":"UP"}` or `{"status":"DOWN"}` with zero component details, disk space, or database error leakages.
+  - Endpoint exposure & web security lockdown: exposed only `health` and `info` via `management.endpoints.web.exposure.include: health,info`. Confirmed that `/actuator/metrics`, `/actuator/env`, `/actuator/beans`, `/actuator/heapdump`, `/actuator/threaddump`, `/actuator/configprops`, `/actuator/loggers`, and `/actuator/mappings` are strictly rejected with HTTP 403 Forbidden.
+  - HTTP method security: non-GET requests to `/actuator/**` rejected with HTTP 403 Forbidden by Spring Security filter chain.
+  - Backward compatibility: preserved `HealthController.java` (`GET /api/health`) returning `{"status":"UP"}` for authenticated callers and 403 Forbidden for unauthenticated callers.
+  - Automated test suites:
+    - Added `ActuatorReadinessIsolationTest.java` (3 tests): verifies database outage isolates failure to `/actuator/health/readiness` (503) and `/actuator/health` (503) while keeping `/actuator/health/liveness` 200 OK UP, with details completely masked.
+    - Expanded `ActuatorSecurityTest.java` (6 -> 8 tests): added authenticated detail masking verification, liveness/readiness probe detail masking, sensitive endpoint rejections, and POST method rejection.
+    - `HealthControllerTest.java` (3 tests): verified 100% passing.
+  - Full backend test suite verified: **2,505 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 1 min 55 s).
+  - Code hygiene: 0 Checkstyle violations (`.\backend\mvnw.cmd checkstyle:check`).
+  - Zero dependencies added to `pom.xml`, zero modifications to Java production business code.
 - **Phase 18A Verification Status**: COMPLETE — AUDIT VERIFIED (Read-Only Planning).
   - Executed comprehensive read-only observability architecture and baseline audit.
   - Verified baseline commit `53e1064282658a872cfd8722a7aa494c9430fe6b` on branch `main` with 0 uncommitted changes.

@@ -2120,6 +2120,49 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 18B — Application Health & Spring Actuator Hardening
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE & VERIFIED`.
+- **Backend Unit & Slice Tests (`mvn test`)**: **2,505 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 1 min 55 s).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Dependencies**: 0 dependencies added to `pom.xml`.
+- **Production Java Changes**: 0 lines of production Java code modified (`backend/src/main/resources/` configuration only).
+
+### Actuator & Health Verification Matrix
+| Endpoint | Method | Group Components | Show Details | Auth Required | Expected Status (Healthy) | Expected Status (DB Outage) | Expected Status (Spotify/YouTube Outage) |
+|---|---|---|---|---|---|---|---|
+| `/actuator/health` | GET | Aggregated components | `never` | No (PermitAll) | 200 OK (`{"status":"UP"}`) | 503 DOWN (`{"status":"DOWN"}`) | 200 OK (`{"status":"UP"}`) |
+| `/actuator/health/liveness` | GET | `livenessState` | `never` | No (PermitAll) | 200 OK (`{"status":"UP"}`) | 200 OK (`{"status":"UP"}`) | 200 OK (`{"status":"UP"}`) |
+| `/actuator/health/readiness` | GET | `readinessState,db` | `never` | No (PermitAll) | 200 OK (`{"status":"UP"}`) | 503 DOWN (`{"status":"DOWN"}`) | 200 OK (`{"status":"UP"}`) |
+| `/actuator/info` | GET | Info contributors | N/A | No (PermitAll) | 200 OK (`{}`) | 200 OK (`{}`) | 200 OK (`{}`) |
+| `/actuator/metrics` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/env` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/beans` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/heapdump` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/threaddump` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/configprops` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/loggers` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/mappings` | GET | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/actuator/health` | POST | N/A | N/A | DenyAll | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+| `/api/health` | GET | N/A | Custom | Authenticated | 200 OK (`{"status":"UP"}`) | 200 OK (`{"status":"UP"}`) | 200 OK (`{"status":"UP"}`) |
+| `/api/health` | GET | N/A | Custom | Unauthenticated | 403 Forbidden | 403 Forbidden | 403 Forbidden |
+
+### Test Implementations & Hardening
+1. **`ActuatorReadinessIsolationTest.java` (Brand New Suite — 3 tests)**:
+   - `databaseDown_ReadinessReturns503WithMaskedDetails()`: When a simulated database outage occurs (`Health.down()`), `/actuator/health/readiness` immediately returns HTTP 503 Service Unavailable with `{"status":"DOWN"}` and zero details/components/error leakage.
+   - `databaseDown_LivenessRemains200Ok()`: When a simulated database outage occurs, `/actuator/health/liveness` remains HTTP 200 OK with `{"status":"UP"}`. Proves that database connectivity failures do not trigger pod/container restarts in orchestrators (Kubernetes / ECS).
+   - `databaseDown_AggregateHealthReturns503WithMaskedDetails()`: Aggregate `/actuator/health` reflects the database outage (HTTP 503) without leaking component or database connection strings.
+2. **`ActuatorSecurityTest.java` (Expanded Suite — 6 -> 8 tests)**:
+   - Added authenticated caller test: verifies `management.endpoint.health.show-details: never` masks internal components even when the request is sent by an authenticated user.
+   - Added probe detail masking tests: verifies `/actuator/health/liveness` and `/actuator/health/readiness` do not leak details under normal operation.
+   - Expanded forbidden endpoints: verifies `/actuator/threaddump`, `/actuator/configprops`, `/actuator/loggers`, and `/actuator/mappings` in addition to `/actuator/env`, `/actuator/beans`, `/actuator/heapdump`, and `/actuator/metrics` return 403 Forbidden.
+   - Added method restriction test: verifies non-GET (POST) requests to `/actuator/health` are rejected with HTTP 403 Forbidden.
+3. **`HealthControllerTest.java` (Preserved Suite — 3 tests)**:
+   - Verified backward compatibility of legacy `/api/health` endpoint: 200 OK for authenticated user, 403 Forbidden for anonymous user, 405 Method Not Allowed for POST.
+
+---
+
 ## Phase 18A — Observability Architecture & Audit (Audit-Only)
 
 ### Execution & Verification Metrics
