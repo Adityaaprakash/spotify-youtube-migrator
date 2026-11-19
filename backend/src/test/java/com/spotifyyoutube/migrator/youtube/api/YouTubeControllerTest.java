@@ -36,6 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -391,5 +392,71 @@ class YouTubeControllerTest {
     void verifyPlaylist_shouldReturn403_whenUnauthenticated() throws Exception {
         mockMvc.perform(get("/api/youtube/playlists/PL123/verify"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void searchVideos_shouldReturn400_whenMaxResultsBelowOne() throws Exception {
+        mockMvc.perform(get("/api/youtube/videos/search?q=Queen&maxResults=0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("maxResults must be between 1 and 50"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void searchVideos_shouldReturn400_whenMaxResultsAboveFifty() throws Exception {
+        mockMvc.perform(get("/api/youtube/videos/search?q=Queen&maxResults=51"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("maxResults must be between 1 and 50"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void searchVideos_shouldReturn400_whenQueryExceeds500Chars() throws Exception {
+        String longQuery = "a".repeat(501);
+        mockMvc.perform(get("/api/youtube/videos/search?q=" + longQuery))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Search query 'q' must not exceed 500 characters"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void createPlaylist_shouldReturn400_whenMissingRequestBody() throws Exception {
+        mockMvc.perform(post("/api/youtube/playlists")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void addVideoToPlaylist_shouldReturn400_whenMissingRequestBody() throws Exception {
+        mockMvc.perform(post("/api/youtube/playlists/PL123/videos")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void searchVideos_shouldReturn405_whenPostMethodUsed() throws Exception {
+        mockMvc.perform(post("/api/youtube/videos/search")
+                        .with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
+    }
+
+    @Test
+    @WithMockUser(username = "user@example.com")
+    void getPlaylist_shouldReturn405_whenDeleteMethodUsed() throws Exception {
+        mockMvc.perform(delete("/api/youtube/playlists/PL123")
+                        .with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
     }
 }

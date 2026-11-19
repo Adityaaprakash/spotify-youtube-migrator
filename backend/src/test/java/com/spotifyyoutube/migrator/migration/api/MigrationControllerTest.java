@@ -30,6 +30,8 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -162,5 +164,50 @@ public class MigrationControllerTest {
                 .with(csrf()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    public void testGetProgress_InvalidExecutionId_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/migrations/not-a-valid-uuid/progress")
+                .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid parameter value for: executionId"));
+    }
+
+    @Test
+    public void testGetExecution_InvalidId_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/migrations/not-a-valid-uuid")
+                .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid parameter value for: id"));
+    }
+
+    @Test
+    public void testSubmitMigration_MissingBody_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/migrations/submit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    public void testResumeMigration_InvalidId_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(post("/api/migrations/not-a-valid-uuid/resume")
+                        .with(csrf()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid parameter value for: id"));
+    }
+
+    @Test
+    public void testGetExecution_DeleteMethod_ReturnsMethodNotAllowed() throws Exception {
+        UUID id = UUID.randomUUID();
+        mockMvc.perform(delete("/api/migrations/" + id)
+                        .with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
     }
 }

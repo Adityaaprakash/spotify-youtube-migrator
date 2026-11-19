@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.context.annotation.Import;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -25,6 +26,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @WebMvcTest(OAuthController.class)
+@Import(com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler.class)
 @AutoConfigureMockMvc(addFilters = false) // Bypass standard security filters for isolated controller tests, we mock User fetching
 class OAuthControllerTest {
 
@@ -140,5 +142,56 @@ class OAuthControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(tokenLifecycleService).disconnect(userId, OAuthProvider.GOOGLE);
+    }
+
+    @Test
+    @WithMockUser("test@example.com")
+    void generateAuthUrl_InvalidProvider_ReturnsBadRequest() throws Exception {
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+
+        mockMvc.perform(get("/api/oauth/facebook/authorize"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid OAuth provider: facebook"));
+    }
+
+    @Test
+    @WithMockUser("test@example.com")
+    void getConnectionStatus_InvalidProvider_ReturnsBadRequest() throws Exception {
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+
+        mockMvc.perform(get("/api/oauth/facebook"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid OAuth provider: facebook"));
+    }
+
+    @Test
+    void handleCallback_InvalidProvider_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/oauth/facebook/callback")
+                        .param("code", "valid-code")
+                        .param("state", "valid-state"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid OAuth provider: facebook"));
+    }
+
+    @Test
+    @WithMockUser("test@example.com")
+    void disconnect_InvalidProvider_ReturnsBadRequest() throws Exception {
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(testUser));
+
+        mockMvc.perform(delete("/api/oauth/facebook"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid OAuth provider: facebook"));
+    }
+
+    @Test
+    @WithMockUser("test@example.com")
+    void generateAuthUrl_PostMethod_ReturnsMethodNotAllowed() throws Exception {
+        mockMvc.perform(post("/api/oauth/spotify/authorize"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
     }
 }

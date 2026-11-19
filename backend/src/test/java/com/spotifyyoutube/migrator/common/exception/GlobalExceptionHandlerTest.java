@@ -113,7 +113,45 @@ class GlobalExceptionHandlerTest {
         public void progressConsistency() {
             throw new com.spotifyyoutube.migrator.migration.progress.domain.ProgressConsistencyException("Count conservation violation: total=10, sum=8");
         }
+
+        @GetMapping("/test/idempotency-fingerprint-mismatch")
+        public void idempotencyFingerprintMismatch() {
+            throw new com.spotifyyoutube.migrator.migration.reliability.idempotency.IdempotencyFingerprintMismatchException("Idempotency fingerprint mismatch");
+        }
+
+        @GetMapping("/test/optimistic-locking")
+        public void optimisticLocking() {
+            throw new jakarta.persistence.OptimisticLockException("Row modified concurrently");
+        }
+
+        @GetMapping("/test/media-type-not-supported")
+        public void mediaTypeNotSupported() throws org.springframework.web.HttpMediaTypeNotSupportedException {
+            throw new org.springframework.web.HttpMediaTypeNotSupportedException("Content type not supported");
+        }
+
+        @GetMapping("/test/max-upload-size")
+        public void maxUploadSize() {
+            throw new org.springframework.web.multipart.MaxUploadSizeExceededException(1048576L);
+        }
+
+        @GetMapping("/test/missing-param")
+        public void missingParam(@org.springframework.web.bind.annotation.RequestParam("requiredParam") String param) {
+        }
+
+        @GetMapping("/test/type-mismatch")
+        public void typeMismatch(@org.springframework.web.bind.annotation.RequestParam("number") Integer number) {
+        }
+
+        @org.springframework.web.bind.annotation.PostMapping("/test/not-readable")
+        public void notReadable(@org.springframework.web.bind.annotation.RequestBody java.util.Map<String, Object> body) {
+        }
+
+        @org.springframework.web.bind.annotation.PostMapping("/test/validation")
+        public void validation(@jakarta.validation.Valid @org.springframework.web.bind.annotation.RequestBody ValidatedRequest body) {
+        }
     }
+
+    record ValidatedRequest(@jakarta.validation.constraints.NotBlank String name) {}
 
 
     @BeforeEach
@@ -256,6 +294,82 @@ class GlobalExceptionHandlerTest {
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.code").value("INTERNAL_SERVER_ERROR"))
                 .andExpect(jsonPath("$.message").value("An unexpected error occurred"));
+    }
+
+    @Test
+    void idempotencyFingerprintMismatchException_shouldReturn409WithFingerprintMismatchCode() throws Exception {
+        mockMvc.perform(get("/test/idempotency-fingerprint-mismatch").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_FINGERPRINT_MISMATCH"))
+                .andExpect(jsonPath("$.message").value("Idempotency fingerprint mismatch"));
+    }
+
+    @Test
+    void optimisticLockException_shouldReturn409WithConflictCode() throws Exception {
+        mockMvc.perform(get("/test/optimistic-locking").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONFLICT"))
+                .andExpect(jsonPath("$.message").value("Concurrent modification detected; resource was updated by another request"));
+    }
+
+    @Test
+    void mediaTypeNotSupportedException_shouldReturn415WithInvalidRequestCode() throws Exception {
+        mockMvc.perform(get("/test/media-type-not-supported").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Content type is not supported"));
+    }
+
+    @Test
+    void maxUploadSizeExceededException_shouldReturn413WithInvalidRequestCode() throws Exception {
+        mockMvc.perform(get("/test/max-upload-size").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isPayloadTooLarge())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Request payload exceeds maximum allowed size"));
+    }
+
+    @Test
+    void missingServletRequestParameterException_shouldReturn400WithInvalidRequestCode() throws Exception {
+        mockMvc.perform(get("/test/missing-param").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Missing required parameter: requiredParam"));
+    }
+
+    @Test
+    void methodArgumentTypeMismatchException_shouldReturn400WithInvalidRequestCode() throws Exception {
+        mockMvc.perform(get("/test/type-mismatch?number=not-a-number").accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid parameter value for: number"));
+    }
+
+    @Test
+    void httpMessageNotReadableException_shouldReturn400WithInvalidRequestCode() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/test/not-readable")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{invalid-json"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Required request body is missing or malformed"));
+    }
+
+    @Test
+    void methodArgumentNotValidException_shouldReturn400WithInvalidRequestCode() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post("/test/validation")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Validation failed"));
+    }
+
+    @Test
+    void httpRequestMethodNotSupportedException_shouldReturn405WithMethodNotAllowedCode() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/test/not-found"))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"))
+                .andExpect(jsonPath("$.message").value("HTTP method DELETE is not supported for this endpoint"));
     }
 }
 

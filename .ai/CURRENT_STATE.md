@@ -3,10 +3,27 @@
 Last Updated: 2026-11-19
 
 Current Phase: Phase 17 — Testing [IN PROGRESS]
-Current Subphase: Phase 17C (Integration Testing Hardening) [COMPLETE & VERIFIED] -> Next Subphase: Phase 17D (API & Controller Testing Hardening) [AWAITING APPROVAL]
-Latest Pushed Commit: eb73adb6b2d5461a5a2c64a871b39ba2f7baea7f (test(unit): complete Phase 17B unit testing hardening)
+Current Subphase: Phase 17D (API & Controller Testing Hardening) [READY FOR REVIEW] -> Next Subphase: Phase 17E (End-to-End Workflow Testing) [AWAITING APPROVAL]
+Latest Pushed Commit: 9a1768ab825c5d7525831ad16684caf1e0ba690f (test(integration): harden scheduler recovery and async test reliability)
 
 ## Verification Status & Release Gate
+- **Phase 17D Verification Status**: IMPLEMENTATION COMPLETE & VERIFIED (Ready for Review).
+  - Implemented systematic API and controller testing hardening across 9 test classes (+67 automated tests), expanding backend suite from 2,433 to **2,500 tests** with 0 failures, 0 errors, 0 skipped (`mvn test`, 1 min 50 s).
+  - Maintained 0 Checkstyle violations across production and test code (`mvn checkstyle:check`).
+  - Preserved 100% pass rate across all 21 PostgreSQL Testcontainers integration test suites (128/128 tests passing via `mvn test -Dtest=*IT`, 1 min 22 s).
+  - Total combined automated project baseline: **2,767 tests** (2,500 backend unit/controller/slice tests + 128 Testcontainers IT tests = 2,628 backend tests + 139 frozen frontend tests).
+  - Created 2 new test classes:
+    1. `AuthControllerTest.java` (19 tests): Comprehensive MockMvc suite covering `POST /api/auth/register` (201 Created, missing body, invalid email, short password, blank display name, 409 email conflict), `POST /api/auth/login` (200 OK, missing body, blank fields, 401 BadCredentials), `POST /api/auth/logout` (204 No Content, cookie expiration with Max-Age=0), `GET /api/auth/me` (403 unauthenticated, 200 OK authenticated, 404 user not found), and 405 Method Not Allowed checks.
+    2. `HealthControllerTest.java` (3 tests): Covers `/api/health` 200 OK UP status, 403 unauthenticated rejection, and 405 Method Not Allowed on POST.
+  - Expanded 7 existing test classes (+45 tests):
+    3. `GlobalExceptionHandlerTest.java` (+9 tests): Added coverage for unexercised exception handlers: `IdempotencyFingerprintMismatchException` (409), `OptimisticLockException` (409), `HttpMediaTypeNotSupportedException` (415), `MaxUploadSizeExceededException` (413), `MissingServletRequestParameterException` (400), `MethodArgumentTypeMismatchException` (400), `HttpMessageNotReadableException` (400), `MethodArgumentNotValidException` (400), and `HttpRequestMethodNotSupportedException` (405).
+    4. `UserControllerTest.java` (+4 tests): Added non-UUID path segment type mismatch (400), IDOR cross-user access non-disclosure (404), and 405 Method Not Allowed on POST/DELETE.
+    5. `PlaylistControllerTest.java` (+6 tests): Added non-UUID query/path parameter type mismatch (400), empty playlist array handling (200), IDOR cross-user access non-disclosure (404), and 405 Method Not Allowed on POST/DELETE.
+    6. `SpotifyControllerTest.java` (+9 tests): Added query boundary validation (`limit < 1`, `limit > 50`, `offset < 0`, `limit=abc` -> 400), provider rate limiting with `Retry-After: 45` (429), provider unauthorized (401), not found (404), and 405 Method Not Allowed on POST/DELETE.
+    7. `OAuthControllerTest.java` (+5 tests): Added invalid provider rejection (400) on authorize, status, callback, and disconnect endpoints, plus 405 Method Not Allowed on POST.
+    8. `MigrationControllerTest.java` (+5 tests): Added non-UUID execution ID type mismatch on progress, detail, and resume endpoints (400), missing body on submit (400), and 405 Method Not Allowed on DELETE.
+    9. `YouTubeControllerTest.java` (+7 tests): Added search query boundary tests (`maxResults < 1`, `maxResults > 50`, query exceeding 500 characters -> 400), missing request body on playlist creation and video insertion (400), and 405 Method Not Allowed on POST search and DELETE playlist.
+  - Confirmed 0 production files modified (`backend/src/main/` and `frontend/` untouched).
 - **Phase 17C Verification Status**: COMPLETE & VERIFIED.
   - Resolved the intermittent/batch failure in `MigrationIdempotencyPostgresIT.testE_queuedExecutionRecovery_delegatesToSchedulerSafely:625`: identified that background `@Scheduled` scheduler polling thread `[ scheduling-1]` was active in cached Spring `TestContext` across test suites, claiming executions before the test thread. Disabled background scheduler auto-polling in `backend/src/main/resources/application-test.yml` (`migration.scheduler.enabled: false`).
   - Hardened integration test polling with deterministic Awaitility: replaced brittle `Thread.sleep` polling loops with `await().atMost(...).pollInterval(...).untilAsserted(...)` across `EndToEndAsyncMigrationLifecycleIT`, `QueuedMigrationDispatcherIT`, and `MigrationIdempotencyPostgresIT`.

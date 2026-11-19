@@ -1995,3 +1995,44 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 19. `DurableRetrySchedulingIT` (4 tests) — Exponential backoff scheduling in PostgreSQL.
 20. `GracefulShutdownAndSaturationIT` (3 tests) — Thread pool saturation, graceful shutdown draining.
 21. `WorkerDispatchAndCompensationIT` (7 tests) — Worker thread dispatch and failure compensation.
+
+---
+
+## Phase 17D — API & Controller Testing Hardening (Complete & Verified)
+
+### Execution Metrics
+- **Focused Controller & API Suite (9 classes)**: **129 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test "-Dtest=AuthControllerTest,HealthControllerTest,GlobalExceptionHandlerTest,UserControllerTest,PlaylistControllerTest,SpotifyControllerTest,OAuthControllerTest,MigrationControllerTest,YouTubeControllerTest"`, 58.95 s).
+- **Backend Unit & Controller Tests (`mvn test`)**: **2,500 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 1 min 50 s).
+- **New Tests Added**: **+67 automated tests** over the Phase 17C baseline of 2,433.
+- **PostgreSQL Testcontainers Integration Tests (`-Dtest=*IT`)**: **128 tests** passing across 21 test suites (`.\backend\mvnw.cmd test "-Dtest=*IT"`, 1 min 22 s).
+- **Combined Backend Executed Tests**: **2,628 tests** (2,500 unit/controller + 128 integration).
+- **Frontend Automated Tests**: **139 tests** (Phase 15 frozen baseline).
+- **Total Project Automated Tests**: **2,767 tests**.
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Production Code Status**: 0 production Java files modified.
+
+### Test Classes Added & Hardened
+1. **`AuthControllerTest.java` (Brand New Suite — 19 tests)**:
+   - Covers `POST /api/auth/register`: 201 Created with `UserResponse`, missing body (400), invalid email format (400), short password <6 chars (400), blank display name (400), and duplicate email conflict (409).
+   - Covers `POST /api/auth/login`: 200 OK with `UserResponse`, missing body (400), blank email (400), blank password (400), and invalid credentials (401).
+   - Covers `POST /api/auth/logout`: 204 No Content with `JSESSIONID` cookie cleared (`Max-Age=0`), with or without active session.
+   - Covers `GET /api/auth/me`: 403 Forbidden when unauthenticated under SecurityConfig, 200 OK with `UserResponse` when authenticated, 404 Not Found when user is not found in database.
+   - Covers HTTP 405 Method Not Allowed on `GET /api/auth/register`, `GET /api/auth/login`, and `DELETE /api/auth/me`.
+2. **`HealthControllerTest.java` (Brand New Suite — 3 tests)**:
+   - Covers `GET /api/health`: 200 OK with `{"status":"UP"}` for authenticated caller.
+   - Covers `GET /api/health`: 403 Forbidden for unauthenticated caller under SecurityConfig.
+   - Covers `POST /api/health`: 405 Method Not Allowed.
+3. **`GlobalExceptionHandlerTest.java` (+9 tests, 16 -> 25)**:
+   - Added tests for unexercised exception handlers: `IdempotencyFingerprintMismatchException` (409), `OptimisticLockException` (409), `HttpMediaTypeNotSupportedException` (415), `MaxUploadSizeExceededException` (413), `MissingServletRequestParameterException` (400), `MethodArgumentTypeMismatchException` (400), `HttpMessageNotReadableException` (400), `MethodArgumentNotValidException` (400), and `HttpRequestMethodNotSupportedException` (405).
+4. **`UserControllerTest.java` (+4 tests, 2 -> 6)**:
+   - Added invalid UUID path segment type mismatch (400), IDOR cross-user access non-disclosure (404), and 405 Method Not Allowed on POST/DELETE.
+5. **`PlaylistControllerTest.java` (+6 tests, 4 -> 10)**:
+   - Added invalid UUID query/path parameter type mismatch (400), empty playlists collection returning `[]` (200), IDOR cross-user access non-disclosure (404), and 405 Method Not Allowed on POST/DELETE.
+6. **`SpotifyControllerTest.java` (+9 tests, 5 -> 14)**:
+   - Added query parameter boundary validation (`limit < 1`, `limit > 50`, `offset < 0`, `limit=abc` -> 400), upstream rate limit translation with `Retry-After: 45` (429), upstream token rejection translation (401), not found (404), and 405 Method Not Allowed on POST/DELETE.
+7. **`OAuthControllerTest.java` (+5 tests, 7 -> 12)**:
+   - Added invalid provider validation (400) across `/authorize`, `/callback`, `/status`, and disconnect endpoints, plus 405 Method Not Allowed on POST.
+8. **`MigrationControllerTest.java` (+5 tests, 6 -> 11)**:
+   - Added invalid UUID path segment type mismatch on progress, detail, and resume endpoints (400), missing request body on submit (400), and 405 Method Not Allowed on DELETE.
+9. **`YouTubeControllerTest.java` (+7 tests, 22 -> 29)**:
+   - Added search query boundary tests (`maxResults < 1`, `maxResults > 50`, query > 500 characters -> 400), missing request body on playlist creation and video insertion (400), and 405 Method Not Allowed on POST search and DELETE playlist.

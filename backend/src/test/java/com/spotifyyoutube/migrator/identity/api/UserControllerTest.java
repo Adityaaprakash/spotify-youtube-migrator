@@ -16,7 +16,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.UUID;
 
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -57,5 +60,53 @@ public class UserControllerTest {
                 .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    public void testGetUser_InvalidUuid_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/users/not-a-valid-uuid")
+                .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid parameter value for: id"));
+    }
+
+    @Test
+    @WithMockUser(username = "attacker@test.com")
+    public void testGetUser_CrossUserAccess_ReturnsNotFoundForIdorProtection() throws Exception {
+        UUID targetUserId = UUID.randomUUID();
+        User targetUser = new User("victim@test.com");
+        targetUser.setId(targetUserId);
+
+        UUID attackerId = UUID.randomUUID();
+        User attacker = new User("attacker@test.com");
+        attacker.setId(attackerId);
+
+        when(userService.getUserById(targetUserId)).thenReturn(targetUser);
+        when(userService.getUserByEmail("attacker@test.com")).thenReturn(attacker);
+
+        mockMvc.perform(get("/api/users/" + targetUserId)
+                .accept(MediaType.APPLICATION_JSON))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("User not found with id: " + targetUserId));
+    }
+
+    @Test
+    public void testGetUser_PostMethod_ReturnsMethodNotAllowed() throws Exception {
+        UUID userId = UUID.randomUUID();
+        mockMvc.perform(post("/api/users/" + userId)
+                        .with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
+    }
+
+    @Test
+    public void testGetUser_DeleteMethod_ReturnsMethodNotAllowed() throws Exception {
+        UUID userId = UUID.randomUUID();
+        mockMvc.perform(delete("/api/users/" + userId)
+                        .with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
     }
 }

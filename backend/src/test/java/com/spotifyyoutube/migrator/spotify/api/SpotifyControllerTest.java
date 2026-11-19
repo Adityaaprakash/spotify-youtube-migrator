@@ -11,7 +11,9 @@ import com.spotifyyoutube.migrator.playlist.domain.Platform;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyIdentityService;
 import com.spotifyyoutube.migrator.spotify.application.SpotifyPlaylistService;
 import com.spotifyyoutube.migrator.common.config.SecurityConfig;
+import com.spotifyyoutube.migrator.common.exception.ExternalProviderException;
 import com.spotifyyoutube.migrator.common.exception.GlobalExceptionHandler;
+import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -24,7 +26,11 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -120,5 +126,108 @@ public class SpotifyControllerTest {
         mockMvc.perform(get("/api/spotify/playlists/pl1/tracks"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].externalId").value("t1"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylists_limitBelowOne_shouldReturn400BadRequest() throws Exception {
+        mockMvc.perform(get("/api/spotify/playlists?limit=0&offset=0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("limit must be between 1 and 50"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylists_limitAboveFifty_shouldReturn400BadRequest() throws Exception {
+        mockMvc.perform(get("/api/spotify/playlists?limit=51&offset=0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("limit must be between 1 and 50"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylists_negativeOffset_shouldReturn400BadRequest() throws Exception {
+        mockMvc.perform(get("/api/spotify/playlists?limit=20&offset=-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("offset must not be negative"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylists_invalidLimitType_shouldReturn400BadRequest() throws Exception {
+        mockMvc.perform(get("/api/spotify/playlists?limit=abc&offset=0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Invalid parameter value for: limit"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylists_providerRateLimited_shouldReturn429WithRetryAfter() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("test@example.com");
+
+        when(userService.getUserByEmail("test@example.com")).thenReturn(user);
+        when(playlistService.getPlaylists(user.getId(), 20, 0))
+                .thenThrow(new ExternalProviderException("Spotify rate limit exceeded", 429, "45"));
+
+        mockMvc.perform(get("/api/spotify/playlists?limit=20&offset=0"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "45"))
+                .andExpect(jsonPath("$.code").value("EXTERNAL_PROVIDER_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getCurrentProfile_providerUnauthorized_shouldReturn401() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("test@example.com");
+
+        when(userService.getUserByEmail("test@example.com")).thenReturn(user);
+        when(identityService.getConnectedProfile(user.getId()))
+                .thenThrow(new ExternalProviderException("Token rejected", 401, null));
+
+        mockMvc.perform(get("/api/spotify/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("EXTERNAL_PROVIDER_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylistMetadata_notFound_shouldReturn404() throws Exception {
+        User user = new User();
+        user.setId(UUID.randomUUID());
+        user.setEmail("test@example.com");
+
+        when(userService.getUserByEmail("test@example.com")).thenReturn(user);
+        when(playlistService.getPlaylistMetadata(user.getId(), "pl_missing"))
+                .thenThrow(new ResourceNotFoundException("Playlist not found on Spotify: pl_missing"));
+
+        mockMvc.perform(get("/api/spotify/playlists/pl_missing"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylists_postMethod_shouldReturn405MethodNotAllowed() throws Exception {
+        mockMvc.perform(post("/api/spotify/playlists")
+                        .with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
+    }
+
+    @Test
+    @WithMockUser(username = "test@example.com")
+    void getPlaylistMetadata_deleteMethod_shouldReturn405MethodNotAllowed() throws Exception {
+        mockMvc.perform(delete("/api/spotify/playlists/pl1")
+                        .with(csrf()))
+                .andExpect(status().isMethodNotAllowed())
+                .andExpect(jsonPath("$.code").value("METHOD_NOT_ALLOWED"));
     }
 }
