@@ -2120,6 +2120,37 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 18E — External Provider Metrics
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE & VERIFIED`.
+- **Backend Unit & Slice Tests (`mvn test`)**: **2,637 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 10 s).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **New Tests Added**: +52 tests across 4 suites:
+  - `SpotifyMetricsInterceptorTest.java`: 19 tests (operation resolution, error categorization, mock intercept execution, request counter, error counter, latency timer, network exceptions).
+  - `YouTubeMetricsInterceptorTest.java`: 23 tests (operation resolution across search/videos/playlists/playlistItems, quota/rate-limit error categorization, mock intercept execution, request/error counters, latency timer, timeouts).
+  - `SpotifyApiClientMetricsIntegrationTest.java`: 4 tests (profile metrics, pagination multi-attempt counting, 500 server error recording, empty result exclusion from errors).
+  - `YouTubeClientMetricsIntegrationTest.java`: 6 tests (search metrics, playlist creation, 403 forbidden error, 429 rate limit, retry attempt sequence counting, empty search results).
+- **Instrumentation Architecture**:
+  - `SpotifyMetricsInterceptor.java`: Dedicated `ClientHttpRequestInterceptor` managing Spotify Web API request volume, error counts, and request latency at the HTTP transport boundary.
+  - `YouTubeMetricsInterceptor.java`: Dedicated `ClientHttpRequestInterceptor` managing YouTube Data API request volume, error counts, and request latency at the HTTP transport boundary.
+  - `SpotifyApiClient.java`: Instrumented with backward-compatible constructor taking `@Autowired(required = false) SpotifyMetricsInterceptor`.
+  - `YouTubeClient.java`: Instrumented with backward-compatible constructor taking `@Autowired(required = false) YouTubeMetricsInterceptor`.
+  - Attempt-level request counting: accurately records individual HTTP dispatches during pagination and retries without double-counting with service or controller layers.
+  - Latency measurement: monotonic duration recorded via `System.nanoTime()` at the transport boundary, excluding database, matching, or JSON serialization delays.
+
+### Implemented External Provider Metrics Matrix
+| Roadmap Metric | Micrometer Name | Meter Type | Authoritative Recording Boundary | Bounded Tags |
+|---|---|---|---|---|
+| `spotify_api_requests_total` | `spotify.api.requests` | Counter | `SpotifyMetricsInterceptor.intercept` | `provider` (`spotify`), `operation` (`get_profile`, `get_playlists`, `get_playlist`, `get_playlist_tracks`, `token`, `other`), `status` (`200`, `400`, `401`, `403`, `404`, `429`, `500`, `503`, `error`) |
+| `spotify_api_errors_total` | `spotify.api.errors` | Counter | `SpotifyMetricsInterceptor.intercept` (status $\ge 400$ or exception) | `provider` (`spotify`), `operation`, `status`, `error_category` (`rate_limit`, `auth_error`, `validation_error`, `client_error`, `server_error`, `timeout`, `network_error`) |
+| `spotify_api_latency_seconds` | `spotify.api.latency` | Timer | `SpotifyMetricsInterceptor.intercept` (transport duration) | `provider` (`spotify`), `operation`, `status` (`success`, `error`) |
+| `youtube_api_requests_total` | `youtube.api.requests` | Counter | `YouTubeMetricsInterceptor.intercept` | `provider` (`youtube`), `operation` (`search`, `get_video`, `create_playlist`, `get_playlist`, `get_my_playlists`, `add_playlist_item`, `get_playlist_items`, `remove_playlist_item`, `other`), `status` (`200`, `400`, `401`, `403`, `404`, `429`, `500`, `503`, `error`) |
+| `youtube_api_errors_total` | `youtube.api.errors` | Counter | `YouTubeMetricsInterceptor.intercept` (status $\ge 400$ or exception) | `provider` (`youtube`), `operation`, `status`, `error_category` (`rate_limit`, `auth_error`, `validation_error`, `client_error`, `server_error`, `timeout`, `network_error`) |
+| `youtube_api_latency_seconds` | `youtube.api.latency` | Timer | `YouTubeMetricsInterceptor.intercept` (transport duration) | `provider` (`youtube`), `operation`, `status` (`success`, `error`) |
+
+---
+
 ## Phase 18D — Migration & Matching Business Metrics
 
 ### Execution & Verification Metrics

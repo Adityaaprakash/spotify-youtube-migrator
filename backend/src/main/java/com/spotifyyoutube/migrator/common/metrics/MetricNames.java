@@ -90,6 +90,18 @@ public final class MetricNames {
      */
     public static final String SPOTIFY_API_ERRORS = "spotify.api.errors";
 
+    /**
+     * Timer: Total duration of outbound Spotify API requests.
+     * Exported to Prometheus as: {@code spotify_api_latency_seconds}
+     */
+    public static final String SPOTIFY_API_LATENCY = "spotify.api.latency";
+
+    /**
+     * Timer: Total duration of outbound YouTube API requests.
+     * Exported to Prometheus as: {@code youtube_api_latency_seconds}
+     */
+    public static final String YOUTUBE_API_LATENCY = "youtube.api.latency";
+
     // --- Roadmap Mapping ---
 
     private static final Map<String, String> ROADMAP_TO_MICROMETER;
@@ -118,6 +130,8 @@ public final class MetricNames {
         promMap.put(YOUTUBE_API_ERRORS, "youtube_api_errors_total");
         promMap.put(SPOTIFY_API_REQUESTS, "spotify_api_requests_total");
         promMap.put(SPOTIFY_API_ERRORS, "spotify_api_errors_total");
+        promMap.put(SPOTIFY_API_LATENCY, "spotify_api_latency_seconds");
+        promMap.put(YOUTUBE_API_LATENCY, "youtube_api_latency_seconds");
         promMap.put(MATCHING_SCORE, "matching_score");
         promMap.put(MIGRATION_DURATION, "migration_duration_seconds");
         MICROMETER_TO_PROMETHEUS = Collections.unmodifiableMap(promMap);

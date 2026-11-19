@@ -3,10 +3,50 @@
 Last Updated: 2026-11-19
 
 Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
-Current Subphase: Phase 18D (Migration & Matching Business Metrics) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18E (External Provider Metrics) [READY FOR IMPLEMENTATION]
-Latest Pushed Commit: 5ab97ffa7d487768e8b3724cdf352a9f4043a62e (feat(observability): establish micrometer metrics foundation)
+Current Subphase: Phase 18E (External Provider Metrics) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18F (Structured Logging & Correlation IDs) [READY FOR IMPLEMENTATION]
+Latest Pushed Commit: 00a3c06a8b6730c6fbdd3ee4ae855e9a08ae3cb0 (feat(observability): instrument migration and matching metrics)
 
 ## Verification Status & Release Gate
+- **Phase 18E Verification Status**: COMPLETE & VERIFIED.
+  - Implemented external provider metrics interceptors at the HTTP transport boundary:
+    - `SpotifyMetricsInterceptor.java` under `com.spotifyyoutube.migrator.spotify.infrastructure`
+    - `YouTubeMetricsInterceptor.java` under `com.spotifyyoutube.migrator.youtube.infrastructure`
+  - Instrumented HTTP client entry points with backward-compatible constructors:
+    - `SpotifyApiClient.java`: wired with `@Autowired(required = false) SpotifyMetricsInterceptor`
+    - `YouTubeClient.java`: wired with `@Autowired(required = false) YouTubeMetricsInterceptor`
+  - Defined and recorded external provider metrics:
+    - `spotify.api.requests` (`spotify_api_requests_total`): counter incremented once per actual outbound Spotify HTTP request attempt (`provider="spotify"`, `operation`, `status`).
+    - `spotify.api.errors` (`spotify_api_errors_total`): counter incremented on failed Spotify HTTP responses or transport exceptions (`provider="spotify"`, `operation`, `status`, `error_category`).
+    - `spotify.api.latency` (`spotify_api_latency_seconds`): timer measuring actual outbound Spotify request duration (`provider="spotify"`, `operation`, `status="success"|"error"`).
+    - `youtube.api.requests` (`youtube_api_requests_total`): counter incremented once per actual outbound YouTube HTTP request attempt (`provider="youtube"`, `operation`, `status`).
+    - `youtube.api.errors` (`youtube_api_errors_total`): counter incremented on failed YouTube HTTP responses or transport exceptions (`provider="youtube"`, `operation`, `status`, `error_category`).
+    - `youtube.api.latency` (`youtube_api_latency_seconds`): timer measuring actual outbound YouTube request duration (`provider="youtube"`, `operation`, `status="success"|"error"`).
+  - Exact request-counting semantics:
+    - Dispatched at the narrowest HTTP attempt boundary; accurately counts individual requests during pagination (e.g., multi-page track fetches) and retry attempts.
+    - Zero double-counting between service/adapter layers and transport boundary.
+    - Successful empty result sets (HTTP 200 with 0 items) are counted as successful requests and strictly excluded from error counters.
+  - Error classification: mapped to bounded low-cardinality categories:
+    - `rate_limit` (HTTP 429 or Retry-After header present)
+    - `auth_error` (HTTP 401, or HTTP 403 forbidden/permissions error where stream cannot be safely consumed)
+    - `validation_error` (HTTP 400, 422)
+    - `client_error` (HTTP 404 and other 4xx)
+    - `server_error` (HTTP 5xx)
+    - `timeout` (SocketTimeoutException)
+    - `network_error` (IOException, connection reset, broken pipe)
+  - Tag dimensions: strictly bounded low-cardinality values complying with `TagPolicy`:
+    - `provider`: `spotify`, `youtube`
+    - `operation`: `get_profile`, `get_playlists`, `get_playlist`, `get_playlist_tracks`, `token`, `search`, `get_video`, `create_playlist`, `get_my_playlists`, `add_playlist_item`, `get_playlist_items`, `remove_playlist_item`, `other`
+    - `status`: HTTP status code (`200`, `400`, `401`, `403`, `404`, `429`, `500`, `503`) or `error` for network exceptions; `success`/`error` for latency timer
+    - `error_category`: `rate_limit`, `quota_exceeded`, `auth_error`, `validation_error`, `client_error`, `server_error`, `timeout`, `network_error`
+    - Prohibited keys (userId, playlistId, trackId, videoId, URLs, queries, exception messages) are completely excluded.
+  - Added 52 automated tests across 4 new test suites:
+    - `SpotifyMetricsInterceptorTest.java` (19 tests): tests operation resolution, error categorization, intercept dispatch, counters, latency timer, and network exceptions.
+    - `YouTubeMetricsInterceptorTest.java` (23 tests): tests operation resolution across all YouTube endpoints, quota/rate-limit classification, error counters, latency timer, and network exceptions.
+    - `SpotifyApiClientMetricsIntegrationTest.java` (4 tests): tests end-to-end profile retrieval, pagination request counting, 500 error recording, and empty response handling with `MockRestServiceServer`.
+    - `YouTubeClientMetricsIntegrationTest.java` (6 tests): tests search, playlist creation, forbidden error (403), rate limit (429), retry sequence attempt counting, and empty search results.
+  - Full backend test suite verified: **2,637 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 10 s).
+  - Code hygiene: 0 Checkstyle violations (`.\backend\mvnw.cmd checkstyle:check`).
+  - Zero modifications to business logic, OAuth token lifecycle, retry policies, or API contracts.
 - **Phase 18D Verification Status**: COMPLETE & VERIFIED.
   - Implemented application metrics service `MigrationMetrics.java` under `com.spotifyyoutube.migrator.migration.metrics` leveraging the reusable Micrometer infrastructure from Phase 18C.
   - Implemented migration lifecycle counters:

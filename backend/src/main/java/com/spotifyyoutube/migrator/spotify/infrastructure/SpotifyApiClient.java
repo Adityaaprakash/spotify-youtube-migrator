@@ -18,9 +18,20 @@ public class SpotifyApiClient {
     private final RestClient restClient;
 
     public SpotifyApiClient(RestClient.Builder restClientBuilder) {
-        this.restClient = restClientBuilder
-                .baseUrl("https://api.spotify.com/v1")
-                .build();
+        this(restClientBuilder, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SpotifyApiClient(
+            RestClient.Builder restClientBuilder,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            SpotifyMetricsInterceptor metricsInterceptor
+    ) {
+        RestClient.Builder builder = restClientBuilder.baseUrl("https://api.spotify.com/v1");
+        if (metricsInterceptor != null) {
+            builder.requestInterceptor(metricsInterceptor);
+        }
+        this.restClient = builder.build();
     }
 
     public SpotifyUserProfileDto getCurrentUserProfile(String accessToken) {

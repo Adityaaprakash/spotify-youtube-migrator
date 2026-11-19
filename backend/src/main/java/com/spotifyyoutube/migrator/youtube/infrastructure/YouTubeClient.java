@@ -25,10 +25,22 @@ public class YouTubeClient {
     private final YouTubeProperties properties;
 
     public YouTubeClient(RestClient.Builder restClientBuilder, YouTubeProperties properties) {
+        this(restClientBuilder, properties, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public YouTubeClient(
+            RestClient.Builder restClientBuilder,
+            YouTubeProperties properties,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            YouTubeMetricsInterceptor metricsInterceptor
+    ) {
         this.properties = properties;
-        this.restClient = restClientBuilder
-                .baseUrl(properties.getBaseUrl())
-                .build();
+        RestClient.Builder builder = restClientBuilder.baseUrl(properties.getBaseUrl());
+        if (metricsInterceptor != null) {
+            builder.requestInterceptor(metricsInterceptor);
+        }
+        this.restClient = builder.build();
     }
 
     public YouTubeSearchListResponseDto searchVideos(String query, int maxResults, String pageToken) {
