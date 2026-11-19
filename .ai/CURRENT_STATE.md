@@ -3,11 +3,29 @@
 Last Updated: 2026-11-19
 
 Current Phase: Phase 17 — Testing [IN PROGRESS]
-Current Subphase: Phase 17E (End-to-End Migration Workflow Testing) [READY FOR REVIEW] -> Next Subphase: Phase 17F (Full Regression & Phase Freeze) [AWAITING APPROVAL]
-Latest Pushed Commit: 6323eb4e235cd6afc9b5a606e8deebbb1ec2ac60 (test(api): harden controller validation and error contract coverage)
+Current Subphase: Phase 17F (Migration Recovery, Reliability, Retry, Rollback & Idempotency Testing) [READY FOR REVIEW] -> Next Subphase: Full Regression, Quality Gates & Phase Freeze [AWAITING APPROVAL]
+Latest Pushed Commit: 8d8ed02bfa04a77b84cb5f797bab6dc4bdc67fc6 (test(e2e): verify full playlist migration workflow)
 
 ## Verification Status & Release Gate
-- **Phase 17E Verification Status**: IMPLEMENTATION COMPLETE & VERIFIED (Ready for Review).
+- **Phase 17F Verification Status**: IMPLEMENTATION COMPLETE & VERIFIED (Ready for Review).
+  - Implemented comprehensive, deterministic migration recovery, reliability, retry, rollback, and idempotency tests in `MigrationReliabilityAndRecoveryE2EIT.java` (+8 automated tests) across real PostgreSQL Testcontainers and live application context.
+  - Verified 8 distinct failure, recovery, and resiliency scenarios:
+    1. Scenario A (Transient Destination Failure & In-Flight Retry): Simulates HTTP 429 rate limit with `Retry-After: 1` on YouTube insertion; in-flight retry loop succeeds on attempt 2 without track duplication; all 3 tracks reach `ADDED`; status `COMPLETED`; 100% progress.
+    2. Scenario B (Permanent Destination Failure & Conservative Stopping): Simulates HTTP 400 Bad Request; conservative stopping halts forward insertion; track 1 marked `FAILED`; subsequent tracks 2 and 3 marked `SKIPPED`; status `PARTIALLY_COMPLETED`; count conservation holds ($4 = 1 \text{ added} + 1 \text{ failed} + 2 \text{ skipped}$).
+    3. Scenario C (Partial Migration & Resumption Workflow): Resumption via `POST /api/migrations/{id}/resume` skips already-added track 0 (0 provider invocations), retries failed track 1, and processes skipped tracks 2 and 3; status `COMPLETED` (4/4 added).
+    4. Scenario D (Worker Interruption, Lease Expiration & Fencing Recovery): Expired lease from crashed worker-1 claimed by recovery worker-2 via PostgreSQL CTE `FOR UPDATE SKIP LOCKED`; stale worker-1 lease generation (1L) rejected with `StaleLeaseOwnershipException`; worker-2 safely completes remaining tracks under generation 2L to `COMPLETED`.
+    5. Scenario E1 (Idempotent Duplicate Submission): Concurrent/duplicate submissions with identical `Idempotency-Key` return identical `executionId`; 0 duplicate playlists created; 0 duplicate tracks inserted.
+    6. Scenario E2 (Conflicting Submission Fingerprint Mismatch): Submissions with same `Idempotency-Key` but different payload rejected with HTTP 409 Conflict (`IDEMPOTENCY_FINGERPRINT_MISMATCH`).
+    7. Scenario F (Destination Rollback & Audit Retention): Rollback via `POST /api/migrations/{id}/rollback` removes inserted tracks from playlist, records `ExecutionRollbackRecord` in `ROLLED_BACK` status, logs `ExecutionAuditEvent` audit trail; repeated rollback on terminal execution returns HTTP 409 Conflict.
+    8. Scenario G (Invalid State Transition Rejections): State machine invariants reject running an already-running execution or rolling back an un-started `INITIALIZED` execution with HTTP 409 Conflict (`INVALID_STATE`).
+  - Verified 100% pass rate in double consecutive determinism runs (Run 1: 34.65s, Run 2: 33.45s; 0 failures, 0 flakes).
+  - Verified 100% pass rate across all 23 PostgreSQL Testcontainers integration test suites: **140 / 140 tests passing** (`mvn test -Dtest=*IT`, 1 min 36 s).
+  - Verified 100% pass rate across full backend test suite: **2,500 tests passing** (`mvn test`, 1 min 53 s).
+  - Verified 100% pass rate across frontend test suite: **139 tests passing** across 48 suites (`npm test`, 127.5 s).
+  - Total combined automated project baseline: **2,779 tests** (2,500 backend unit/slice + 140 Testcontainers IT + 139 frontend).
+  - Maintained 0 Checkstyle violations across production and test code (`mvn checkstyle:check`).
+  - Confirmed 0 production files modified (`backend/src/main/` and `frontend/` untouched).
+- **Phase 17E Verification Status**: COMPLETE & VERIFIED.
   - Implemented comprehensive, deterministic end-to-end migration workflow test in `FullMigrationWorkflowE2EIT.java` (+4 automated tests) across real PostgreSQL Testcontainers and Spring Boot web layer.
   - Validated primary 9-stage migration journey in a single unbroken test:
     1. User Registration: HTTP `POST /api/auth/register` returns 201 Created; asserts user record in PostgreSQL with encrypted BCrypt password hash (`$2a$`).

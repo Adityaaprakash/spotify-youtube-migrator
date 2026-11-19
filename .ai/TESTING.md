@@ -1999,6 +1999,53 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 17F — Migration Recovery, Reliability, Retry, Rollback & Idempotency Testing (Complete & Verified)
+
+### Execution Metrics
+- **New Reliability Integration Test Suite**: `MigrationReliabilityAndRecoveryE2EIT.java` (8 tests passing, 0 failures, 0 errors, 0 skipped, ~33-35s).
+- **PostgreSQL Testcontainers Integration Tests (`-Dtest=*IT`)**: **140 tests** passing across 23 test suites (`.\backend\mvnw.cmd test "-Dtest=*IT"`, 1 min 36 s) — 100% pass rate.
+- **Backend Unit & Controller Tests (`mvn test`)**: **2,500 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 1 min 53 s).
+- **Frontend Automated Tests (`npm test`)**: **139 tests** passing across 48 suites (127.5 s) — 100% pass rate.
+- **Combined Backend Executed Tests**: **2,640 tests** (2,500 unit/controller + 140 integration).
+- **Total Project Automated Tests**: **2,779 tests**.
+- **Determinism Verification**: Consecutive runs verified 100% deterministic pass rate (Run 1: 34.65s, Run 2: 33.45s; 0 failures, 0 flakes).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Production Code Status**: 0 production Java files modified.
+
+### 8 Failure, Recovery & Resiliency Scenarios Tested
+1. **Scenario A (Transient Provider Failure & In-Flight Retry)**:
+   - Simulates HTTP 429 rate limit with `Retry-After: 1` header on destination YouTube track insertion.
+   - Verifies in-flight retry loop succeeds on attempt 2 without failing the migration.
+   - Verifies 0 duplicate tracks inserted; all 3 tracks reach `ADDED`; status `COMPLETED`; progress endpoint reports 100%.
+2. **Scenario B (Permanent Provider Failure & Conservative Stopping)**:
+   - Simulates non-retryable HTTP 400 Bad Request on YouTube track insertion.
+   - Conservative stopping halts forward progress immediately; track 1 marked `FAILED` with sanitized diagnostic message; subsequent tracks (2, 3) marked `SKIPPED`.
+   - Verifies execution reaches `PARTIALLY_COMPLETED` and count conservation invariant holds ($4 = 1 \text{ added} + 1 \text{ failed} + 2 \text{ skipped}$).
+3. **Scenario C (Partial Migration & Resumption Workflow)**:
+   - Resumption via `POST /api/migrations/{id}/resume` after partial failure.
+   - Crucially verifies that already-added track 0 is strictly skipped (0 calls to destination provider).
+   - Retries failed track 1, processes skipped tracks 2 and 3, and transitions execution to `COMPLETED` (4/4 added).
+4. **Scenario D (Worker Interruption, Lease Expiration & Fencing Recovery)**:
+   - Execution left in `RECOVERY_REQUIRED` with expired lease from crashed worker-1 (`lease_generation = 1L`).
+   - Recovery worker claims execution via PostgreSQL CTE query (`claimNextEligibleExecution`) using `FOR UPDATE SKIP LOCKED`.
+   - Fencing token increments ($1 \to 2$); verifies stale worker-1 lease generation (1L) is strictly rejected with `StaleLeaseOwnershipException`.
+   - Recovery worker under generation 2L safely completes remaining tracks to `COMPLETED`.
+5. **Scenario E1 (Idempotent Duplicate Submission)**:
+   - Concurrent/repeated submissions with identical `Idempotency-Key` and payload return identical `executionId` (HTTP 202/200).
+   - Zero duplicate YouTube destination playlists created; zero duplicate tracks inserted.
+6. **Scenario E2 (Conflicting Submission Fingerprint Mismatch)**:
+   - Submissions with same `Idempotency-Key` but different payload rejected with HTTP 409 Conflict (`IDEMPOTENCY_FINGERPRINT_MISMATCH`).
+7. **Scenario F (Destination Rollback & Audit Retention)**:
+   - Client initiates rollback via `POST /api/migrations/{id}/rollback`.
+   - Orchestrator invokes `removeTrackFromPlaylist` for each inserted track.
+   - Persists `ExecutionRollbackRecord` rows in `ROLLED_BACK` status and records `ExecutionAuditEvent` audit trail.
+   - Repeated rollback on terminal `ROLLED_BACK` execution returns HTTP 409 Conflict, preserving terminal state immutability.
+8. **Scenario G (Invalid State Transition Rejections)**:
+   - Direct execution on an already-running migration throws `InvalidStateException`.
+   - Initiating rollback on an un-started `INITIALIZED` execution returns HTTP 409 Conflict (`INVALID_STATE`).
+
+---
+
 ## Phase 17E — End-to-End Migration Workflow Testing (Complete & Verified)
 
 ### Execution Metrics
