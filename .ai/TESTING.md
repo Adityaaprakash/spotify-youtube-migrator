@@ -2117,3 +2117,31 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
    - Added invalid UUID path segment type mismatch on progress, detail, and resume endpoints (400), missing request body on submit (400), and 405 Method Not Allowed on DELETE.
 9. **`YouTubeControllerTest.java` (+7 tests, 22 -> 29)**:
    - Added search query boundary tests (`maxResults < 1`, `maxResults > 50`, query > 500 characters -> 400), missing request body on playlist creation and video insertion (400), and 405 Method Not Allowed on POST search and DELETE playlist.
+
+---
+
+## Phase 18A — Observability Architecture & Audit (Audit-Only)
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE — AUDIT VERIFIED` (Read-Only Planning).
+- **Baseline Verification**: Branch `main`, commit `53e1064282658a872cfd8722a7aa494c9430fe6b` verified synchronized with `origin/main`.
+- **Backend Unit & Controller Tests (`mvn test`)**: **2,500 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 1 min 52 s).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Production & Test Code Status**: 0 production or test files added or modified (strictly audit-only).
+- **Audit Deliverable**: Comprehensive architecture and instrumentation blueprint created at `.ai/PHASE_18A_OBSERVABILITY_AUDIT.md`.
+
+### Future Testing Strategy (Phases 18B–18H)
+1. **Actuator & Health Verification (Phase 18B)**:
+   - `ActuatorSecurityTest.java` expansion: verify `/actuator/health/liveness`, `/actuator/health/readiness`, detail masking (`show-details: never`), and 403 Forbidden rejection on unauthorized `/actuator/metrics`.
+2. **Metrics Foundation & Business Metrics Verification (Phases 18C, 18D, 18E)**:
+   - Use `SimpleMeterRegistry` for deterministic unit test assertions.
+   - Verify `migration_started_total`, `migration_completed_total`, `migration_failed_total`, and `migration_duration` boundaries.
+   - Verify zero double-counting on frontend progress polling (`GET /api/migrations/{id}/progress`) or resume workflows.
+   - Verify `tracks_matched_total`, `tracks_unmatched_total`, and `matching.score` `DistributionSummary`.
+   - Verify `youtube_api_requests_total` and `youtube_api_errors_total` at `RestClientCustomizer` interceptor boundary.
+3. **Structured Logging & Correlation Verification (Phase 18F)**:
+   - Verify JSON log structure, MDC population, and cleanup in `try ... finally` blocks.
+   - Verify `TaskDecorator` MDC propagation across `AsyncMigrationConfig` worker threads.
+   - Verify `SensitiveDataSanitizer` redacts Bearer tokens, cookies, auth headers, and neutralizes CRLF log injection.
+4. **Final Regression & Freeze (Phase 18H)**:
+   - Full regression across all 2,500+ unit tests, 23 PostgreSQL Testcontainers suites, and frontend test suite with zero Checkstyle violations.

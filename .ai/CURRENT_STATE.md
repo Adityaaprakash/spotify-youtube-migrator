@@ -2,11 +2,20 @@
 
 Last Updated: 2026-11-19
 
-Current Phase: Phase 17 — Testing [IN PROGRESS]
-Current Subphase: Phase 17F (Migration Recovery, Reliability, Retry, Rollback & Idempotency Testing) [READY FOR REVIEW] -> Next Subphase: Full Regression, Quality Gates & Phase Freeze [AWAITING APPROVAL]
-Latest Pushed Commit: 8d8ed02bfa04a77b84cb5f797bab6dc4bdc67fc6 (test(e2e): verify full playlist migration workflow)
+Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
+Current Subphase: Phase 18A (Observability Architecture & Audit) [COMPLETE — AUDIT VERIFIED] -> Next Subphase: Phase 18B (Application Health & Spring Actuator) [READY FOR IMPLEMENTATION]
+Latest Pushed Commit: 53e1064282658a872cfd8722a7aa494c9430fe6b (test(reliability): harden migration recovery and rollback scenarios)
 
 ## Verification Status & Release Gate
+- **Phase 18A Verification Status**: COMPLETE — AUDIT VERIFIED (Read-Only Planning).
+  - Executed comprehensive read-only observability architecture and baseline audit.
+  - Verified baseline commit `53e1064282658a872cfd8722a7aa494c9430fe6b` on branch `main` with 0 uncommitted changes.
+  - Full backend unit suite verified: 2,500 tests passing with 0 failures and 0 Checkstyle violations.
+  - Authored comprehensive audit and architecture specification in `.ai/PHASE_18A_OBSERVABILITY_AUDIT.md`.
+  - Audited Spring Boot Actuator, Micrometer transitive dependencies, Logback logging framework, and `SensitiveDataSanitizer`.
+  - Mapped authoritative recording points for all 9 roadmap metrics (`migration_started_total`, `migration_completed_total`, `migration_failed_total`, `tracks_matched_total`, `tracks_unmatched_total`, `youtube_api_requests_total`, `youtube_api_errors_total`, `average_match_score`, `migration_duration`).
+  - Solved asynchronous MDC context loss across worker threads with `TaskDecorator` blueprint in `AsyncMigrationConfig`.
+  - Designed structured JSON logging, bounded tagging convention, alert strategy, and Prometheus scraper integration for Phases 18B–18H.
 - **Phase 17F Verification Status**: IMPLEMENTATION COMPLETE & VERIFIED (Ready for Review).
   - Implemented comprehensive, deterministic migration recovery, reliability, retry, rollback, and idempotency tests in `MigrationReliabilityAndRecoveryE2EIT.java` (+8 automated tests) across real PostgreSQL Testcontainers and live application context.
   - Verified 8 distinct failure, recovery, and resiliency scenarios:
