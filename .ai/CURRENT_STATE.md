@@ -1,12 +1,51 @@
 # Current State
 
-Last Updated: 2026-11-19
+Last Updated: 2026-11-20
 
 Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
-Current Subphase: Phase 18E (External Provider Metrics) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18F (Structured Logging & Correlation IDs) [READY FOR IMPLEMENTATION]
-Latest Pushed Commit: 00a3c06a8b6730c6fbdd3ee4ae855e9a08ae3cb0 (feat(observability): instrument migration and matching metrics)
+Current Subphase: Phase 18F (Structured Logging & Correlation IDs) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18G (Metrics Exposure, Dashboards & Alerting) [READY FOR IMPLEMENTATION]
+Latest Pushed Commit: 1e2861d99f09415e011b4d8351336064dc68ccc4 (feat(observability): instrument external provider metrics)
 
 ## Verification Status & Release Gate
+- **Phase 18F Verification Status**: COMPLETE & VERIFIED.
+  - Implemented production-quality structured logging, MDC context management, and correlation IDs without adding external logging dependencies (zero new Maven dependencies).
+  - Implemented `RequestCorrelationFilter.java` under `com.spotifyyoutube.migrator.common.logging`:
+    - Inspects incoming `X-Request-ID` and `X-Correlation-ID` headers with `X-Request-ID` priority.
+    - Validates format against regex `^[a-zA-Z0-9_-]{1,64}$`, strictly rejecting and replacing malformed, oversized (> 64), or CRLF-injected IDs with cryptographically secure UUIDv4 identifiers.
+    - Sets both `X-Request-ID` and `X-Correlation-ID` response headers on every HTTP response.
+    - Injects `requestId`, `correlationId`, `application`, `environment`, `httpMethod`, and `httpRoute` into SLF4J MDC.
+    - Guarantees thread-safe MDC restoration/cleanup in `finally` block, preventing context leakage across pooled servlet threads.
+  - Implemented `LoggingContextHolder.java` under `com.spotifyyoutube.migrator.common.logging`:
+    - Provides exception-free `ContextScope` try-with-resources blocks restoring previous MDC context upon close.
+    - Provides `forExecution(UUID, UUID, String, String)` for manual migration tasks and `forScheduledExecution(UUID, UUID, long)` for automated scheduler tasks.
+    - Strictly prevents generating fake HTTP `requestId` for background scheduled tasks, distinguishing `sched-<gen>-<id>` correlation IDs from client HTTP request IDs.
+  - Implemented `MdcTaskDecorator.java` under `com.spotifyyoutube.migrator.common.logging`:
+    - Implements Spring `TaskDecorator` to capture caller thread MDC snapshots and propagate them to `ThreadPoolTaskExecutor` worker threads.
+    - Guarantees worker thread MDC cleanup upon task completion or uncaught task exceptions.
+    - Wired into `migrationTaskExecutor` in `AsyncMigrationConfig.java`.
+  - Implemented `StructuredJsonLayout.java` under `com.spotifyyoutube.migrator.common.logging`:
+    - Extends Logback `LayoutBase<ILoggingEvent>` formatting log records as single-line NDJSON (JSON Lines).
+    - Emits standard top-level fields: `timestamp` (ISO-8601 UTC), `level`, `logger`, `thread`, `service`, `environment`, `message`, `requestId`, `correlationId`.
+    - Nests remaining safe MDC properties into a `context` JSON object (`migrationExecutionId`, `userId`, `operation`, `provider`, `mode`, `leaseGeneration`).
+    - Serializes exceptions with `exceptionClass`, sanitized `exceptionMessage`, and sanitized `stackTrace`.
+    - Mandatory credential redaction: all messages, context values, and exception traces are sanitized via `SensitiveDataSanitizer`.
+  - Configured `logback-spring.xml` in `backend/src/main/resources/`:
+    - Development/Test (`!prod`): human-readable colored console pattern with `%clr([req:%X{requestId:-none}]){yellow}`.
+    - Production (`prod`): structured JSON console logging via `StructuredJsonLayout`.
+  - Hardened CORS and Security Filter Chain in `SecurityConfig.java`:
+    - Added `X-Request-ID` and `X-Correlation-ID` to CORS `allowedHeaders` and `exposedHeaders`.
+    - Positioned `RequestCorrelationFilter` before `SecurityContextHolderFilter` in the security filter chain.
+  - Hardened error logging in `GlobalExceptionHandler.java`:
+    - Log unexpected internal server errors at `ERROR` level with sanitized exception messages via `SensitiveDataSanitizer.sanitizeThrowableMessage(ex)`.
+  - Added 44 automated tests across 5 new test suites:
+    - `RequestCorrelationFilterTest.java` (20 tests): tests inbound ID validation, UUID generation, CRLF injection rejection, oversized ID rejection, header emission, MDC lifecycle, and thread reuse.
+    - `MdcTaskDecoratorTest.java` (5 tests): tests async MDC propagation to worker threads, cleanup on success and exception, and pooled thread reuse.
+    - `StructuredJsonLayoutTest.java` (7 tests): tests NDJSON formatting, standard fields, MDC context nesting, Bearer/Basic/cookie redaction, and exception sanitization.
+    - `AsyncWorkerCorrelationTest.java` (7 tests): tests manual vs scheduled correlation contexts, stale requestId removal, and worker lifecycle context cleanup.
+    - `LoggingSecurityTest.java` (5 tests): tests CRLF header splitting defense, token and password redaction, and stack trace cause chain redaction.
+  - Full backend test suite verified: **2,681 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 02 s).
+  - Code hygiene: 0 Checkstyle violations (`.\backend\mvnw.cmd checkstyle:check`).
+  - Zero modifications to business logic, matching algorithm, scheduler leases, retry policies, or API response bodies.
 - **Phase 18E Verification Status**: COMPLETE & VERIFIED.
   - Implemented external provider metrics interceptors at the HTTP transport boundary:
     - `SpotifyMetricsInterceptor.java` under `com.spotifyyoutube.migrator.spotify.infrastructure`

@@ -1056,3 +1056,35 @@ Controllers MUST NOT:
     - Table Overflow Containment: Complex data tables maintain horizontal containment via `overflow-x-auto` wrappers preventing page-level horizontal scroll blowout.
   - **Multi-Engine Rendering Verification**:
     - Validated in headless mode across Chromium (Blink), Firefox (Gecko), and WebKit with 0 console errors.
+
+## Observability, Structured Logging & Request Correlation Architecture (Phase 18)
+
+- Packages:
+  - `com.spotifyyoutube.migrator.common.logging`
+  - `com.spotifyyoutube.migrator.common.metrics`
+  - `com.spotifyyoutube.migrator.spotify.infrastructure`
+  - `com.spotifyyoutube.migrator.youtube.infrastructure`
+  - `com.spotifyyoutube.migrator.migration.metrics`
+- Purpose: Provides low-cardinality Micrometer metrics, structured JSON logging, and leak-proof request correlation across synchronous HTTP requests and asynchronous background migration workflows.
+- Architecture Rules:
+  - **HTTP Request Correlation (`RequestCorrelationFilter`)**:
+    - Inspects incoming `X-Request-ID` and `X-Correlation-ID` headers with `X-Request-ID` priority.
+    - Strictly validates inbound identifiers against `^[a-zA-Z0-9_-]{1,64}$`; malformed, oversized, or CRLF-injected values are discarded and replaced with fresh cryptographically secure UUIDv4 identifiers.
+    - Sets both `X-Request-ID` and `X-Correlation-ID` response headers on every HTTP response.
+    - Initializes SLF4J MDC with `requestId`, `correlationId`, `application`, `environment`, `httpMethod`, and `httpRoute`.
+    - Guarantees thread-safe cleanup and context restoration in `finally` blocks, preventing thread-local contamination across pooled servlet threads.
+  - **Asynchronous MDC Context Propagation (`MdcTaskDecorator`)**:
+    - Captures caller thread MDC snapshots and decorates tasks submitted to `ThreadPoolTaskExecutor` (`migrationTaskExecutor`).
+    - Guarantees worker thread MDC cleanup upon normal task completion or uncaught task exceptions.
+  - **Worker Logging Scopes (`LoggingContextHolder`)**:
+    - Manual migration execution: associates `migrationExecutionId`, `userId`, `operation`, `mode="manual"`, and preserves originating correlation ID.
+    - Scheduled execution: establishes `sched-<gen>-<id>` correlation ID, associates `leaseGeneration`, `mode="automated"`, and strictly prevents generating fake HTTP `requestId` values for background worker executions.
+  - **Structured JSON Logging (`StructuredJsonLayout`)**:
+    - Formats log events as single-line NDJSON (JSON Lines) under the `prod` profile.
+    - Emits standard top-level telemetry fields: `timestamp` (ISO-8601 UTC), `level`, `logger`, `thread`, `service`, `environment`, `message`, `requestId`, `correlationId`.
+    - Nests execution-specific context into a `context` JSON object.
+    - Formats exception details with `exceptionClass`, sanitized `exceptionMessage`, and sanitized `stackTrace`.
+    - Enforces mandatory credential redaction via `SensitiveDataSanitizer` across messages, context values, and stack traces.
+  - **Low-Cardinality Metrics Isolation**:
+    - Correlation IDs, request IDs, user IDs, track titles, and playlist IDs are strictly prohibited from Micrometer metric tags (`TagPolicy`).
+    - Logging context and metrics meters serve completely distinct observability roles without cross-subsystem interference.

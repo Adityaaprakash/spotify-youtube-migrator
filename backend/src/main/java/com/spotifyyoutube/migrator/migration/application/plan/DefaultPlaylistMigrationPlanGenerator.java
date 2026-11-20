@@ -202,6 +202,10 @@ public class DefaultPlaylistMigrationPlanGenerator implements PlaylistMigrationP
         UUID planId = UUID.randomUUID();
         Instant createdAt = Instant.now();
 
+        log.info("Migration plan generated for playlist {}: totalTracks={}, autoMatch={}, reviewRequired={}, unmatched={}, failed={}",
+                sourcePlaylistId, summary.totalTracks(), summary.autoMatchCount(),
+                summary.reviewRequiredCount(), summary.unmatchedCount(), summary.failedCount());
+
         return new MigrationPlan(planId, sourcePlaylistId, playlistTitle, createdAt, planTracks, summary);
     }
 }

@@ -2,6 +2,7 @@ package com.spotifyyoutube.migrator.migration.async;
 
 import com.spotifyyoutube.migrator.common.exception.InvalidStateException;
 import com.spotifyyoutube.migrator.common.exception.ResourceNotFoundException;
+import com.spotifyyoutube.migrator.common.logging.LoggingContextHolder;
 import com.spotifyyoutube.migrator.migration.application.execution.ApprovedMigrationOrchestrator;
 import com.spotifyyoutube.migrator.migration.application.execution.contract.MigrationExecutionSummary;
 import com.spotifyyoutube.migrator.migration.execution.repository.MigrationExecutionRepository;
@@ -57,26 +58,28 @@ public class MigrationBackgroundWorker {
             throw new IllegalArgumentException("Authenticated user ID must not be null");
         }
 
-        Instant startTime = Instant.now();
-        log.info("Background worker started processing migration execution {} for user {}", executionId, authenticatedUserId);
+        try (var ignored = LoggingContextHolder.forExecution(executionId, authenticatedUserId, "migration_execution", "manual")) {
+            Instant startTime = Instant.now();
+            log.info("Background worker started processing migration execution {} for user {}", executionId, authenticatedUserId);
 
-        try {
-            MigrationExecutionSummary summary = orchestrator.executeQueuedMigration(executionId, authenticatedUserId);
-            Duration duration = Duration.between(startTime, Instant.now());
-            log.info("Background worker completed migration execution {} in {}ms with status {} (successful: {}, failed: {}, uncertain: {}, skipped: {})",
-                    executionId, duration.toMillis(), summary.status(),
-                    summary.successfulInsertions(), summary.failedInsertions(),
-                    summary.uncertainInsertions(), summary.skippedInsertions());
-        } catch (InvalidStateException ex) {
-            log.warn("Migration execution {} rejected by orchestrator during background processing: {}",
-                    executionId, ex.getMessage());
-        } catch (ResourceNotFoundException ex) {
-            log.error("Migration execution {} not found or access denied during background processing: {}",
-                    executionId, ex.getMessage());
-        } catch (Exception ex) {
-            Duration duration = Duration.between(startTime, Instant.now());
-            log.error("Unexpected error in background worker processing migration execution {} after {}ms: {}",
-                    executionId, duration.toMillis(), ex.getMessage(), ex);
+            try {
+                MigrationExecutionSummary summary = orchestrator.executeQueuedMigration(executionId, authenticatedUserId);
+                Duration duration = Duration.between(startTime, Instant.now());
+                log.info("Background worker completed migration execution {} in {}ms with status {} (successful: {}, failed: {}, uncertain: {}, skipped: {})",
+                        executionId, duration.toMillis(), summary.status(),
+                        summary.successfulInsertions(), summary.failedInsertions(),
+                        summary.uncertainInsertions(), summary.skippedInsertions());
+            } catch (InvalidStateException ex) {
+                log.warn("Migration execution {} rejected by orchestrator during background processing: {}",
+                        executionId, ex.getMessage());
+            } catch (ResourceNotFoundException ex) {
+                log.error("Migration execution {} not found or access denied during background processing: {}",
+                        executionId, ex.getMessage());
+            } catch (Exception ex) {
+                Duration duration = Duration.between(startTime, Instant.now());
+                log.error("Unexpected error in background worker processing migration execution {} after {}ms: {}",
+                        executionId, duration.toMillis(), ex.getMessage(), ex);
+            }
         }
     }
 
@@ -95,29 +98,31 @@ public class MigrationBackgroundWorker {
             throw new IllegalArgumentException("Authenticated user ID must not be null");
         }
 
-        Instant startTime = Instant.now();
-        log.info("Background worker started processing claimed migration execution {} (generation {}) for user {}",
-                executionId, leaseGeneration, authenticatedUserId);
+        try (var ignored = LoggingContextHolder.forScheduledExecution(executionId, authenticatedUserId, leaseGeneration)) {
+            Instant startTime = Instant.now();
+            log.info("Background worker started processing claimed migration execution {} (generation {}) for user {}",
+                    executionId, leaseGeneration, authenticatedUserId);
 
-        try {
-            MigrationExecutionSummary summary = orchestrator.executeClaimedMigration(
-                    executionId, authenticatedUserId, leaseGeneration);
-            Duration duration = Duration.between(startTime, Instant.now());
-            log.info("Background worker completed claimed execution {} in {}ms with status {} "
-                            + "(successful: {}, failed: {}, uncertain: {}, skipped: {})",
-                    executionId, duration.toMillis(), summary.status(),
-                    summary.successfulInsertions(), summary.failedInsertions(),
-                    summary.uncertainInsertions(), summary.skippedInsertions());
-        } catch (InvalidStateException ex) {
-            log.warn("Claimed migration execution {} rejected during background processing: {}",
-                    executionId, ex.getMessage());
-        } catch (ResourceNotFoundException ex) {
-            log.error("Claimed migration execution {} not found or access denied during background processing: {}",
-                    executionId, ex.getMessage());
-        } catch (Exception ex) {
-            Duration duration = Duration.between(startTime, Instant.now());
-            log.error("Unexpected error in background worker processing claimed migration execution {} after {}ms: {}",
-                    executionId, duration.toMillis(), ex.getMessage(), ex);
+            try {
+                MigrationExecutionSummary summary = orchestrator.executeClaimedMigration(
+                        executionId, authenticatedUserId, leaseGeneration);
+                Duration duration = Duration.between(startTime, Instant.now());
+                log.info("Background worker completed claimed execution {} in {}ms with status {} "
+                                + "(successful: {}, failed: {}, uncertain: {}, skipped: {})",
+                        executionId, duration.toMillis(), summary.status(),
+                        summary.successfulInsertions(), summary.failedInsertions(),
+                        summary.uncertainInsertions(), summary.skippedInsertions());
+            } catch (InvalidStateException ex) {
+                log.warn("Claimed migration execution {} rejected during background processing: {}",
+                        executionId, ex.getMessage());
+            } catch (ResourceNotFoundException ex) {
+                log.error("Claimed migration execution {} not found or access denied during background processing: {}",
+                        executionId, ex.getMessage());
+            } catch (Exception ex) {
+                Duration duration = Duration.between(startTime, Instant.now());
+                log.error("Unexpected error in background worker processing claimed migration execution {} after {}ms: {}",
+                        executionId, duration.toMillis(), ex.getMessage(), ex);
+            }
         }
     }
 

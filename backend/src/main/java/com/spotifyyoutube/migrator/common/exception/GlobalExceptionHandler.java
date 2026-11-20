@@ -1,5 +1,6 @@
 package com.spotifyyoutube.migrator.common.exception;
 
+import com.spotifyyoutube.migrator.common.security.logging.SensitiveDataSanitizer;
 import com.spotifyyoutube.migrator.migration.progress.domain.ProgressConsistencyException;
 import jakarta.persistence.OptimisticLockException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -322,6 +323,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleGenericException(Exception ex, HttpServletRequest request) {
+        log.error("Unhandled internal server error processing URI {}: {}",
+                request.getRequestURI(), SensitiveDataSanitizer.sanitizeThrowableMessage(ex), ex);
         ApiError apiError = new ApiError(
                 ErrorCode.INTERNAL_SERVER_ERROR,
                 "An unexpected error occurred",

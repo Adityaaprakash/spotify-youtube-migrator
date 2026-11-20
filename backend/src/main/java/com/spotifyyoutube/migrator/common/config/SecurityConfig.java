@@ -1,5 +1,7 @@
 package com.spotifyyoutube.migrator.common.config;
 
+import com.spotifyyoutube.migrator.common.logging.LoggingConstants;
+import com.spotifyyoutube.migrator.common.logging.RequestCorrelationFilter;
 import com.spotifyyoutube.migrator.common.security.csrf.CsrfCookieFilter;
 import com.spotifyyoutube.migrator.common.security.ratelimit.ApiRateLimitingFilter;
 import com.spotifyyoutube.migrator.migration.reliability.idempotency.ApiIdempotencyFilter;
@@ -16,6 +18,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
@@ -54,13 +57,17 @@ public class SecurityConfig {
                 "Authorization",
                 "Idempotency-Key",
                 "Accept",
-                "Origin"
+                "Origin",
+                LoggingConstants.HEADER_REQUEST_ID,
+                LoggingConstants.HEADER_CORRELATION_ID
         ));
         configuration.setExposedHeaders(List.of(
                 "Retry-After",
                 "Location",
                 "Idempotency-Key",
-                "Idempotency-Replayed"
+                "Idempotency-Replayed",
+                LoggingConstants.HEADER_REQUEST_ID,
+                LoggingConstants.HEADER_CORRELATION_ID
         ));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
@@ -74,8 +81,15 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             ObjectProvider<ApiIdempotencyFilter> apiIdempotencyFilterProvider,
-            ObjectProvider<ApiRateLimitingFilter> apiRateLimitingFilterProvider
+            ObjectProvider<ApiRateLimitingFilter> apiRateLimitingFilterProvider,
+            ObjectProvider<RequestCorrelationFilter> requestCorrelationFilterProvider
     ) throws Exception {
+        RequestCorrelationFilter correlationFilter = requestCorrelationFilterProvider.getIfAvailable();
+        if (correlationFilter == null) {
+            correlationFilter = new RequestCorrelationFilter();
+        }
+        http.addFilterBefore(correlationFilter, SecurityContextHolderFilter.class);
+
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             // Use CookieCsrfTokenRepository for SPA architecture (React). 

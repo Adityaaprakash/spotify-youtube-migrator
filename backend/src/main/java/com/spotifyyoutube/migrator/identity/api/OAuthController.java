@@ -55,6 +55,7 @@ public class OAuthController {
         User user = getCurrentUser();
         OAuthProvider provider = parseProvider(providerStr);
         String url = authorizationService.generateAuthorizationUrl(user.getId(), provider);
+        log.info("OAuth authorization initiated for provider {} by user {}", provider, user.getId());
         
         return ResponseEntity.ok(Map.of("url", url));
     }
@@ -97,6 +98,7 @@ public class OAuthController {
 
         User user = getCurrentUser();
         authorizationService.handleCallback(code, state, user.getId(), provider);
+        log.info("OAuth authorization completed successfully for provider {} by user {}", provider, user.getId());
         
         String safeDestination = RedirectUriValidator.validateDestinationUri("/");
         return ResponseEntity.status(HttpStatus.FOUND).location(URI.create(safeDestination)).build();

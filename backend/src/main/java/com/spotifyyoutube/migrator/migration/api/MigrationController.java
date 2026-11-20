@@ -202,6 +202,9 @@ public class MigrationController {
         MigrationExecutionSummary summary = jobDispatcher.dispatchMigration(domainReq, userId);
         MigrationSubmissionResponse response = MigrationSubmissionResponse.from(summary);
 
+        log.info("Migration submission accepted: executionId={}, userId={}, reviewSessionId={}, status={}",
+                summary.executionId(), userId, request.reviewSessionId(), summary.status());
+
         HttpStatus status = summary.status() == MigrationExecutionStatus.COMPLETED
                 ? HttpStatus.OK
                 : HttpStatus.ACCEPTED;
@@ -471,6 +474,8 @@ public class MigrationController {
             throw new InvalidStateException("Execution cannot be resumed in current status: " + execution.getStatus());
         }
 
+        log.info("Migration resume accepted: executionId={}, userId={}, previousStatus={}", id, userId, execution.getStatus());
+
         return ResponseEntity.ok(MigrationExecutionApiMapper.toExecutionResponse(summary));
     }
 
@@ -542,6 +547,9 @@ public class MigrationController {
 
         MigrationExecutionSummary summary = jobDispatcher.dispatchMigration(domainReq, userId);
         MigrationSubmissionResponse response = MigrationSubmissionResponse.from(summary);
+
+        log.info("Migration submission accepted: executionId={}, userId={}, reviewSessionId={}, status={}",
+                summary.executionId(), userId, request.reviewSessionId(), summary.status());
 
         HttpStatus status = summary.status() == MigrationExecutionStatus.COMPLETED
                 ? HttpStatus.OK

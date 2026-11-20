@@ -2120,6 +2120,41 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 18F — Structured Logging, Correlation IDs & Observability Context
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE & VERIFIED`.
+- **Backend Unit & Slice Tests (`mvn test`)**: **2,681 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 02 s).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **New Tests Added**: +44 tests across 5 new suites:
+  - `RequestCorrelationFilterTest.java`: 20 tests (valid `X-Request-ID` acceptance, `X-Correlation-ID` fallback, missing header UUID generation, malformed/injected ID rejection, CRLF log injection defense, oversized ID handling, response header emission, standard MDC property population, leak-proof MDC cleanup, nested context preservation, thread-pool reuse isolation).
+  - `MdcTaskDecoratorTest.java`: 5 tests (MDC snapshot capture and worker thread propagation, worker MDC cleanup upon normal completion, worker MDC cleanup upon unhandled exceptions, empty caller MDC handling, thread-pool reuse isolation).
+  - `StructuredJsonLayoutTest.java`: 7 tests (single-line NDJSON format, standard top-level fields, MDC property extraction to top-level and `context` object, Bearer token redaction, Basic credential redaction, session cookie redaction, exception serialization with sanitized message and stack trace).
+  - `AsyncWorkerCorrelationTest.java`: 7 tests (manual execution correlation context, scheduled execution correlation context, stale `requestId` removal, single property scoping, worker lifecycle context cleanup on success and orchestrator rejection).
+  - `LoggingSecurityTest.java`: 5 tests (CRLF injection neutralization in correlation IDs, OAuth client secret and access token redaction in logs, session/CSRF cookie redaction, plaintext password redaction, stack trace credential cause chain traversal and redaction).
+
+### Structured Logging & Correlation Architecture
+- **Inbound Correlation Filtering**:
+  - `RequestCorrelationFilter.java`: `OncePerRequestFilter` inspecting incoming `X-Request-ID` and `X-Correlation-ID` headers.
+  - Validation Policy: strictly enforces regex `^[a-zA-Z0-9_-]{1,64}$`; rejects CRLF injection, control characters, spaces, punctuation, and strings exceeding 64 characters, substituting fresh cryptographically secure UUIDv4 identifiers.
+  - Response Header Emission: returns both `X-Request-ID` and `X-Correlation-ID` response headers on every HTTP response.
+  - Lifecycle: guarantees thread-safe MDC restoration/cleanup in `finally` blocks, preventing thread-local contamination across pooled servlet threads.
+- **Asynchronous MDC Context Propagation**:
+  - `MdcTaskDecorator.java`: Spring `TaskDecorator` capturing caller thread MDC context and propagating it to `migrationTaskExecutor` worker threads.
+  - Wired into `AsyncMigrationConfig.java` to bridge HTTP request correlation into background migration execution.
+- **Worker Logging Scopes**:
+  - `LoggingContextHolder.java`: Exception-free `ContextScope` try-with-resources blocks managing MDC properties and restoring previous context on close.
+  - Manual execution: propagates or generates `exec-<UUID>` correlation ID, sets `migrationExecutionId`, `userId`, `operation`, `mode="manual"`.
+  - Scheduled execution: establishes `sched-<gen>-<id>` correlation ID, sets `mode="automated"`, and explicitly removes any stale HTTP `requestId`.
+- **Structured JSON Layout**:
+  - `StructuredJsonLayout.java`: Custom Logback layout formatting records as single-line NDJSON (JSON Lines).
+  - Standard fields: `timestamp` (ISO-8601 UTC), `level`, `logger`, `thread`, `service`, `environment`, `message`, `requestId`, `correlationId`, `context`, `exceptionClass`, `exceptionMessage`, `stackTrace`.
+  - Mandatory redaction: all messages, context values, and exception traces are sanitized via `SensitiveDataSanitizer`.
+- **Logback Multi-Profile Configuration**:
+  - `logback-spring.xml`: Console logging with `%clr([req:%X{requestId:-none}]){yellow}` for non-production profiles (`!prod`); structured JSON console logging for production (`prod`).
+
+---
+
 ## Phase 18E — External Provider Metrics
 
 ### Execution & Verification Metrics
