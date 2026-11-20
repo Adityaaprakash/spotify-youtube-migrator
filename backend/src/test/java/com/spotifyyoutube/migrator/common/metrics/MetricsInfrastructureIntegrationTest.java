@@ -56,10 +56,14 @@ class MetricsInfrastructureIntegrationTest {
 
     @Test
     @WithAnonymousUser
-    @DisplayName("Prometheus scraping endpoint /actuator/prometheus is not exposed and returns 403 Forbidden")
-    void prometheusEndpoint_NotExposed_Forbidden() throws Exception {
+    @DisplayName("Prometheus scraping endpoint /actuator/prometheus is exposed and returns 200 OK with Prometheus metrics")
+    void prometheusEndpoint_Exposed_ReturnsOk() throws Exception {
         mockMvc.perform(get("/actuator/prometheus"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    String content = result.getResponse().getContentAsString();
+                    assertThat(content).contains("application=\"spotify-youtube-migrator\"");
+                });
     }
 
     @Test

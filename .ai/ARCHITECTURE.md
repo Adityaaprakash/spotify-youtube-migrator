@@ -1088,3 +1088,9 @@ Controllers MUST NOT:
   - **Low-Cardinality Metrics Isolation**:
     - Correlation IDs, request IDs, user IDs, track titles, and playlist IDs are strictly prohibited from Micrometer metric tags (`TagPolicy`).
     - Logging context and metrics meters serve completely distinct observability roles without cross-subsystem interference.
+  - **Prometheus Scrape Endpoint & Operational Monitoring (Phase 18G)**:
+    - Dedicated management endpoint `GET /actuator/prometheus` securely exposed for scraper access while maintaining strict lockdown (403 Forbidden) on all sensitive Actuator endpoints (`/actuator/metrics`, `/actuator/env`, `/actuator/beans`, etc.) and `show-details: never` on health probes.
+    - Integrated Prometheus (v2.54.1) and Grafana (v11.2.0) services into `docker-compose.yml`.
+    - Automated Prometheus scrape configuration (`observability/prometheus/prometheus.yml`) with 10s scrape interval targeting `host.docker.internal:8080`.
+    - Version-controlled alert rules (`observability/prometheus/alerts.yml`) covering migration failure rates, durations, YouTube quota limits, rate limits, provider latencies, and service availability.
+    - Automated Grafana provisioning (`observability/grafana/provisioning/`) and 3 production dashboards (`observability/grafana/dashboards/`): Migration Overview, Matching Quality, Provider Health.

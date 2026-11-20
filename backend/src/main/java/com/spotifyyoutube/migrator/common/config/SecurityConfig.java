@@ -105,8 +105,8 @@ public class SecurityConfig {
             )
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/login", "/api/auth/register", "/api/auth/logout").permitAll()
-                // Actuator: permit public liveness/readiness health probes and info; restrict other actuator endpoints
-                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
+                // Actuator: permit public liveness/readiness health probes, info, and prometheus scraping; restrict other actuator endpoints
+                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                 .requestMatchers("/actuator/**").authenticated()
                 .anyRequest().authenticated()
             )

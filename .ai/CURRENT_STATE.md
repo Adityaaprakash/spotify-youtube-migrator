@@ -3,10 +3,25 @@
 Last Updated: 2026-11-20
 
 Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
-Current Subphase: Phase 18F (Structured Logging & Correlation IDs) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18G (Metrics Exposure, Dashboards & Alerting) [READY FOR IMPLEMENTATION]
-Latest Pushed Commit: 1e2861d99f09415e011b4d8351336064dc68ccc4 (feat(observability): instrument external provider metrics)
+Current Subphase: Phase 18G (Metrics Exposure, Dashboards, Alerting & Operational Readiness) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18H (Final Observability Regression, Audit & Freeze) [READY FOR IMPLEMENTATION]
+Latest Pushed Commit: 0c4fdc1e4ac0b525c8c03829484b5f173c501e8f (feat(observability): add structured logging and correlation context)
 
 ## Verification Status & Release Gate
+- **Phase 18G Verification Status**: COMPLETE & VERIFIED.
+  - Securely exposed `/actuator/prometheus` for Prometheus metrics scraping while maintaining strict lockdown on all other Actuator management endpoints (403 Forbidden on `/actuator/metrics`, `/actuator/env`, `/actuator/beans`, `/actuator/heapdump`, etc.; `show-details: never` on health probes).
+  - Configured `management.endpoints.web.exposure.include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,info,prometheus}` in `application.yml` and `application-prod.yml`.
+  - Updated `SecurityConfig.java` to permit `/actuator/prometheus` exclusively for scraping while continuing to require authentication for `/actuator/**`.
+  - Updated `docker-compose.yml` with `prometheus` (v2.54.1) on port 9090 and `grafana` (v11.2.0) on port 3001 with persistent volumes and health dependencies.
+  - Configured Prometheus scraping job `spotify-youtube-migrator` in `observability/prometheus/prometheus.yml` pointing to `host.docker.internal:8080/actuator/prometheus`.
+  - Defined 8 actionable alert rules in `observability/prometheus/alerts.yml` across 3 groups (`migration_alerts`, `provider_alerts`, `monitoring_system_alerts`), verified 100% valid using Prometheus `promtool check rules` and `promtool check config`.
+  - Created automated Grafana datasource provisioning in `observability/grafana/provisioning/datasources/datasource.yml` and dashboard provider provisioning in `observability/grafana/provisioning/dashboards/dashboard-provider.yml`.
+  - Designed and generated 3 importable, valid Grafana dashboards in `observability/grafana/dashboards/`:
+    - `migration-overview.json` (UID: `migrator-migration-overview`): Migration throughput, failure breakdown by error category, average and max duration, success rate %, outcome distribution.
+    - `matching-quality.json` (UID: `migrator-matching-quality`): Matched vs unmatched track volume, match ratio %, confidence tier breakdowns, rolling average score trends, decision distribution.
+    - `provider-health.json` (UID: `migrator-provider-health`): Outbound Spotify & YouTube request rates, error rates by category, average and max latencies, operation breakdowns.
+  - Audited label cardinality: Zero high-cardinality keys, zero UUIDs, zero secrets or tokens in metric tags; full adherence to `TagPolicy` and `TagKeys`.
+  - Created complete operational runbook `.ai/OBSERVABILITY.md` covering architecture, metric dictionary, label policies, endpoint security, local setup, dashboard imports, manual inspection commands, alert rationale, troubleshooting, and production deployment warnings.
+  - Test evidence: Full backend test suite passing with **2,683 tests** (0 failures, 0 errors, 0 skipped); 0 Checkstyle violations; `docker compose config` passed.
 - **Phase 18F Verification Status**: COMPLETE & VERIFIED.
   - Implemented production-quality structured logging, MDC context management, and correlation IDs without adding external logging dependencies (zero new Maven dependencies).
   - Implemented `RequestCorrelationFilter.java` under `com.spotifyyoutube.migrator.common.logging`:

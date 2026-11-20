@@ -1,0 +1,98 @@
+groups:
+  - name: migration_alerts
+    rules:
+      - alert: MigrationHighFailureRate
+        expr: (sum(rate(migration_failed_total[15m])) / (sum(rate(migration_started_total[15m])) > 0)) * 100 > 15
+        for: 5m
+        labels:
+          severity: critical
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "High playlist migration failure rate detected"
+          description: "Over 15% of playlist migrations have failed in the last 15 minutes (current rate: {{ $value | printf \"%.1f\" }}%)."
+          runbook: "Inspect application logs with correlation ID for failed migrations. Check external provider rate limits, network connectivity, and quota status."
+
+      - alert: MigrationElevatedFailures
+        expr: sum(increase(migration_failed_total[10m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "Unusual volume of migration failures"
+          description: "More than 5 playlist migrations failed within the last 10 minutes (current failures: {{ $value }})."
+          runbook: "Check /actuator/prometheus for migration_failed_total breakdown by error_category tag and examine recent server logs."
+
+      - alert: MigrationHighDuration
+        expr: (sum(rate(migration_duration_seconds_sum[15m])) / (sum(rate(migration_duration_seconds_count[15m])) > 0)) > 60
+        for: 5m
+        labels:
+          severity: warning
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "Average migration duration exceeded 60 seconds"
+          description: "Average migration execution duration over the last 15 minutes is {{ $value | printf \"%.1f\" }}s."
+          runbook: "Investigate playlist track counts, batch track insertion latencies, or provider API rate-limiting delays."
+
+  - name: provider_alerts
+    rules:
+      - alert: YouTubeQuotaExceeded
+        expr: sum(increase(youtube_api_errors_total{error_category="quota_exceeded"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+          provider: youtube
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "YouTube Data API quota exceeded"
+          description: "Outbound YouTube API calls are failing due to quota exhaustion."
+          runbook: "YouTube API daily quota (10,000 units) has been reached. Check Google Cloud Console quota dashboard. Wait for quota reset at midnight Pacific Time or request a quota increase."
+
+      - alert: YouTubeRateLimitSpike
+        expr: sum(rate(youtube_api_errors_total{error_category="rate_limit"}[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+          provider: youtube
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "YouTube API 429 rate limit errors detected"
+          description: "YouTube API is returning HTTP 429 rate limit responses at {{ $value | printf \"%.2f\" }} errors/sec."
+          runbook: "Inspect migration concurrency, polling frequency, and backoff intervals in migration worker scheduler."
+
+      - alert: SpotifyApiElevatedErrorRate
+        expr: (sum(rate(spotify_api_errors_total[5m])) / (sum(rate(spotify_api_requests_total[5m])) > 0)) * 100 > 10
+        for: 5m
+        labels:
+          severity: warning
+          provider: spotify
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "Elevated error rate on Spotify API requests"
+          description: "Spotify API error rate is {{ $value | printf \"%.1f\" }}% over the last 5 minutes."
+          runbook: "Check Spotify Developer Dashboard for service incidents, user OAuth token expirations, and network connectivity."
+
+      - alert: YouTubeApiHighLatency
+        expr: (sum(rate(youtube_api_latency_seconds_sum[5m])) / (sum(rate(youtube_api_latency_seconds_count[5m])) > 0)) > 3
+        for: 5m
+        labels:
+          severity: warning
+          provider: youtube
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "High latency on YouTube API requests"
+          description: "Average YouTube API response time exceeded 3 seconds (current: {{ $value | printf \"%.2f\" }}s)."
+          runbook: "Check network connectivity to googleapis.com and YouTube API service status."
+
+  - name: monitoring_system_alerts
+    rules:
+      - alert: SpotifyYouTubeMigratorTargetDown
+        expr: up{job="spotify-youtube-migrator"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          application: spotify-youtube-migrator
+        annotations:
+          summary: "Spotify-YouTube Migrator application instance down"
+          description: "Prometheus has failed to scrape http://host.docker.internal:8080/actuator/prometheus for more than 2 minutes."
+          runbook: "Verify Spring Boot application is running on port 8080 and /actuator/prometheus is responding."

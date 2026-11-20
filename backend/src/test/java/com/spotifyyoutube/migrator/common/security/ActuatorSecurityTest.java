@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @TestPropertySource(properties = {
-        "management.endpoints.web.exposure.include=health,info",
+        "management.endpoints.web.exposure.include=health,info,prometheus",
         "management.endpoint.health.show-details=never",
         "management.endpoint.health.probes.enabled=true",
         "management.endpoint.health.group.liveness.include=livenessState",
@@ -86,6 +86,22 @@ class ActuatorSecurityTest {
     void anonymousInfoEndpoint_Allowed() throws Exception {
         mockMvc.perform(get("/actuator/info"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithAnonymousUser
+    @DisplayName("Anonymous access to /actuator/prometheus is permitted for metrics scraping and returns 200 OK")
+    void anonymousPrometheusEndpoint_Allowed() throws Exception {
+        mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithAnonymousUser
+    @DisplayName("Non-GET (POST) request to /actuator/prometheus is rejected by security configuration")
+    void postPrometheusEndpoint_Forbidden() throws Exception {
+        mockMvc.perform(post("/actuator/prometheus"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

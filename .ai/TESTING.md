@@ -2120,6 +2120,36 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 18G — Prometheus Metrics Exposure, Grafana Dashboards & Alerting
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE & VERIFIED`.
+- **Backend Full Suite Tests (`mvn test`)**: **2,683 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 15 s).
+- **Backend Actuator Security & Metrics Tests**:
+  - `ActuatorSecurityTest.java`: 10 tests passing.
+    - Verified anonymous access to `/actuator/prometheus` returns HTTP 200 OK.
+    - Verified non-GET (POST) request to `/actuator/prometheus` returns HTTP 403 Forbidden.
+    - Verified `/actuator/metrics` remains inaccessible and returns HTTP 403 Forbidden.
+    - Verified sensitive endpoints (`/actuator/env`, `/actuator/beans`, `/actuator/heapdump`, `/actuator/threaddump`, `/actuator/configprops`, `/actuator/loggers`, `/actuator/mappings`) return HTTP 403 Forbidden.
+    - Verified health probes (`/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`) return HTTP 200 OK with `show-details: never`.
+  - `MetricsInfrastructureIntegrationTest.java`: 5 tests passing.
+    - Verified `MeterRegistry` and `PrometheusMeterRegistry` beans available in application context.
+    - Verified `application="spotify-youtube-migrator"` common tag attached to registered meters.
+    - Verified `/actuator/prometheus` exposed and outputs Prometheus text metrics containing `application="spotify-youtube-migrator"`.
+    - Verified `/actuator/metrics` returns HTTP 403 Forbidden.
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Prometheus Configuration & Rules Validation**:
+  - `promtool check config /etc/prometheus/prometheus.yml`: SUCCESS (1 rule file found, valid syntax).
+  - `promtool check rules /etc/prometheus/alerts.yml`: SUCCESS (8 rules found, valid syntax).
+- **Grafana Provisioning & Dashboards Validation**:
+  - All 3 dashboard JSON files (`migration-overview.json`, `matching-quality.json`, `provider-health.json`) validated with Python JSON parser and verified in running Grafana container.
+  - Automatically provisioned into Grafana 11.2.0 via Docker Compose under folder `Spotify-YouTube Migrator`.
+  - Verified Grafana Prometheus datasource provisioned pointing to `http://prometheus:9090`.
+- **Docker Compose Configuration**:
+  - `docker compose config`: 100% valid; services `postgres`, `prometheus`, `grafana` validated.
+
+---
+
 ## Phase 18F — Structured Logging, Correlation IDs & Observability Context
 
 ### Execution & Verification Metrics
