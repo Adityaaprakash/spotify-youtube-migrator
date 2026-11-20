@@ -278,3 +278,39 @@ docker compose down
 # If you wish to wipe observability data completely
 docker compose down -v
 ```
+
+---
+
+## 15. Formal Observability Milestone Freeze (Phase 18H)
+
+- **Freeze Date:** 2026-11-20
+- **Milestone Status:** **FROZEN — ALL GATES PASSED**
+- **Verification Baseline Commit:** `1c0f898dca3b9044121f6dd360d23d2d3bbfe88a` (`1c0f898`)
+- **Phases Covered:**
+  - **Phase 18A**: Observability Architecture Audit & Metric Strategy (`cda57ce`)
+  - **Phase 18B**: Application Health & Spring Actuator Probe Hardening (`22a974c`)
+  - **Phase 18C**: Micrometer Metrics Foundation & Cardinality Policy (`5ab97ff`)
+  - **Phase 18D**: Migration & Matching Business Metrics (`00a3c06`)
+  - **Phase 18E**: External Provider Metrics for Spotify & YouTube (`1e2861d`)
+  - **Phase 18F**: Structured JSON Logging, MDC Context & Correlation IDs (`0c4fdc1`)
+  - **Phase 18G**: Prometheus Exposure, Grafana Dashboards, Alerting & Operational Setup (`1c0f898`)
+  - **Phase 18H**: Final End-to-End Regression, Audit & Formal Milestone Freeze
+- **Actual Verification Results:**
+  - **Full Backend Regression Suite:** **2,683 tests run, 0 failures, 0 errors, 0 skipped** (`mvn test`, total time: 02:13 min).
+  - **Checkstyle Compliance:** **0 violations** (`mvn checkstyle:check`).
+  - **Prometheus Validation:** `promtool check config` (SUCCESS: 1 rule file found, valid syntax), `promtool check rules` (SUCCESS: 8 rules found, valid PromQL syntax).
+  - **Docker Compose Configuration:** `docker compose config` (SUCCESS: clean exit 0).
+  - **Runtime Verification:** Live container startup, Prometheus target discovery at `host.docker.internal:8080/actuator/prometheus`, Grafana datasource provisioning at `http://prometheus:9090`, and 3 dashboards auto-provisioned into folder `Spotify-YouTube Migrator`.
+- **Security Audit Summary:**
+  - Minimal management endpoint exposure: only `GET /actuator/prometheus`, `GET /actuator/health` (with probes), and `GET /actuator/info` are permitted.
+  - Strict lockdown: `/actuator/metrics`, `/actuator/env`, `/actuator/beans`, `/actuator/heapdump`, `/actuator/threaddump`, `/actuator/configprops`, `/actuator/loggers`, and `/actuator/mappings` return HTTP `403 Forbidden`.
+  - Health probes enforce `show-details: never` concealing internal database and disk diagnostics.
+  - Non-GET requests on `/actuator/**` are rejected with HTTP `403 Forbidden`.
+  - Zero high-cardinality keys, UUIDs, URLs, emails, or user data in metric tags (`TagPolicy` enforced).
+  - Production structured JSON logging with automated credential/token/cookie redaction (`SensitiveDataSanitizer`).
+- **Known Limitations & Operational Caveats:**
+  - In production, `/actuator/prometheus` must be isolated behind an internal network boundary or reverse proxy (AWS ALB, Nginx).
+  - Grafana admin credentials (`admin:admin`) must be changed using `GF_SECURITY_ADMIN_PASSWORD` in production.
+- **Explicit Statement:**
+  > [!IMPORTANT]
+  > **MILESTONE FREEZE:** Phase 18 (Observability) is formally **FROZEN**. All planned capabilities across health, metrics, logging, correlation, Prometheus scraping, Grafana dashboards, and alerting are complete, fully tested, documented, and production-ready.

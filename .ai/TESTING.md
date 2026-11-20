@@ -2120,6 +2120,31 @@ Phase 16G and 16H conclude the security hardening milestone by performing an int
 
 ---
 
+## Phase 18H — Final Observability Regression, End-to-End Audit & Milestone Freeze
+
+### Execution & Verification Metrics
+- **Phase Status**: `COMPLETE & VERIFIED — MILESTONE FROZEN`.
+- **Full Backend Suite Tests (`mvn test`)**: **2,683 tests** passing, 0 failures, 0 errors, 0 skipped (`.\backend\mvnw.cmd test`, 2 min 13 s).
+- **Backend Checkstyle**: 0 violations (`.\backend\mvnw.cmd checkstyle:check`).
+- **Prometheus Validation**:
+  - `promtool check config /etc/prometheus/prometheus.yml`: SUCCESS (1 rule file found, valid syntax).
+  - `promtool check rules /etc/prometheus/alerts.yml`: SUCCESS (8 rules found, valid syntax).
+- **Docker Compose Validation**:
+  - `docker compose config`: 100% valid; services `postgres`, `prometheus`, `grafana` validated.
+  - Live container lifecycle: verified scrape target reachability (`host.docker.internal:8080/actuator/prometheus`) and Grafana provisioning (`migrator-migration-overview`, `migrator-matching-quality`, `migrator-provider-health`).
+- **Actuator & Health Security Lockdown**:
+  - `ActuatorSecurityTest`: 10/10 tests passed.
+  - Public exposure strictly limited to `GET /actuator/prometheus`, `GET /actuator/health` (with probes), and `GET /actuator/info`.
+  - Non-GET requests on `/actuator/**` return 403 Forbidden.
+  - All sensitive Actuator endpoints (`/actuator/metrics`, `/actuator/env`, `/actuator/beans`, `/actuator/heapdump`, `/actuator/threaddump`, `/actuator/configprops`, `/actuator/loggers`, `/actuator/mappings`) return 403 Forbidden.
+  - Health probes maintain `show-details: never`.
+- **Metrics Cardinality & Safety**:
+  - Bounded low-cardinality label rules enforced via `TagPolicy` across all 13 metrics.
+  - Zero high-cardinality keys (user IDs, playlist IDs, track IDs, correlation IDs, exception messages, URLs) present in metric series.
+- **Milestone Freeze Record**: Formally established in `.ai/OBSERVABILITY.md` (Section 15).
+
+---
+
 ## Phase 18G — Prometheus Metrics Exposure, Grafana Dashboards & Alerting
 
 ### Execution & Verification Metrics

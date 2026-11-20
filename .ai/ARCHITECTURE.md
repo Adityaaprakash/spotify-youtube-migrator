@@ -1094,3 +1094,5 @@ Controllers MUST NOT:
     - Automated Prometheus scrape configuration (`observability/prometheus/prometheus.yml`) with 10s scrape interval targeting `host.docker.internal:8080`.
     - Version-controlled alert rules (`observability/prometheus/alerts.yml`) covering migration failure rates, durations, YouTube quota limits, rate limits, provider latencies, and service availability.
     - Automated Grafana provisioning (`observability/grafana/provisioning/`) and 3 production dashboards (`observability/grafana/dashboards/`): Migration Overview, Matching Quality, Provider Health.
+  - **Milestone Freeze (Phase 18H)**:
+    - The complete Observability milestone (Phases 18A–18G) is formally frozen following comprehensive end-to-end regression (2,683 tests passing, 0 Checkstyle violations), PromQL and promtool validation, live container lifecycle verification, Actuator lockdown confirmation, and operational runbook publication (`.ai/OBSERVABILITY.md`).

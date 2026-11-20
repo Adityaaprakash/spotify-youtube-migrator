@@ -2,11 +2,22 @@
 
 Last Updated: 2026-11-20
 
-Current Phase: Phase 18 — Observability & Production [IN PROGRESS]
-Current Subphase: Phase 18G (Metrics Exposure, Dashboards, Alerting & Operational Readiness) [COMPLETE & VERIFIED] -> Next Subphase: Phase 18H (Final Observability Regression, Audit & Freeze) [READY FOR IMPLEMENTATION]
-Latest Pushed Commit: 0c4fdc1e4ac0b525c8c03829484b5f173c501e8f (feat(observability): add structured logging and correlation context)
+Current Phase: Phase 18 — Observability & Production [MILESTONE FROZEN]
+Current Subphase: Phase 18H (Final Observability Regression, End-to-End Audit & Formal Freeze) [COMPLETE & VERIFIED]
+Latest Pushed Commit: 1c0f898dca3b9044121f6dd360d23d2d3bbfe88a (feat(observability): expose metrics and add monitoring dashboards)
 
 ## Verification Status & Release Gate
+- **Phase 18H Verification Status**: COMPLETE & VERIFIED (Milestone Frozen).
+  - Completed comprehensive independent end-to-end audit across all Phase 18 subsystems (Phases 18A–18G).
+  - Executed full backend regression test suite: **2,683 tests run, 0 failures, 0 errors, 0 skipped** (`mvn test`, total execution time: 02:13 min).
+  - Verified static code quality: **0 Checkstyle violations** (`mvn checkstyle:check`).
+  - Validated Prometheus configuration and alert rules via `promtool`: 8 rules recognized with valid syntax and safe denominators.
+  - Validated Docker Compose configuration (`docker compose config`) and executed live container lifecycle verification for Prometheus and Grafana.
+  - Verified automatic provisioning of Prometheus datasource and 3 dashboards (`migrator-migration-overview`, `migrator-matching-quality`, `migrator-provider-health`).
+  - Confirmed strict Actuator security lockdown (403 Forbidden on `/actuator/metrics`, `/actuator/env`, `/actuator/beans`, etc., `show-details: never` on health probes, non-GET method rejection).
+  - Audited label cardinality and privacy: zero high-cardinality keys, zero UUIDs/tokens in metric series (`TagPolicy` enforced).
+  - Audited structured JSON logging and sensitive data sanitization: leak-proof MDC lifecycle, automated credential/token redaction (`SensitiveDataSanitizer`).
+  - Formally established Phase 18 Observability Milestone Freeze in `.ai/OBSERVABILITY.md`.
 - **Phase 18G Verification Status**: COMPLETE & VERIFIED.
   - Securely exposed `/actuator/prometheus` for Prometheus metrics scraping while maintaining strict lockdown on all other Actuator management endpoints (403 Forbidden on `/actuator/metrics`, `/actuator/env`, `/actuator/beans`, `/actuator/heapdump`, etc.; `show-details: never` on health probes).
   - Configured `management.endpoints.web.exposure.include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,info,prometheus}` in `application.yml` and `application-prod.yml`.
